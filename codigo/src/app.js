@@ -1,0 +1,1206 @@
+import { METRICS, extractMetrics, metricMeta, sortMetrics, fmtValue, fmtWithUnit, fmtNum, fmtLimit } from "./metrics.js";
+import { createIdbStore, createMemStore } from "./store.js";
+import { Receptor } from "./receptor.js";
+import { buildDemo, DEMO_IDS } from "./demo.js";
+import { Protobuf } from "@meshtastic/core";
+
+/* ───────────── utilidades ───────────── */
+const $ = (s, r = document) => r.querySelector(s);
+const $$ = (s, r = document) => [...r.querySelectorAll(s)];
+const esc = (s) => String(s ?? "").replace(/[&<>"']/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[c]));
+const isNum = (x) => typeof x === "number" && Number.isFinite(x);
+const MIN = 60000, HOUR = 60 * MIN, DAY = 24 * HOUR;
+const validT = (t) => isNum(t) && t > 1.6e12 && t < Date.now() + 5 * MIN;
+
+const LS = {
+  get(k, d) { try { const v = localStorage.getItem(k); return v == null ? d : JSON.parse(v); } catch { return d; } },
+  set(k, v) { try { localStorage.setItem(k, JSON.stringify(v)); } catch { /* sin almacenamiento */ } },
+  del(k) { try { localStorage.removeItem(k); } catch { /* nada */ } },
+};
+
+const hhmm = new Intl.DateTimeFormat("es-ES", { hour: "2-digit", minute: "2-digit" });
+const dShort = new Intl.DateTimeFormat("es-ES", { day: "numeric", month: "short" });
+const wday = new Intl.DateTimeFormat("es-ES", { weekday: "short" });
+
+function dur(ms) {
+  const m = Math.max(0, Math.round(ms / MIN));
+  if (m < 60) return `${m} min`;
+  const h = Math.floor(m / 60), r = m % 60;
+  if (h < 24) return r ? `${h} h ${r} min` : `${h} h`;
+  const d = Math.floor(h / 24);
+  return d === 1 ? "1 día" : `${d} días`;
+}
+function ago(t) {
+  if (!t) return "nunca";
+  const ms = Date.now() - t;
+  if (ms < 60000) return "ahora mismo";
+  return `hace ${dur(ms)}`;
+}
+function stamp(t) {
+  const d = new Date(t), today = new Date();
+  const same = d.toDateString() === today.toDateString();
+  return same ? hhmm.format(d) : `${dShort.format(d)} ${hhmm.format(d)}`;
+}
+function parseNum(s) {
+  const x = String(s ?? "").trim().replace(",", ".");
+  if (x === "") return null;
+  const n = Number(x);
+  return Number.isFinite(n) ? n : NaN;
+}
+
+/* ───────────── estado ───────────── */
+const DEFAULT_SETTINGS = { sound: true, wake: false, retentionDays: 30, defaultOfflineMin: 75 };
+const S = {
+  demo: false,
+  demoTimer: null,
+  store: null,
+  cfg: { watched: {} },
+  settings: { ...DEFAULT_SETTINGS },
+  nodes: new Map(),
+  myNode: null,
+  link: { state: "idle", extra: null },
+  device: null,
+  active: new Map(),
+  log: [],
+  recent: new Map(),
+  seen: new Set(),
+  meshExpanded: false,
+  logExpanded: false,
+  detail: null, // { num, range }
+  req: new Map(), // peticiones de telemetría en curso o recientes, por nodo|tipo
+  demoData: null,
+  demoToken: 0,
+};
+let receptor = null;
+let swReg = null;
+
+/* ───────────── persistencia (solo modo real) ───────────── */
+function saveCfg() { if (!S.demo) LS.set("vigia.cfg", S.cfg); }
+function saveSettings() { LS.set("vigia.settings", S.settings); }
+let nodesTimer = null;
+function saveNodes() {
+  if (S.demo) return;
+  clearTimeout(nodesTimer);
+  nodesTimer = setTimeout(() => LS.set("vigia.nodes", [...S.nodes.values()]), 1500);
+}
+function saveLog() { if (!S.demo) LS.set("vigia.log", S.log.slice(0, 200)); }
+function saveActive() { if (!S.demo) LS.set("vigia.active", [...S.active.values()]); }
+
+function loadReal() {
+  S.cfg = LS.get("vigia.cfg", { watched: {} });
+  if (!S.cfg.watched) S.cfg.watched = {};
+  S.nodes = new Map((LS.get("vigia.nodes", []) || []).map((n) => [n.num, n]));
+  S.log = LS.get("vigia.log", []);
+  S.active = new Map((LS.get("vigia.active", []) || []).map((a) => [a.key, a]));
+  S.myNode = LS.get("vigia.my", null);
+  S.store = createIdbStore();
+  S.recent = new Map();
+}
+
+/* ───────────── nodos ───────────── */
+function node(num) {
+  let n = S.nodes.get(num);
+  if (!n) {
+    const hex = (num >>> 0).toString(16).padStart(8, "0");
+    n = { num, short: hex.slice(-4), long: `!${hex}`, hw: "", lastHeard: 0, hops: null, snr: null, metrics: {}, hasEnv: false };
+    S.nodes.set(num, n);
+  }
+  if (!n.metrics) n.metrics = {};
+  return n;
+}
+const hexId = (num) => `!${(num >>> 0).toString(16).padStart(8, "0")}`;
+const nodeName = (num) => (S.nodes.get(num)?.long) || hexId(num);
+const isWatched = (num) => !!S.cfg.watched[num];
+
+function touch(num, t) {
+  const n = node(num);
+  if (validT(t) && t > (n.lastHeard || 0)) {
+    n.lastHeard = t;
+    if (S.active.has(`${num}||offline`)) evalOffline();
+  }
+}
+
+/* ───────────── lecturas y alarmas ───────────── */
+function seriesKey(num, metric) { return `${num}|${metric}`; }
+
+function ingest(num, metrics, t, opts = {}) {
+  const n = node(num);
+  const rows = [];
+  for (const [k, v] of Object.entries(metrics)) {
+    const prev = n.metrics[k];
+    const newer = !prev || t >= prev.t;
+    if (newer) n.metrics[k] = { v, t };
+    rows.push({ node: num, metric: k, t, v });
+    const key = seriesKey(num, k);
+    const arr = S.recent.get(key) || [];
+    arr.push({ t, v });
+    if (arr.length > 1 && arr[arr.length - 2].t > t) arr.sort((a, b) => a.t - b.t);
+    while (arr.length && arr[0].t < Date.now() - 26 * HOUR) arr.shift();
+    S.recent.set(key, arr);
+    if (newer) evalThreshold(num, k, v, t, opts);
+  }
+  if (opts.env || opts.kind === "environmentMetrics") n.hasEnv = true;
+  if (opts.store !== false) S.store.add(rows);
+  touch(num, t);
+  saveNodes();
+  if (S.detail && S.detail.num === num) refreshDetailLive();
+  render();
+}
+
+function evalThreshold(num, metric, v, t, opts = {}) {
+  const w = S.cfg.watched[num];
+  const kh = `${num}|${metric}|high`, kl = `${num}|${metric}|low`;
+  if (!w) { clearAlarm(kh, { v, t, silent: true }); clearAlarm(kl, { v, t, silent: true }); return; }
+  const r = (w.rules || {})[metric] || {};
+  const hy = metricMeta(metric).hyst || 0;
+  if (isNum(r.max) && v > r.max) raise(kh, { num, metric, kind: "high", value: v, limit: r.max, t }, opts);
+  else if (S.active.has(kh) && (!isNum(r.max) || v <= r.max - hy)) clearAlarm(kh, { v, t });
+  if (isNum(r.min) && v < r.min) raise(kl, { num, metric, kind: "low", value: v, limit: r.min, t }, opts);
+  else if (S.active.has(kl) && (!isNum(r.min) || v >= r.min + hy)) clearAlarm(kl, { v, t });
+}
+
+function evalNode(num, opts = {}) {
+  const n = S.nodes.get(num);
+  if (n) for (const [k, m] of Object.entries(n.metrics)) evalThreshold(num, k, m.v, m.t, opts);
+  // métricas con regla pero que ya no tienen dato: nada que evaluar
+  for (const key of [...S.active.keys()]) {
+    const a = S.active.get(key);
+    if (a.num === num && (a.kind === "high" || a.kind === "low") && !isWatched(num)) clearAlarm(key, { silent: true });
+  }
+  evalOffline(opts);
+}
+
+function linkKnown() { return S.demo || S.link.state === "ready"; }
+
+function evalOffline(opts = {}) {
+  const now = Date.now();
+  for (const key of [...S.active.keys()]) {
+    const a = S.active.get(key);
+    if (a.kind === "offline" && !isWatched(a.num)) clearAlarm(key, { silent: true });
+  }
+  if (!linkKnown()) return; // sin receptor no sé si los nodos callan
+  for (const [numStr, w] of Object.entries(S.cfg.watched)) {
+    const num = Number(numStr);
+    const n = S.nodes.get(num);
+    const key = `${num}||offline`;
+    const lim = isNum(w.offlineMin) ? w.offlineMin : S.settings.defaultOfflineMin;
+    if (num === S.myNode && !S.demo) { clearAlarm(key, {}); continue; }
+    if (!lim || !n || !n.lastHeard) { clearAlarm(key, { silent: true }); continue; }
+    if (now - n.lastHeard > lim * MIN) raise(key, { num, kind: "offline", limit: lim, value: n.lastHeard, t: n.lastHeard + lim * MIN }, opts);
+    else clearAlarm(key, { t: n.lastHeard });
+  }
+}
+
+function raise(key, a, opts = {}) {
+  const ex = S.active.get(key);
+  if (ex) {
+    ex.value = a.value;
+    ex.lastT = a.t;
+    if (isNum(a.limit)) ex.limit = a.limit;
+    saveActive();
+    return;
+  }
+  const al = { key, ...a, since: isNum(a.t) ? a.t : Date.now(), acked: false, late: !!opts.replay };
+  S.active.set(key, al);
+  addLog("raise", alarmTitle(al) + (al.late ? " (recibida al reconectar)" : ""), al.num);
+  saveActive();
+  if (!opts.silent) fireAlarm(al);
+  render();
+}
+
+function clearAlarm(key, info = {}) {
+  const al = S.active.get(key);
+  if (!al) return;
+  S.active.delete(key);
+  if (!info.silent) addLog("clear", clearText(al, info), al.num);
+  saveActive();
+  render();
+}
+
+function ack(key) {
+  const al = S.active.get(key);
+  if (!al || al.acked) return;
+  al.acked = true;
+  addLog("ack", `Enterado: ${alarmTitle(al)}`, al.num);
+  saveActive();
+  render();
+}
+function ackAll() { for (const k of S.active.keys()) ack(k); }
+
+function alarmTitle(al) {
+  if (al.kind === "link") return "Receptor desconectado";
+  if (al.kind === "test") return "Alarma de prueba";
+  const name = nodeName(al.num);
+  if (al.kind === "offline") return `${name} · Sin señal más de ${dur(al.limit * MIN)}`;
+  const m = metricMeta(al.metric);
+  return `${name} · ${m.label} ${al.kind === "high" ? "por encima de" : "por debajo de"} ${fmtLimit(al.metric, al.limit, true)}`;
+}
+function alarmDetail(al) {
+  if (al.kind === "link") return "Reintentando la conexión Bluetooth. Las alarmas de nodo sin señal quedan en pausa.";
+  if (al.kind === "test") return "Así suena y se ve un aviso. Pulsa Enterado para callarlo.";
+  if (al.kind === "offline") return `Último dato ${ago(al.value)} (${stamp(al.value)}).`;
+  return `Ahora ${fmtWithUnit(al.metric, al.value)}.`;
+}
+function clearText(al, info) {
+  if (al.kind === "link") return "Receptor conectado de nuevo";
+  if (al.kind === "test") return "Alarma de prueba cerrada";
+  const name = nodeName(al.num);
+  if (al.kind === "offline") return `${name} · Vuelve a dar señal`;
+  const m = metricMeta(al.metric);
+  return `${name} · ${m.label} de vuelta en rango${isNum(info.v) ? ` (${fmtWithUnit(al.metric, info.v)})` : ""}`;
+}
+
+function addLog(type, text, num) {
+  S.log.unshift({ t: Date.now(), type, text, num: num ?? null });
+  if (S.log.length > 300) S.log.length = 300;
+  saveLog();
+}
+
+/* ───────────── pedir telemetría a un nodo ───────────── */
+// Cada tipo es un campo del mensaje Telemetry; se pide mandando ese campo vacío con want_response.
+const ASK = {
+  env:    { label: "Ambiente", what: "Temperatura, humedad y presión", field: 3, variant: "environmentMetrics" },
+  device: { label: "Batería",  what: "Batería, tensión y uso del canal", field: 2, variant: "deviceMetrics" },
+  air:    { label: "Aire",     what: "CO₂ y partículas", field: 4, variant: "airQualityMetrics" },
+  power:  { label: "Energía",  what: "Tensión y corriente de los canales INA", field: 5, variant: "powerMetrics" },
+};
+const ASK_BY_VARIANT = Object.fromEntries(Object.entries(ASK).map(([k, a]) => [a.variant, k]));
+const ASK_TIMEOUT = 60000, ASK_COOLDOWN = 30000, ASK_SHOW = 10 * MIN;
+const RE = Protobuf.Mesh.Routing_Error;
+const askKey = (num, type) => `${num}|${type}`;
+const canAsk = () => S.demo || (S.link.state === "ready" && !!receptor?.mesh);
+const askVisible = (r) => r && (r.state === "wait" || Date.now() - r.tDone < ASK_SHOW);
+
+function askFailText(code) {
+  switch (code) {
+    case RE.NO_RESPONSE: return "el nodo contesta que no tiene ese sensor";
+    case RE.MAX_RETRANSMIT: return "no llegó al nodo tras varios intentos";
+    case RE.NO_ROUTE: case RE.GOT_NAK: return "no hay ruta hasta el nodo";
+    case RE.NO_CHANNEL: case RE.PKI_FAILED: case RE.PKI_UNKNOWN_PUBKEY: return "el receptor no comparte canal o clave con ese nodo";
+    case RE.DUTY_CYCLE_LIMIT: return "el receptor ha agotado su tiempo de emisión, prueba en unos minutos";
+    case RE.TOO_LARGE: case RE.BAD_REQUEST: return "el nodo rechazó la petición";
+    case "timeout": return `sin respuesta en ${ASK_TIMEOUT / 1000} s`;
+    case "send": return "no se pudo enviar al receptor";
+    default: return `error ${RE[code] ?? code}`;
+  }
+}
+
+async function ask(num, type) {
+  const k = askKey(num, type);
+  const prev = S.req.get(k);
+  if (prev?.state === "wait") return;
+  const since = prev ? Date.now() - prev.t0 : Infinity;
+  if (since < ASK_COOLDOWN) return toast(`Espera ${Math.ceil((ASK_COOLDOWN - since) / 1000)} s antes de repetir, para no saturar la malla.`);
+  if (!canAsk()) return toast("Conecta el receptor para pedir datos.");
+  const r = { num, type, state: "wait", t0: Date.now(), tDone: 0, why: null, timer: null };
+  S.req.set(k, r);
+  r.timer = setTimeout(() => finishAsk(r, "fail", "timeout"), ASK_TIMEOUT);
+  refreshAsk(num);
+  if (S.demo) return demoAsk(r);
+  try {
+    await receptor.requestTelemetry(num, ASK[type].field, S.nodes.get(num)?.channel || 0);
+    // Acuse sin datos todavía: seguimos esperando la telemetría.
+  } catch (e) {
+    const code = e && typeof e === "object" && "error" in e ? e.error : "send";
+    // La librería no cuenta la respuesta como acuse y da TIMEOUT a los 60 s: manda nuestro temporizador.
+    if (code === RE.TIMEOUT) return;
+    finishAsk(r, "fail", code);
+  }
+}
+
+function finishAsk(r, state, why = null) {
+  if (S.req.get(askKey(r.num, r.type)) !== r) return;
+  const lateOk = state === "ok" && r.state === "fail" && r.why === "timeout";
+  if (r.state !== "wait" && !lateOk) return;
+  clearTimeout(r.timer);
+  Object.assign(r, { state, why, tDone: Date.now() });
+  const what = `${nodeName(r.num)} · ${ASK[r.type].label}`;
+  addLog("info", state === "ok" ? `${what}: datos recibidos a petición${lateOk ? " (tarde)" : ""}` : `${what}: ${askFailText(why)}`, r.num);
+  refreshAsk(r.num);
+  render();
+}
+
+function demoAsk(r) {
+  const token = S.demoToken;
+  const res = S.demoData.reply(r.num, r.type);
+  setTimeout(() => {
+    if (!S.demo || token !== S.demoToken) return;
+    if (res.error) return finishAsk(r, "fail", RE[res.error]);
+    finishAsk(r, "ok");
+    ingest(r.num, res.metrics, Date.now(), { kind: ASK[r.type].variant });
+  }, res.delay);
+}
+
+function askChips(num) {
+  const ok = canAsk();
+  return Object.entries(ASK).map(([type, a]) => {
+    const r = S.req.get(askKey(num, type));
+    const st = askVisible(r) ? r.state : "";
+    return `<button type="button" class="ask-b${st ? ` is-${st}` : ""}" data-ask="${type}" data-num="${num}" title="${esc(a.what)}"${!ok || st === "wait" ? " disabled" : ""}>${a.label}</button>`;
+  }).join("");
+}
+function askStatus(num) {
+  return Object.keys(ASK).map((type) => S.req.get(askKey(num, type))).filter(askVisible).sort((a, b) => b.t0 - a.t0).map((r) => {
+    const l = ASK[r.type].label;
+    if (r.state === "wait") return `<span class="s-wait">${l}: esperando respuesta… ${Math.round((Date.now() - r.t0) / 1000)} s</span>`;
+    if (r.state === "ok") return `<span class="s-ok">${l}: recibido a las ${hhmm.format(new Date(r.tDone))}, tardó ${Math.max(1, Math.round((r.tDone - r.t0) / 1000))} s</span>`;
+    return `<span class="s-fail">${l}: ${esc(askFailText(r.why))}</span>`;
+  }).join("");
+}
+function askBlock(num) {
+  return `<span class="ask-l">Pedir datos ahora</span><div class="ask-row">${askChips(num)}</div><p class="ask-st" data-ask-st="${num}">${askStatus(num)}</p>`;
+}
+function refreshAsk(num) {
+  for (const el of $$(`[data-ask-box="${num}"]`)) el.innerHTML = askBlock(num);
+}
+// Solo se reescribe el texto de estado cada segundo, para no robar toques a los botones.
+setInterval(() => {
+  const waiting = new Set([...S.req.values()].filter((r) => r.state === "wait").map((r) => r.num));
+  for (const num of waiting) for (const el of $$(`[data-ask-st="${num}"]`)) el.innerHTML = askStatus(num);
+}, 1000);
+
+function resetAsks() {
+  for (const r of S.req.values()) clearTimeout(r.timer);
+  S.req = new Map();
+}
+
+/* ───────────── avisos: sonido, vibración, notificación ───────────── */
+let actx = null;
+function unlockAudio() {
+  try {
+    if (!actx) actx = new (window.AudioContext || window.webkitAudioContext)();
+    if (actx.state === "suspended") actx.resume();
+  } catch { /* sin audio */ }
+}
+document.addEventListener("pointerdown", unlockAudio, { capture: true });
+document.addEventListener("keydown", unlockAudio, { capture: true });
+
+function beep() {
+  if (!actx || actx.state !== "running") return;
+  const t0 = actx.currentTime;
+  [[880, 0], [660, 0.2], [880, 0.4]].forEach(([f, d]) => {
+    const o = actx.createOscillator(), g = actx.createGain();
+    o.type = "square";
+    o.frequency.value = f;
+    g.gain.setValueAtTime(0.0001, t0 + d);
+    g.gain.exponentialRampToValueAtTime(0.16, t0 + d + 0.012);
+    g.gain.exponentialRampToValueAtTime(0.0001, t0 + d + 0.17);
+    o.connect(g).connect(actx.destination);
+    o.start(t0 + d);
+    o.stop(t0 + d + 0.18);
+  });
+}
+const unacked = () => [...S.active.values()].filter((a) => !a.acked);
+setInterval(() => { if (S.settings.sound && unacked().length) beep(); }, 2500);
+
+function fireAlarm(al) {
+  try { if (navigator.userActivation?.hasBeenActive !== false) navigator.vibrate?.([300, 150, 300, 150, 700]); } catch { /* sin vibración */ }
+  if (S.settings.sound) beep();
+  notify(al);
+}
+
+async function notify(al) {
+  if (!("Notification" in window) || Notification.permission !== "granted") return;
+  const title = alarmTitle(al), body = alarmDetail(al);
+  try {
+    const reg = swReg || (navigator.serviceWorker && (await navigator.serviceWorker.getRegistration()));
+    if (reg) { await reg.showNotification(title, { body, tag: al.key, renotify: true, requireInteraction: true, icon: "./icon-192.png", badge: "./icon-192.png" }); return; }
+  } catch { /* sigue */ }
+  try { new Notification(title, { body, tag: al.key }); } catch { /* Android exige service worker */ }
+}
+
+/* ───────────── pantalla encendida ───────────── */
+let wake = null;
+async function applyWake() {
+  if (!S.settings.wake) {
+    try { await wake?.release(); } catch { /* ya liberado */ }
+    wake = null;
+    renderFoot();
+    return;
+  }
+  if (!("wakeLock" in navigator) || document.visibilityState !== "visible" || wake) return;
+  try {
+    wake = await navigator.wakeLock.request("screen");
+    wake.addEventListener("release", () => { wake = null; renderFoot(); });
+  } catch {
+    toast("Este navegador no deja mantener la pantalla encendida.");
+  }
+  renderFoot();
+}
+document.addEventListener("visibilitychange", () => {
+  if (document.visibilityState === "visible") { applyWake(); evalOffline(); render(); }
+});
+
+/* ───────────── gráficas ───────────── */
+function niceStep(range, count) {
+  const raw = range / Math.max(1, count);
+  const p = 10 ** Math.floor(Math.log10(raw));
+  const n = raw / p;
+  return (n < 1.5 ? 1 : n < 3 ? 2 : n < 7 ? 5 : 10) * p;
+}
+function gapOf(series) {
+  if (series.length < 3) return 3 * HOUR;
+  const d = [];
+  for (let i = 1; i < series.length; i++) d.push(series[i].t - series[i - 1].t);
+  d.sort((a, b) => a - b);
+  return Math.max(3 * d[Math.floor(d.length / 2)], 20 * MIN);
+}
+function segmentsOf(series, gap) {
+  const segs = [];
+  let cur = [];
+  for (const p of series) {
+    if (cur.length && p.t - cur[cur.length - 1].t > gap) { segs.push(cur); cur = []; }
+    cur.push(p);
+  }
+  if (cur.length) segs.push(cur);
+  return segs;
+}
+function yDomain(series, metric, rule) {
+  const vals = series.map((p) => p.v).filter((v) => !(metric === "batteryLevel" && v > 100));
+  const lims = [rule?.min, rule?.max].filter(isNum);
+  if (!vals.length) return null;
+  let lo = Math.min(...vals, ...lims), hi = Math.max(...vals, ...lims);
+  const minSpan = Math.max(5 * 10 ** -metricMeta(metric).dec, Math.abs(hi) * 0.02, 1);
+  if (hi - lo < minSpan) { const c = (hi + lo) / 2; lo = c - minSpan / 2; hi = c + minSpan / 2; }
+  const pad = (hi - lo) * 0.14;
+  return [lo - pad, hi + pad];
+}
+
+/** Gráfica completa con ejes, en píxeles reales. */
+function chartSVG(series, metric, rule, from, to, W) {
+  const H = 132, pl = 42, pr = 12, pt = 10, pb = 22;
+  const ser = series.filter((p) => !(metric === "batteryLevel" && p.v > 100));
+  const dom = yDomain(ser, metric, rule);
+  if (!dom) return `<p class="empty-chart">Sin lecturas en este periodo.</p>`;
+  const [lo, hi] = dom;
+  const x = (t) => pl + ((t - from) / (to - from)) * (W - pl - pr);
+  const y = (v) => pt + ((hi - v) / (hi - lo)) * (H - pt - pb);
+  const m = metricMeta(metric);
+  let g = "";
+  const st = niceStep(hi - lo, 3);
+  for (let v = Math.ceil(lo / st) * st; v <= hi; v += st) {
+    const yy = y(v).toFixed(1);
+    g += `<line class="grid" x1="${pl}" x2="${W - pr}" y1="${yy}" y2="${yy}"/><text class="tick" x="${pl - 6}" y="${yy}" text-anchor="end" dominant-baseline="middle">${fmtNum(v, st < 1 ? 1 : 0)}</text>`;
+  }
+  const span = to - from;
+  const xs = span <= 2 * DAY ? 6 * HOUR : DAY;
+  const first = new Date(from);
+  first.setMinutes(0, 0, 0);
+  if (xs === DAY) first.setHours(0);
+  else first.setHours(Math.ceil(first.getHours() / 6) * 6);
+  for (let t = first.getTime(); t <= to; t += xs) {
+    if (t < from) continue;
+    const xx = x(t).toFixed(1);
+    const lab = xs === DAY ? wday.format(new Date(t)) : hhmm.format(new Date(t));
+    g += `<line class="grid v" x1="${xx}" x2="${xx}" y1="${pt}" y2="${H - pb}"/><text class="tick" x="${xx}" y="${H - 6}" text-anchor="middle">${lab}</text>`;
+  }
+  let thr = "";
+  for (const [side, val] of [["máx", rule?.max], ["mín", rule?.min]]) {
+    if (!isNum(val)) continue;
+    const yy = y(val).toFixed(1);
+    const above = +yy - pt > 14;
+    thr += `<line class="thr" x1="${pl}" x2="${W - pr}" y1="${yy}" y2="${yy}"/><text class="thr-l" x="${pl + 4}" y="${(above ? +yy - 4 : +yy + 12).toFixed(1)}">${side} ${fmtLimit(metric, val)}</text>`;
+  }
+  const segs = segmentsOf(ser, gapOf(ser));
+  let area = "", line = "";
+  for (const s of segs) {
+    const pts = s.map((p) => `${x(p.t).toFixed(1)},${y(p.v).toFixed(1)}`);
+    line += `<polyline class="ln" points="${pts.join(" ")}"/>`;
+    if (s.length > 1) area += `<path class="ar" d="M${pts[0]} L${pts.join(" L")} L${x(s[s.length - 1].t).toFixed(1)},${H - pb} L${x(s[0].t).toFixed(1)},${H - pb} Z"/>`;
+  }
+  const last = ser[ser.length - 1];
+  const out = (isNum(rule?.max) && last.v > rule.max) || (isNum(rule?.min) && last.v < rule.min);
+  const dot = `<circle class="end-ring${out ? " bad" : ""}" cx="${x(last.t).toFixed(1)}" cy="${y(last.v).toFixed(1)}" r="6"/><circle class="end${out ? " bad" : ""}" cx="${x(last.t).toFixed(1)}" cy="${y(last.v).toFixed(1)}" r="3.2"/>`;
+  return `<svg class="chart-svg" width="${W}" height="${H}" viewBox="0 0 ${W} ${H}" role="img" aria-label="${esc(m.label)}">${g}${area}${line}${thr}${dot}</svg>`;
+}
+
+/** Mini gráfica de la tarjeta: se estira al ancho, el punto final va en HTML. */
+function sparkHTML(series, metric, rule) {
+  const W = 300, H = 46;
+  const now = Date.now(), from = now - DAY;
+  const ser = series.filter((p) => p.t >= from && !(metric === "batteryLevel" && p.v > 100));
+  const dom = yDomain(ser, metric, rule);
+  if (!dom || ser.length < 2 || ser[ser.length - 1].t - ser[0].t < 45 * MIN) return `<div class="spark spark-empty"><span>Aún sin histórico</span></div>`;
+  const [lo, hi] = dom;
+  const x = (t) => ((t - from) / (now - from)) * W;
+  const y = (v) => 2 + ((hi - v) / (hi - lo)) * (H - 4);
+  let area = "", line = "", thr = "";
+  for (const s of segmentsOf(ser, gapOf(ser))) {
+    const pts = s.map((p) => `${x(p.t).toFixed(1)},${y(p.v).toFixed(1)}`);
+    line += `<polyline class="ln" points="${pts.join(" ")}" vector-effect="non-scaling-stroke"/>`;
+    if (s.length > 1) area += `<path class="ar" d="M${pts[0]} L${pts.join(" L")} L${x(s[s.length - 1].t).toFixed(1)},${H} L${x(s[0].t).toFixed(1)},${H} Z"/>`;
+  }
+  for (const val of [rule?.max, rule?.min]) if (isNum(val)) {
+    const yy = y(val).toFixed(1);
+    thr += `<line class="thr" x1="0" x2="${W}" y1="${yy}" y2="${yy}" vector-effect="non-scaling-stroke"/>`;
+  }
+  const last = ser[ser.length - 1];
+  const out = (isNum(rule?.max) && last.v > rule.max) || (isNum(rule?.min) && last.v < rule.min);
+  return `<div class="spark"><svg viewBox="0 0 ${W} ${H}" preserveAspectRatio="none" aria-hidden="true">${area}${thr}${line}</svg><i class="spark-dot${out ? " bad" : ""}" style="left:${((x(last.t) / W) * 100).toFixed(2)}%;top:${((y(last.v) / H) * 100).toFixed(2)}%"></i></div>`;
+}
+
+/* ───────────── render ───────────── */
+let raf = 0;
+function render() {
+  if (raf) return;
+  raf = requestAnimationFrame(() => {
+    raf = 0;
+    renderTop();
+    renderBoard();
+    renderCards();
+    renderMesh();
+    renderLog();
+    renderFoot();
+    const n = unacked().length;
+    document.title = n ? `(${n}) Alarma · Vigía Mesh` : "Vigía Mesh";
+  });
+}
+
+const ICON = {
+  bt: `<svg viewBox="0 0 24 24" aria-hidden="true"><path d="M7 7l10 10-5 4V3l5 4L7 17" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"/></svg>`,
+  gear: `<svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 15.2a3.2 3.2 0 1 0 0-6.4 3.2 3.2 0 0 0 0 6.4Z" fill="none" stroke="currentColor" stroke-width="1.8"/><path d="M19.4 13.5a7.6 7.6 0 0 0 0-3l2-1.6-2-3.4-2.4.9a7.5 7.5 0 0 0-2.6-1.5L14 2.4h-4l-.4 2.5A7.5 7.5 0 0 0 7 6.4l-2.4-.9-2 3.4 2 1.6a7.6 7.6 0 0 0 0 3l-2 1.6 2 3.4 2.4-.9a7.5 7.5 0 0 0 2.6 1.5l.4 2.5h4l.4-2.5a7.5 7.5 0 0 0 2.6-1.5l2.4.9 2-3.4-2-1.6Z" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linejoin="round"/></svg>`,
+  close: `<svg viewBox="0 0 24 24" aria-hidden="true"><path d="M6 6l12 12M18 6L6 18" stroke="currentColor" stroke-width="2" stroke-linecap="round"/></svg>`,
+};
+
+const LINK_TEXT = {
+  idle: "Conectar receptor",
+  connecting: "Conectando…",
+  configuring: "Leyendo el nodo…",
+  ready: "Receptor conectado",
+  reconnecting: "Reconectando…",
+};
+
+function renderTop() {
+  const b = $("#linkBtn");
+  const st = S.demo ? "demo" : S.link.state;
+  b.dataset.state = st;
+  let label = S.demo ? "Demo" : LINK_TEXT[st] || st;
+  if (st === "ready" && S.myNode != null) label = `${S.nodes.get(S.myNode)?.short || "Receptor"} conectado`;
+  if (st === "reconnecting" && S.link.extra?.at) {
+    const s = Math.max(0, Math.round((S.link.extra.at - Date.now()) / 1000));
+    label = s > 0 ? `Reintento en ${s} s` : "Reconectando…";
+  }
+  b.innerHTML = `<span class="ld"></span>${ICON.bt}<span class="lt">${esc(label)}</span>`;
+  $("#demoBar").hidden = !S.demo;
+}
+
+function renderBoard() {
+  const el = $("#board");
+  const list = [...S.active.values()].sort((a, b) => (a.acked - b.acked) || (b.since - a.since));
+  const watchedN = Object.keys(S.cfg.watched).length;
+  let html = "";
+  if (list.length) {
+    const open = list.filter((a) => !a.acked).length;
+    const cls = open ? "crit" : "seen";
+    html += `<div class="board ${cls}"><div class="board-h"><h2>${open ? (open === 1 ? "1 alarma sin atender" : `${open} alarmas sin atender`) : (list.length === 1 ? "1 alarma vista, sigue activa" : `${list.length} alarmas vistas, siguen activas`)}</h2>${open > 1 ? `<button class="btn on-dark" data-ackall>Enterado todas</button>` : ""}</div><ul class="al-list">`;
+    for (const a of list) {
+      html += `<li class="al${a.acked ? " acked" : ""}" data-kind="${a.kind}"><div class="al-main"${a.num != null ? ` data-open="${a.num}"` : ""}><strong>${esc(alarmTitle(a))}</strong><span>${esc(alarmDetail(a))}${a.late ? " Recibida al reconectar." : ""}</span></div><div class="al-side"><span class="al-t">desde ${esc(stamp(a.since))}</span>${a.acked ? `<span class="al-ok">Visto</span>` : `<button class="btn on-dark" data-ack="${esc(a.key)}">Enterado</button>`}</div></li>`;
+    }
+    html += `</ul></div>`;
+  } else {
+    let lastT = 0;
+    for (const num of Object.keys(S.cfg.watched)) lastT = Math.max(lastT, S.nodes.get(Number(num))?.lastHeard || 0);
+    const parts = watchedN
+      ? [`${watchedN} ${watchedN === 1 ? "nodo vigilado" : "nodos vigilados"}`, lastT ? `último dato ${ago(lastT)}` : "sin datos aún"]
+      : ["Ningún nodo vigilado todavía"];
+    html += `<div class="board calm"><span class="calm-dot"></span><div><h2>${watchedN ? "Todo en orden" : "Elige qué vigilar"}</h2><p>${esc(parts.join(" · "))}</p></div></div>`;
+  }
+  if (!S.demo && S.link.state !== "ready" && !S.active.has("link")) {
+    const msg = S.link.state === "idle"
+      ? "Sin receptor conectado. Mientras tanto ves los últimos datos guardados y no puedo saber si un nodo deja de emitir."
+      : "Esperando al receptor. Las alarmas de nodo sin señal están en pausa hasta que vuelva.";
+    html += `<div class="notice"><p>${esc(msg)}</p>${S.link.state === "idle" ? `<button class="btn primary" data-connect>Conectar receptor</button>` : ""}</div>`;
+  }
+  el.innerHTML = html;
+}
+
+function nodeState(num) {
+  const al = [...S.active.values()].filter((a) => a.num === num);
+  if (al.some((a) => a.kind === "high" || a.kind === "low")) return ["crit", "Alarma"];
+  if (al.some((a) => a.kind === "offline")) return ["off", "Sin señal"];
+  const n = S.nodes.get(num);
+  if (!n || !n.lastHeard) return ["none", "Sin datos"];
+  return ["ok", "Normal"];
+}
+
+function metaLine(n) {
+  const bits = [n.lastHeard ? `visto ${ago(n.lastHeard)}` : "sin señal registrada"];
+  if (isNum(n.hops)) bits.push(n.hops === 0 ? "directo" : `${n.hops} ${n.hops === 1 ? "salto" : "saltos"}`);
+  if (isNum(n.snr) && n.snr !== 0) bits.push(`SNR ${fmtNum(n.snr, 1)} dB`);
+  return bits.join(" · ");
+}
+
+function renderCards() {
+  const el = $("#cards");
+  const nums = Object.keys(S.cfg.watched).map(Number)
+    .sort((a, b) => (S.nodes.get(a)?.long || "").localeCompare(S.nodes.get(b)?.long || "", "es"));
+  $("#watchCount").textContent = nums.length ? String(nums.length) : "";
+  if (!nums.length) {
+    el.innerHTML = `<div class="empty"><p><strong>Aquí aparecerán tus sensores.</strong> En “Resto de la malla” toca <em>Vigilar</em> en un nodo para fijarlo aquí y ponerle alarmas de umbral y de nodo sin señal.</p></div>`;
+    return;
+  }
+  el.innerHTML = nums.map((num) => {
+    const n = node(num);
+    const w = S.cfg.watched[num];
+    const [st, stLabel] = nodeState(num);
+    const keys = sortMetrics(Object.keys(n.metrics).filter((k) => !metricMeta(k).minor));
+    const readings = keys.map((k) => {
+      const m = metricMeta(k), r = (w.rules || {})[k] || {};
+      const v = n.metrics[k].v;
+      const bad = (isNum(r.max) && v > r.max) || (isNum(r.min) && v < r.min);
+      const lim = [isNum(r.min) ? `mín ${fmtLimit(k, r.min)}` : "", isNum(r.max) ? `máx ${fmtLimit(k, r.max)}` : ""].filter(Boolean).join(" · ");
+      const unit = k === "batteryLevel" && v > 100 ? "" : m.unit;
+      return `<div class="rd${bad ? " bad" : ""}"><span class="rd-l">${esc(m.label)}</span><span class="rd-v">${fmtValue(k, v)}${unit ? `<small>${esc(unit)}</small>` : ""}</span><span class="rd-lim">${lim || "&nbsp;"}</span></div>`;
+    }).join("");
+    const sparkMetric = ["temperature", "batteryLevel", "relativeHumidity"].find((k) => n.metrics[k]) || keys[0];
+    const spark = sparkMetric
+      ? `<div class="spark-wrap"><span class="spark-cap">${esc(metricMeta(sparkMetric).label)} · últimas 24 h</span>${sparkHTML(S.recent.get(seriesKey(num, sparkMetric)) || [], sparkMetric, (w.rules || {})[sparkMetric])}</div>`
+      : "";
+    return `<article class="card st-${st}" data-open="${num}">
+      <header class="card-h"><span class="tag">${esc(n.short)}</span><div class="card-t"><h3><button type="button" class="name-btn" data-open="${num}" aria-label="Abrir ficha de ${esc(n.long)}, estado ${stLabel}">${esc(n.long)}</button></h3><p class="meta">${esc(metaLine(n))}</p></div><span class="pill p-${st}">${stLabel}</span></header>
+      ${readings ? `<div class="rds">${readings}</div>` : `<p class="no-rd">Este nodo aún no ha mandado telemetría.</p>`}
+      ${spark}
+      <div class="ask" data-ask-box="${num}">${askBlock(num)}</div>
+    </article>`;
+  }).join("");
+}
+
+function renderMesh() {
+  const el = $("#mesh");
+  const all = [...S.nodes.values()].filter((n) => !isWatched(n.num))
+    .sort((a, b) => (b.hasEnv - a.hasEnv) || ((b.lastHeard || 0) - (a.lastHeard || 0)));
+  $("#meshCount").textContent = all.length ? String(all.length) : "";
+  const shown = S.meshExpanded ? all : all.slice(0, 8);
+  if (!all.length) {
+    el.innerHTML = `<li class="empty-row">${S.demo || S.link.state === "ready" ? "No hay más nodos en la base de datos del receptor." : "Conecta el receptor para ver los nodos que oye."}</li>`;
+  } else {
+    el.innerHTML = shown.map((n) => {
+      const tags = [n.num === S.myNode ? "receptor" : "", n.hasEnv ? "sensores" : ""].filter(Boolean);
+      return `<li class="row"><button class="row-main" data-open="${n.num}"><span class="tag sm">${esc(n.short)}</span><span class="row-t"><span class="row-n">${esc(n.long)}${tags.map((t) => `<span class="chip">${t}</span>`).join("")}</span><span class="meta">${esc(metaLine(n))}</span></span></button><button class="btn ghost" data-watch="${n.num}">Vigilar</button></li>`;
+    }).join("");
+  }
+  const more = $("#meshMore");
+  more.hidden = all.length <= 8;
+  more.textContent = S.meshExpanded ? "Ver menos" : `Ver los ${all.length} nodos`;
+}
+
+function renderLog() {
+  const el = $("#log");
+  const list = S.logExpanded ? S.log : S.log.slice(0, 12);
+  el.innerHTML = list.length
+    ? list.map((e) => `<li class="lg lg-${e.type}"><time>${esc(stamp(e.t))}</time><span>${esc(e.text)}</span></li>`).join("")
+    : `<li class="empty-row">Todavía no ha pasado nada.</li>`;
+  const more = $("#logMore");
+  more.hidden = S.log.length <= 12;
+  more.textContent = S.logExpanded ? "Ver menos" : `Ver todo el registro (${S.log.length})`;
+}
+
+function renderFoot() {
+  const bits = ["Sin internet: los datos se guardan solo en este dispositivo."];
+  if (wake) bits.push("Pantalla fija activada.");
+  $("#foot").textContent = bits.join(" ");
+}
+
+/* ───────────── detalle de nodo ───────────── */
+function openDetail(num) {
+  S.detail = { num, range: S.detail?.num === num ? S.detail.range : "24h" };
+  renderDetail();
+  const d = $("#detail");
+  if (!d.open) d.showModal();
+  drawCharts();
+}
+
+function renderDetail() {
+  const { num } = S.detail;
+  const n = node(num);
+  const w = S.cfg.watched[num];
+  const keys = sortMetrics(new Set([...Object.keys(n.metrics), ...Object.keys(w?.rules || {})]));
+  const tags = [hexId(num), n.hw ? n.hw.replaceAll("_", " ") : "", n.num === S.myNode ? "tu receptor" : ""].filter(Boolean).join(" · ");
+  let body = `<section class="blk"><h3>Pedir datos ahora</h3><div class="ask in-sheet" data-ask-box="${num}">${askBlock(num)}</div>
+    <p class="hint">La petición sale por LoRa desde tu receptor y el nodo contesta con una lectura recién tomada. Si está dormido para ahorrar batería o fuera de alcance, no contesta.</p></section>`;
+  if (w) {
+    const off = isNum(w.offlineMin) ? w.offlineMin : S.settings.defaultOfflineMin;
+    const rows = keys.filter((k) => !metricMeta(k).minor).map((k) => {
+      const m = metricMeta(k), r = (w.rules || {})[k] || {};
+      const cur = n.metrics[k];
+      return `<tr><th scope="row">${esc(m.label)}${m.unit ? ` <small>${esc(m.unit)}</small>` : ""}</th><td class="now" data-now="${k}">${cur ? fmtValue(k, cur.v) : "—"}</td>
+        <td><input id="r-${k}-min" class="inp" data-rule="${k}" data-side="min" inputmode="decimal" autocomplete="off" placeholder="—" value="${isNum(r.min) ? fmtLimit(k, r.min) : ""}" aria-label="${esc(m.label)} mínimo"></td>
+        <td><input id="r-${k}-max" class="inp" data-rule="${k}" data-side="max" inputmode="decimal" autocomplete="off" placeholder="—" value="${isNum(r.max) ? fmtLimit(k, r.max) : ""}" aria-label="${esc(m.label)} máximo"></td></tr>`;
+    }).join("");
+    body += `<section class="blk"><h3>Alarmas de este nodo</h3>
+      <div class="off-row"><label for="r-off">Avisar si no da señal en más de</label><span class="inp-u"><input id="r-off" class="inp" inputmode="numeric" autocomplete="off" value="${off || ""}" placeholder="no"><span>min</span></span></div>
+      <p class="hint">Por defecto la telemetría sale cada 30 min. Deja margen para dos envíos perdidos; vacío desactiva este aviso.</p>
+      ${rows ? `<div class="tbl"><table class="thr-t"><thead><tr><th scope="col">Métrica</th><th scope="col">Ahora</th><th scope="col">Mín.</th><th scope="col">Máx.</th></tr></thead><tbody>${rows}</tbody></table></div>
+      <p class="hint">Escribe el límite y sal de la casilla para guardarlo. Vacía la casilla para quitarlo.</p>` : `<p class="hint">Cuando este nodo mande telemetría aparecerán aquí sus métricas para ponerles límites.</p>`}
+      <p class="form-err" id="ruleErr" role="alert" hidden></p></section>`;
+  } else {
+    body += `<section class="blk cta"><p>Vigila este nodo para fijarlo arriba y ponerle alarmas de umbral y de nodo sin señal.</p><button class="btn primary" data-watch="${num}">Vigilar este nodo</button></section>`;
+  }
+  body += `<section class="blk"><div class="blk-h"><h3>Histórico</h3><div class="seg" role="group" aria-label="Periodo">
+      <button type="button" data-range="24h" aria-pressed="${S.detail.range === "24h"}">24 h</button><button type="button" data-range="7d" aria-pressed="${S.detail.range === "7d"}">7 días</button></div></div>
+      <div id="chartList" class="chart-list">${keys.length ? keys.map((k) => `<figure class="chart" data-m="${k}"><figcaption><span>${esc(metricMeta(k).label)}</span><b data-cur="${k}">${n.metrics[k] ? esc(fmtWithUnit(k, n.metrics[k].v)) : "—"}</b><span class="mm" data-mm="${k}"></span></figcaption><div class="chart-box"></div></figure>`).join("") : `<p class="hint">Sin telemetría de este nodo.</p>`}</div></section>`;
+  if (w) body += `<section class="blk end"><button class="btn danger-ghost" id="unwatchBtn" data-unwatch="${num}">Dejar de vigilar</button></section>`;
+
+  $("#detail").innerHTML = `<div class="sheet-h"><span class="tag">${esc(n.short)}</span><div class="sheet-t"><h2>${esc(n.long)}</h2><p class="meta">${esc(tags)}<br>${esc(metaLine(n))}</p></div><button class="icon-btn" data-close aria-label="Cerrar">${ICON.close}</button></div><div class="sheet-b">${body}</div>`;
+}
+
+async function drawCharts() {
+  if (!S.detail) return;
+  const { num, range } = S.detail;
+  const to = Date.now(), from = to - (range === "7d" ? 7 * DAY : DAY);
+  const rules = S.cfg.watched[num]?.rules || {};
+  for (const fig of $$("#chartList .chart")) {
+    const k = fig.dataset.m;
+    const ser = await S.store.series(num, k, from, to);
+    if (!S.detail || S.detail.num !== num) return;
+    const box = $(".chart-box", fig);
+    const W = Math.max(240, Math.floor(box.clientWidth || 320));
+    box.innerHTML = chartSVG(ser, k, rules[k], from, to, W);
+    const vals = ser.map((p) => p.v).filter((v) => !(k === "batteryLevel" && v > 100));
+    $(`[data-mm="${k}"]`, fig).textContent = vals.length ? `mín ${fmtNum(Math.min(...vals), metricMeta(k).dec)} · máx ${fmtNum(Math.max(...vals), metricMeta(k).dec)}` : "";
+  }
+}
+
+let liveT = null;
+function refreshDetailLive() {
+  if (!S.detail || !$("#detail").open) return;
+  const n = S.nodes.get(S.detail.num);
+  if (!n) return;
+  for (const [k, m] of Object.entries(n.metrics)) {
+    const a = $(`#detail [data-now="${k}"]`);
+    if (a) a.textContent = fmtValue(k, m.v);
+    const b = $(`#detail [data-cur="${k}"]`);
+    if (b) b.textContent = fmtWithUnit(k, m.v);
+  }
+  clearTimeout(liveT);
+  liveT = setTimeout(drawCharts, 400);
+}
+
+function saveRuleFromInput(inp) {
+  const num = S.detail?.num;
+  const w = S.cfg.watched[num];
+  if (!w) return;
+  const err = $("#ruleErr");
+  if (inp.id === "r-off") {
+    const v = parseNum(inp.value);
+    if (Number.isNaN(v) || (v !== null && v < 1)) { showErr(err, "Pon un número de minutos (1 o más) o déjalo vacío."); inp.focus(); return; }
+    w.offlineMin = v === null ? 0 : Math.round(v);
+    err.hidden = true;
+    saveCfg();
+    evalOffline();
+    render();
+    toast(v === null ? "Aviso de nodo sin señal desactivado" : `Avisará tras ${dur(w.offlineMin * MIN)} sin señal`);
+    return;
+  }
+  const k = inp.dataset.rule, side = inp.dataset.side;
+  const v = parseNum(inp.value);
+  if (Number.isNaN(v)) { showErr(err, `“${inp.value}” no es un número. Usa coma o punto para los decimales.`); inp.focus(); return; }
+  w.rules = w.rules || {};
+  const r = { ...(w.rules[k] || {}) };
+  if (v === null) delete r[side]; else r[side] = v;
+  if (isNum(r.min) && isNum(r.max) && r.min >= r.max) { showErr(err, `En ${metricMeta(k).label.toLowerCase()} el mínimo tiene que ser menor que el máximo.`); inp.focus(); return; }
+  err.hidden = true;
+  if (isNum(r.min) || isNum(r.max)) w.rules[k] = r; else delete w.rules[k];
+  saveCfg();
+  const cur = S.nodes.get(num)?.metrics[k];
+  if (cur) evalThreshold(num, k, cur.v, cur.t);
+  else { clearAlarm(`${num}|${k}|high`, { silent: true }); clearAlarm(`${num}|${k}|low`, { silent: true }); }
+  render();
+  drawCharts();
+  toast("Límite guardado");
+}
+function showErr(el, msg) { el.textContent = msg; el.hidden = false; }
+
+function watch(num) {
+  if (isWatched(num)) return;
+  S.cfg.watched[num] = { offlineMin: S.settings.defaultOfflineMin, rules: {} };
+  saveCfg();
+  loadRecent([num]).then(render);
+  addLog("info", `Vigilando ${nodeName(num)}`, num);
+  evalNode(num);
+  render();
+  if (S.detail?.num === num && $("#detail").open) { renderDetail(); drawCharts(); }
+  toast(`${nodeName(num)} fijado arriba. Ponle límites en su ficha.`);
+}
+
+function unwatch(num) {
+  delete S.cfg.watched[num];
+  saveCfg();
+  for (const k of [...S.active.keys()]) if (S.active.get(k).num === num) clearAlarm(k, { silent: true });
+  addLog("info", `Ya no se vigila ${nodeName(num)}`, num);
+  render();
+}
+
+/* ───────────── ajustes ───────────── */
+const PREVIEW = !window.__VIGIA_PWA;
+function btSupportMsg() {
+  if (PREVIEW) return "Esta es la vista previa: aquí el navegador no deja usar Bluetooth. Instala la app desde tu dirección https para conectar el nodo.";
+  const s = Receptor.support();
+  if (s === "insecure") return "Bluetooth web solo funciona en páginas seguras (https). Abre la app desde su dirección https.";
+  if (s === "none") return "Este navegador no tiene Bluetooth web. Usa Chrome en Android o en el ordenador; en iPhone no está disponible.";
+  return "";
+}
+
+function renderSettings() {
+  const st = S.link.state;
+  const dev = S.device || LS.get("vigia.device", null);
+  const sup = btSupportMsg();
+  let rec = "";
+  if (sup) rec = `<p class="warn-t">${esc(sup)}</p>`;
+  else if (S.demo) rec = `<p>Estás en la demo. Sal de ella para conectar tu nodo.</p><div class="btns"><button class="btn primary" data-demo-off>Salir de la demo y conectar</button></div>`;
+  else {
+    const my = S.myNode != null ? S.nodes.get(S.myNode) : null;
+    const statusTxt = {
+      idle: dev?.name ? `Desconectado. Último receptor: ${dev.name}.` : "Ningún receptor emparejado todavía.",
+      connecting: `Conectando con ${dev?.name || "el nodo"}…`,
+      configuring: "Conectado. Leyendo la base de datos de nodos…",
+      ready: `Conectado a ${my ? `${my.short} · ${my.long}` : dev?.name || "tu nodo"}.`,
+      reconnecting: `Se ha perdido la conexión con ${dev?.name || "el receptor"}. Reintentando sola.`,
+    }[st];
+    rec = `<p>${esc(statusTxt)}</p><div class="btns">`;
+    if (st === "idle") rec += `<button class="btn primary" data-connect>Conectar receptor</button><button class="btn ghost" data-connect-all>Mi nodo no aparece</button>`;
+    else rec += `${st === "reconnecting" ? `<button class="btn primary" data-retry>Reintentar ahora</button>` : ""}<button class="btn ghost" data-disconnect>Desconectar</button>`;
+    rec += `</div><p class="hint">El receptor es el nodo que tienes al lado del móvil; los sensores le llegan por LoRa. El móvil se conecta a él por Bluetooth, sin internet.</p>`;
+  }
+  const notifState = !("Notification" in window) ? "none" : Notification.permission;
+  const notif = notifState === "granted" ? `<span class="okt">Activadas</span>`
+    : notifState === "denied" ? `<span class="warn-t">Bloqueadas en los ajustes del navegador</span>`
+    : notifState === "none" ? `<span class="hint">No disponibles aquí</span>`
+    : `<button class="btn ghost" data-notif>Activar</button>`;
+  $("#settings").innerHTML = `<div class="sheet-h"><div class="sheet-t"><h2>Ajustes</h2></div><button class="icon-btn" data-close aria-label="Cerrar">${ICON.close}</button></div>
+  <div class="sheet-b">
+    <section class="blk"><h3>Receptor</h3>${rec}</section>
+    <section class="blk"><h3>Avisos</h3>
+      <div class="set-row"><label class="sw" for="setSound"><input type="checkbox" id="setSound" ${S.settings.sound ? "checked" : ""}><span class="sw-ui"></span><span>Sonido de alarma</span></label><button class="btn ghost" data-test>Probar alarma</button></div>
+      <div class="set-row"><label class="sw" for="setWake"><input type="checkbox" id="setWake" ${S.settings.wake ? "checked" : ""}><span class="sw-ui"></span><span>Mantener la pantalla encendida</span></label></div>
+      <div class="set-row"><span>Notificaciones del sistema</span>${notif}</div>
+      <div class="set-row"><label for="setOff">Sin señal, valor para nodos nuevos</label><span class="inp-u"><input id="setOff" class="inp" inputmode="numeric" autocomplete="off" value="${S.settings.defaultOfflineMin}"><span>min</span></span></div>
+      <p class="hint">Las alarmas solo saltan con la app abierta y en pantalla. Con el móvil bloqueado, Chrome congela la página; al volver, recoge lo que guardó el receptor y avisa de lo que se perdió.</p>
+    </section>
+    <section class="blk"><h3>Histórico</h3>
+      <div class="set-row"><span id="histCount">Contando lecturas…</span><select id="setRet" class="inp sel" aria-label="Tiempo que se guardan las lecturas">${[7, 30, 90, 365].map((d) => `<option value="${d}"${S.settings.retentionDays === d ? " selected" : ""}>Guardar ${d} días</option>`).join("")}</select></div>
+      <div class="btns">${PREVIEW ? "" : `<button class="btn ghost" data-export>Exportar CSV</button>`}<button class="btn danger-ghost" data-wipe>Borrar histórico</button></div>
+    </section>
+    <section class="blk"><h3>Demostración</h3>${S.demo ? `<p>Los datos que ves son inventados y no se guardan.</p>${PREVIEW ? "" : `<button class="btn ghost" data-demo-off>Salir de la demo</button>`}` : `<p>Prueba el panel con nodos inventados. Tus datos reales no se tocan.</p><button class="btn ghost" data-demo-on>Ver la demo</button>`}</section>
+  </div>`;
+  S.store.count().then((c) => { const el = $("#histCount"); if (el) el.textContent = `${c.toLocaleString("es-ES")} lecturas${S.demo ? " (demo)" : ""}`; });
+}
+function openSettings() {
+  renderSettings();
+  const d = $("#settings");
+  if (!d.open) d.showModal();
+}
+
+async function exportCsv() {
+  const rows = (await S.store.all()).sort((a, b) => a.t - b.t);
+  const lines = ["fecha;nodo;nombre;metrica;valor;unidad"];
+  for (const r of rows) {
+    const m = metricMeta(r.metric);
+    lines.push([new Date(r.t).toISOString(), hexId(r.node), `"${nodeName(r.node).replaceAll('"', "'")}"`, r.metric, String(r.v).replace(".", ","), m.unit].join(";"));
+  }
+  const blob = new Blob(["﻿" + lines.join("\n")], { type: "text/csv;charset=utf-8" });
+  const a = document.createElement("a");
+  a.href = URL.createObjectURL(blob);
+  a.download = `vigia-mesh-${new Date().toISOString().slice(0, 10)}.csv`;
+  document.body.append(a);
+  a.click();
+  a.remove();
+  setTimeout(() => URL.revokeObjectURL(a.href), 4000);
+  toast(`${rows.length.toLocaleString("es-ES")} lecturas exportadas`);
+}
+
+/* ───────────── receptor ───────────── */
+function makeReceptor() {
+  return new Receptor({
+    onStatus(state, extra) {
+      S.link = { state, extra: extra || null };
+      if ($("#settings").open) renderSettings();
+      if (S.detail) refreshAsk(S.detail.num);
+      render();
+    },
+    onDevice(dev) {
+      S.device = { id: dev.id, name: dev.name || "Nodo Meshtastic" };
+      LS.set("vigia.device", S.device);
+    },
+    onReady() {
+      LS.set("vigia.ever", true);
+      clearAlarm("link", {});
+      addLog("info", `Receptor listo: ${S.myNode != null ? nodeName(S.myNode) : S.device?.name || "nodo"}`);
+      evalOffline();
+      render();
+    },
+    onLost(reason, wasReady) {
+      if (wasReady) raise("link", { kind: "link", num: null, t: Date.now() });
+      evalOffline();
+    },
+    onError(e) {
+      if (S.link.state === "connecting" && !receptor.everReady) toast(btErrorText(e));
+    },
+    onMyNode(num) {
+      S.myNode = num;
+      LS.set("vigia.my", num);
+      node(num);
+    },
+    onNodeInfo(ni) {
+      const n = node(ni.num);
+      if (ni.user) setUser(n, ni.user);
+      const lh = ni.lastHeard ? ni.lastHeard * 1000 : 0;
+      touch(ni.num, lh);
+      if (isNum(ni.hopsAway)) n.hops = ni.hopsAway;
+      if (isNum(ni.snr) && ni.snr !== 0) n.snr = ni.snr;
+      if (isNum(ni.channel)) n.channel = ni.channel;
+      const dm = ni.deviceMetrics;
+      if (dm && validT(lh)) {
+        const m = {};
+        if (isNum(dm.batteryLevel) && dm.batteryLevel > 0) m.batteryLevel = dm.batteryLevel;
+        if (isNum(dm.voltage) && dm.voltage > 0) m.voltage = dm.voltage;
+        for (const [k, v] of Object.entries(m)) {
+          const prev = n.metrics[k];
+          if (!prev || lh > prev.t) { n.metrics[k] = { v, t: lh }; evalThreshold(ni.num, k, v, lh); }
+        }
+      }
+      saveNodes();
+      render();
+    },
+    onUser(from, user) { setUser(node(from), user); saveNodes(); render(); },
+    onPacket(p) {
+      const rx = p.rxTime ? p.rxTime * 1000 : 0;
+      touch(p.from, validT(rx) ? rx : Date.now());
+      const n = node(p.from);
+      if (p.hopStart > 0 && isNum(p.hopLimit)) n.hops = Math.max(0, p.hopStart - p.hopLimit);
+      if (isNum(p.rxSnr) && p.rxSnr !== 0) n.snr = p.rxSnr;
+      // Canal por el que emite el nodo, para pedirle datos por el mismo.
+      if (p.to === 0xffffffff && isNum(p.channel) && p.channel < 8) n.channel = p.channel;
+      saveNodes();
+      render();
+    },
+    onTelemetry(p) {
+      const id = `${p.from}:${p.id}`;
+      if (p.id && S.seen.has(id)) return;
+      if (p.id) { S.seen.add(id); if (S.seen.size > 600) S.seen.delete(S.seen.values().next().value); }
+      const rx = p.rxTime?.getTime?.() || 0;
+      const sent = p.data?.time ? p.data.time * 1000 : 0;
+      const t = validT(rx) ? rx : validT(sent) ? sent : Date.now();
+      const kind = p.data.variant?.case;
+      const pending = ASK_BY_VARIANT[kind] && S.req.get(askKey(p.from, ASK_BY_VARIANT[kind]));
+      if (pending && t >= pending.t0 - 5000 && Date.now() - pending.t0 < 5 * MIN) finishAsk(pending, "ok");
+      const metrics = extractMetrics(p.data);
+      if (!Object.keys(metrics).length) return;
+      ingest(p.from, metrics, t, { kind, replay: Date.now() - t > 5 * MIN });
+    },
+  });
+}
+
+function setUser(n, u) {
+  if (u.longName) n.long = u.longName;
+  if (u.shortName) n.short = u.shortName;
+  if (typeof u.hwModel === "number" && u.hwModel > 0) n.hw = Protobuf.Mesh.HardwareModel?.[u.hwModel] || n.hw;
+}
+
+function btErrorText(e) {
+  const name = e?.name || "";
+  const msg = String(e?.message || "");
+  if (name === "NotFoundError" && /cancel/i.test(msg)) return "";
+  if (name === "NotFoundError") return "No se encontró el nodo. Comprueba que tiene el Bluetooth activo y está cerca.";
+  if (name === "SecurityError" || /permissions policy|disallowed/i.test(msg)) return "Esta página no tiene permiso para usar Bluetooth. Pasa en la vista previa: abre la app instalada desde tu dirección https.";
+  if (name === "NetworkError") return "El nodo no responde. Acércalo, o reinícialo si tiene otro móvil conectado.";
+  if (name === "NotAllowedError") return "Has denegado el acceso al Bluetooth.";
+  return `No se pudo conectar: ${msg || name || "error desconocido"}`;
+}
+
+async function connectFlow(all = false) {
+  const sup = btSupportMsg();
+  if (sup) { toast(sup); openSettings(); return; }
+  if (S.demo) stopDemo();
+  if (!receptor) receptor = makeReceptor();
+  try {
+    await receptor.pick(all);
+  } catch (e) {
+    const t = btErrorText(e);
+    if (t) toast(t);
+    if (receptor.state !== "reconnecting") { S.link = { state: "idle", extra: null }; render(); }
+  }
+}
+
+/* ───────────── demo ───────────── */
+function startDemo() {
+  if (receptor && receptor.state !== "idle") receptor.disconnect();
+  S.demo = true;
+  const d = buildDemo(Date.now());
+  S.demoData = d;
+  S.demoToken++;
+  resetAsks();
+  S.store = createMemStore();
+  S.store.add(d.rows);
+  S.nodes = new Map();
+  for (const n of d.nodes) S.nodes.set(n.num, { metrics: {}, snr: null, hasEnv: false, hw: "", ...n });
+  for (const r of d.rows) {
+    const n = S.nodes.get(r.node);
+    const prev = n.metrics[r.metric];
+    if (!prev || r.t >= prev.t) n.metrics[r.metric] = { v: r.v, t: r.t };
+  }
+  for (const [num, ms] of Object.entries(d.extraMetrics)) Object.assign(S.nodes.get(Number(num)).metrics, ms);
+  S.myNode = d.myNode;
+  S.cfg = { watched: JSON.parse(JSON.stringify(d.watched)) };
+  S.active = new Map();
+  S.log = [{ t: Date.now(), type: "info", text: "Demo cargada con nodos inventados" }];
+  S.recent = new Map();
+  const since = Date.now() - 26 * HOUR;
+  for (const r of d.rows) if (r.t >= since) {
+    const k = seriesKey(r.node, r.metric);
+    if (!S.recent.has(k)) S.recent.set(k, []);
+    S.recent.get(k).push({ t: r.t, v: r.v });
+  }
+  for (const num of Object.keys(S.cfg.watched)) evalNode(Number(num), { silent: true });
+  const seen = S.active.get(`${DEMO_IDS.monte}||offline`);
+  if (seen) seen.acked = true;
+  clearInterval(S.demoTimer);
+  S.demoTimer = setInterval(() => {
+    const x = d.tick();
+    ingest(x.num, x.metrics, Date.now(), { env: true });
+  }, 12000);
+  render();
+}
+
+function stopDemo() {
+  clearInterval(S.demoTimer);
+  S.demoTimer = null;
+  S.demo = false;
+  S.demoData = null;
+  S.demoToken++;
+  resetAsks();
+  loadReal();
+  if (S.detail && $("#detail").open) $("#detail").close();
+  loadRecent().then(render);
+  render();
+}
+
+async function loadRecent(nums) {
+  const list = nums || Object.keys(S.cfg.watched).map(Number);
+  const since = Date.now() - 26 * HOUR;
+  for (const num of list) {
+    const n = S.nodes.get(num);
+    if (!n) continue;
+    for (const k of Object.keys(n.metrics)) {
+      const ser = await S.store.series(num, k, since);
+      if (ser.length) S.recent.set(seriesKey(num, k), ser);
+    }
+  }
+}
+
+/* ───────────── toast ───────────── */
+let toastT = null;
+function toast(msg) {
+  if (!msg) return;
+  const t = $("#toast");
+  t.textContent = msg;
+  t.hidden = false;
+  t.classList.remove("show");
+  void t.offsetWidth;
+  t.classList.add("show");
+  clearTimeout(toastT);
+  toastT = setTimeout(() => { t.classList.remove("show"); setTimeout(() => { t.hidden = true; }, 250); }, 3600);
+}
+
+/* ───────────── eventos ───────────── */
+let wipeArmed = 0, unwatchArmed = 0;
+document.addEventListener("click", async (ev) => {
+  const t = ev.target.closest("button, [data-open], [data-close]");
+  if (!t) {
+    const dlg = ev.target.closest("dialog");
+    if (dlg && ev.target === dlg) dlg.close();
+    return;
+  }
+  const ds = t.dataset;
+  if ("ask" in ds) return ask(Number(ds.num), ds.ask);
+  if ("ack" in ds) return ack(ds.ack);
+  if ("ackall" in ds) return ackAll();
+  if ("watch" in ds) return watch(Number(ds.watch));
+  if ("close" in ds) return t.closest("dialog")?.close();
+  if ("connect" in ds) { $("#settings").open && $("#settings").close(); return connectFlow(false); }
+  if ("connectAll" in ds) { $("#settings").close(); return connectFlow(true); }
+  if ("retry" in ds) return receptor?.retryNow();
+  if ("disconnect" in ds) { await receptor?.disconnect(); addLog("info", "Receptor desconectado a mano"); clearAlarm("link", { silent: true }); render(); return; }
+  if ("demoOn" in ds) { $("#settings").close(); startDemo(); return toast("Demo activada: datos inventados"); }
+  if ("demoOff" in ds) { $("#settings").open && $("#settings").close(); if (PREVIEW) return toast(btSupportMsg()); stopDemo(); return connectFlow(false); }
+  if ("notif" in ds) { try { await Notification.requestPermission(); } catch { /* nada */ } renderSettings(); return; }
+  if ("test" in ds) { unlockAudio(); raise("test", { kind: "test", num: null, t: Date.now() }); $("#settings").close(); return; }
+  if ("export" in ds) return exportCsv();
+  if ("wipe" in ds) {
+    if (Date.now() - wipeArmed > 4000) { wipeArmed = Date.now(); t.textContent = "Toca otra vez para borrar"; return; }
+    wipeArmed = 0;
+    await S.store.clear();
+    S.recent = new Map();
+    renderSettings();
+    render();
+    return toast("Histórico borrado");
+  }
+  if ("unwatch" in ds) {
+    if (Date.now() - unwatchArmed > 4000) { unwatchArmed = Date.now(); t.textContent = "Toca otra vez para dejar de vigilar"; return; }
+    unwatchArmed = 0;
+    unwatch(Number(ds.unwatch));
+    renderDetail();
+    drawCharts();
+    return;
+  }
+  if ("range" in ds) { S.detail.range = ds.range; $$("#detail [data-range]").forEach((b) => b.setAttribute("aria-pressed", String(b.dataset.range === ds.range))); return drawCharts(); }
+  if (t.id === "linkBtn") { if (!S.demo && S.link.state === "idle" && !btSupportMsg()) return connectFlow(false); return openSettings(); }
+  if (t.id === "setBtn") return openSettings();
+  if (t.id === "meshMore") { S.meshExpanded = !S.meshExpanded; return renderMesh(); }
+  if (t.id === "logMore") { S.logExpanded = !S.logExpanded; return renderLog(); }
+  if ("open" in ds) return openDetail(Number(ds.open));
+});
+
+document.addEventListener("keydown", (ev) => {
+  if ((ev.key === "Enter" || ev.key === " ") && ev.target.matches?.(".card[data-open]")) { ev.preventDefault(); openDetail(Number(ev.target.dataset.open)); }
+  if (ev.key === "Enter" && ev.target.matches?.("#detail .inp")) ev.target.blur();
+});
+
+document.addEventListener("change", (ev) => {
+  const t = ev.target;
+  if (t.matches("#detail .inp")) return saveRuleFromInput(t);
+  if (t.id === "setSound") { S.settings.sound = t.checked; saveSettings(); if (t.checked) { unlockAudio(); beep(); } return; }
+  if (t.id === "setWake") { S.settings.wake = t.checked; saveSettings(); return applyWake(); }
+  if (t.id === "setOff") {
+    const v = parseNum(t.value);
+    if (!v || Number.isNaN(v) || v < 1) { t.value = S.settings.defaultOfflineMin; return toast("Pon un número de minutos (1 o más)."); }
+    S.settings.defaultOfflineMin = Math.round(v);
+    saveSettings();
+    return toast("Guardado");
+  }
+  if (t.id === "setRet") {
+    S.settings.retentionDays = Number(t.value);
+    saveSettings();
+    S.store.prune(Date.now() - S.settings.retentionDays * DAY).then(renderSettings);
+  }
+});
+
+$("#detail").addEventListener("close", () => { S.detail = null; unwatchArmed = 0; });
+window.addEventListener("resize", () => { clearTimeout(liveT); liveT = setTimeout(drawCharts, 200); });
+
+/* ───────────── arranque ───────────── */
+async function boot() {
+  S.settings = { ...DEFAULT_SETTINGS, ...LS.get("vigia.settings", {}) };
+  loadReal();
+  const ever = LS.get("vigia.ever", false);
+  if (!ever && S.nodes.size === 0) {
+    startDemo();
+  } else {
+    await loadRecent();
+    S.store.prune(Date.now() - S.settings.retentionDays * DAY);
+    render();
+    const dev = LS.get("vigia.device", null);
+    if (dev && !btSupportMsg()) {
+      receptor = makeReceptor();
+      S.device = dev;
+      receptor.restore(dev.id).catch(() => {});
+    }
+  }
+  applyWake();
+  if (window.__VIGIA_PWA && "serviceWorker" in navigator) {
+    navigator.serviceWorker.register("./sw.js").then((r) => { swReg = r; }).catch(() => {});
+  }
+  setInterval(() => { evalOffline(); render(); }, 15000);
+  setInterval(() => { if (S.link.state === "reconnecting") renderTop(); }, 1000);
+}
+boot();
