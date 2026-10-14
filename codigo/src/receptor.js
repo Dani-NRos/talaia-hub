@@ -99,7 +99,7 @@ export class Receptor {
     });
     ev.onMyNodeInfo.subscribe((i) => mine() && this.h.onMyNode?.(i.myNodeNum));
     ev.onNodeInfoPacket.subscribe((n) => mine() && this.h.onNodeInfo?.(n));
-    ev.onUserPacket.subscribe((p) => mine() && this.h.onUser?.(p.from, p.data));
+    ev.onUserPacket.subscribe((p) => mine() && this.h.onUser?.(p.from, p.data, p));
     ev.onTelemetryPacket.subscribe((p) => mine() && this.h.onTelemetry?.(p));
     ev.onMeshPacket.subscribe((p) => mine() && this.h.onPacket?.(p));
   }
@@ -137,6 +137,17 @@ export class Receptor {
     if (!mesh || this.state !== "ready") return Promise.reject({ error: "send" });
     const payload = new Uint8Array([(field << 3) | 2, 0]);
     return mesh.sendPacket(payload, Protobuf.Portnums.PortNum.TELEMETRY_APP, dest, channel, true, true, false);
+  }
+
+  /**
+   * Pide la ficha (NodeInfo) de un nodo mandándole la nuestra con want_response, como hace la app oficial.
+   * NodeInfo nunca va cifrado con PKI, así que funciona aunque falte la clave del nodo, y de paso
+   * el nodo aprende la clave de nuestro receptor. userBytes: nuestro User ya codificado.
+   */
+  requestNodeInfo(dest, userBytes, channel = 0) {
+    const mesh = this.mesh;
+    if (!mesh || this.state !== "ready") return Promise.reject({ error: "send" });
+    return mesh.sendPacket(userBytes, Protobuf.Portnums.PortNum.NODEINFO_APP, dest, channel, true, true, false);
   }
 
   /** Reintenta ya, sin esperar al siguiente intervalo. */

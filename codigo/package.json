@@ -1,6 +1,6 @@
 {
   "name": "vigia-mesh",
-  "version": "1.1.0",
+  "version": "1.2.0",
   "description": "Panel de telemetría y alarmas para nodos Meshtastic por Bluetooth, sin internet",
   "scripts": {
     "build": "node build.mjs"

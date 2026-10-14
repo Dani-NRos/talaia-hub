@@ -3,6 +3,7 @@ import { createIdbStore, createMemStore } from "./store.js";
 import { Receptor } from "./receptor.js";
 import { buildDemo, DEMO_IDS } from "./demo.js";
 import { Protobuf } from "@meshtastic/core";
+import { encodeUser } from "./pb.js";
 
 /* ───────────── utilidades ───────────── */
 const $ = (s, r = document) => r.querySelector(s);
@@ -67,7 +68,8 @@ const S = {
   meshExpanded: false,
   logExpanded: false,
   detail: null, // { num, range }
-  req: new Map(), // peticiones de telemetría en curso o recientes, por nodo|tipo
+  req: new Map(), // peticiones a nodos en curso o recientes, por nodo|tipo
+  myUser: null, // ficha de nuestro receptor, se manda al pedir la de otro nodo
   demoData: null,
   demoToken: 0,
 };
@@ -256,50 +258,88 @@ function addLog(type, text, num) {
   saveLog();
 }
 
-/* ───────────── pedir telemetría a un nodo ───────────── */
-// Cada tipo es un campo del mensaje Telemetry; se pide mandando ese campo vacío con want_response.
+/* ───────────── pedir datos a un nodo ───────────── */
+// Telemetría: cada tipo es un campo del mensaje Telemetry; se pide mandando ese campo vacío con want_response.
 const ASK = {
   env:    { label: "Ambiente", what: "Temperatura, humedad y presión", field: 3, variant: "environmentMetrics" },
   device: { label: "Batería",  what: "Batería, tensión y uso del canal", field: 2, variant: "deviceMetrics" },
   air:    { label: "Aire",     what: "CO₂ y partículas", field: 4, variant: "airQualityMetrics" },
   power:  { label: "Energía",  what: "Tensión y corriente de los canales INA", field: 5, variant: "powerMetrics" },
 };
+// Ficha del nodo (NodeInfo): nombre y clave pública. Sin la clave, el receptor no le manda peticiones.
+const ASK_ALL = { ...ASK, info: { label: "Ficha" } };
 const ASK_BY_VARIANT = Object.fromEntries(Object.entries(ASK).map(([k, a]) => [a.variant, k]));
-const ASK_TIMEOUT = 60000, ASK_COOLDOWN = 30000, ASK_SHOW = 10 * MIN;
+const ASK_TIMEOUT = 60000, ASK_COOLDOWN = 30000, INFO_COOLDOWN = 60000, ASK_SHOW = 10 * MIN;
 const RE = Protobuf.Mesh.Routing_Error;
+// Códigos que la librería incluida aún no nombra (firmware 2.7+).
+const E_RATE_LIMIT = 38, E_NO_PUBKEY = 39;
+const KEY_ERRORS = new Set([RE.PKI_FAILED, RE.PKI_UNKNOWN_PUBKEY, E_NO_PUBKEY]);
 const askKey = (num, type) => `${num}|${type}`;
 const canAsk = () => S.demo || (S.link.state === "ready" && !!receptor?.mesh);
 const askVisible = (r) => r && (r.state === "wait" || Date.now() - r.tDone < ASK_SHOW);
+// Quién confirmó cada paquete nuestro (requestId → nodo), para saber si el acuse vino del destino.
+const ackFrom = new Map();
 
-function askFailText(code) {
+function askFailText(code, r) {
   switch (code) {
     case RE.NO_RESPONSE: return "el nodo contesta que no tiene ese sensor";
     case RE.MAX_RETRANSMIT: return "no llegó al nodo tras varios intentos";
     case RE.NO_ROUTE: case RE.GOT_NAK: return "no hay ruta hasta el nodo";
-    case RE.NO_CHANNEL: case RE.PKI_FAILED: case RE.PKI_UNKNOWN_PUBKEY: return "el receptor no comparte canal o clave con ese nodo";
+    case RE.NO_CHANNEL: return "el receptor no tiene el canal de ese nodo";
+    case E_NO_PUBKEY: return "tu receptor no tiene la clave de este nodo, pide su ficha";
+    case RE.PKI_UNKNOWN_PUBKEY: return "el nodo no tiene la clave de tu receptor, pedir su ficha se la envía";
+    case RE.PKI_FAILED: return "fallo de cifrado con ese nodo, pedir su ficha suele arreglarlo";
     case RE.DUTY_CYCLE_LIMIT: return "el receptor ha agotado su tiempo de emisión, prueba en unos minutos";
+    case E_RATE_LIMIT: return "límite de uso del canal alcanzado, prueba en unos minutos";
     case RE.TOO_LARGE: case RE.BAD_REQUEST: return "el nodo rechazó la petición";
-    case "timeout": return `sin respuesta en ${ASK_TIMEOUT / 1000} s`;
+    case "timeout":
+      if (r?.acked && r.type === "info") return "el nodo la recibió pero no contestó; no repite su ficha si te la mandó en las últimas horas o la anunció hace poco";
+      if (r?.acked) return "el nodo la recibió pero no mandó datos";
+      return `sin respuesta en ${ASK_TIMEOUT / 1000} s`;
     case "send": return "no se pudo enviar al receptor";
     default: return `error ${RE[code] ?? code}`;
   }
 }
 
+// ¿El receptor cifra los mensajes directos con clave? (firmware 2.5+ y sin modo radioaficionado)
+const receptorUsesPki = () => S.demo || (S.myUser?.publicKey?.length === 32 && !S.myUser.isLicensed);
+// Un fallo de clave deja de contar en cuanto llega la ficha del nodo.
+function keyFixedAt(num) {
+  const info = S.req.get(askKey(num, "info"));
+  return info?.state === "ok" ? info.tDone : 0;
+}
+const staleKeyFail = (r) => r.state === "fail" && KEY_ERRORS.has(r.why) && r.tDone <= keyFixedAt(r.num);
+function keyNeeded(num) {
+  if (num === S.myNode) return false;
+  if (receptorUsesPki() && S.nodes.get(num)?.key === false) return true;
+  return Object.keys(ASK).some((t) => {
+    const r = S.req.get(askKey(num, t));
+    return askVisible(r) && r.state === "fail" && KEY_ERRORS.has(r.why) && !staleKeyFail(r);
+  });
+}
+
 async function ask(num, type) {
+  const isInfo = type === "info";
   const k = askKey(num, type);
   const prev = S.req.get(k);
   if (prev?.state === "wait") return;
+  const cool = isInfo ? INFO_COOLDOWN : ASK_COOLDOWN;
   const since = prev ? Date.now() - prev.t0 : Infinity;
-  if (since < ASK_COOLDOWN) return toast(`Espera ${Math.ceil((ASK_COOLDOWN - since) / 1000)} s antes de repetir, para no saturar la malla.`);
+  if (since < cool) return toast(`Espera ${Math.ceil((cool - since) / 1000)} s antes de repetir, para no saturar la malla.`);
   if (!canAsk()) return toast("Conecta el receptor para pedir datos.");
-  const r = { num, type, state: "wait", t0: Date.now(), tDone: 0, why: null, timer: null };
+  if (isInfo && !S.demo && !S.myUser) return toast("Espera a que el receptor termine de cargar sus datos.");
+  const r = { num, type, state: "wait", t0: Date.now(), tDone: 0, why: null, timer: null, acked: false };
   S.req.set(k, r);
   r.timer = setTimeout(() => finishAsk(r, "fail", "timeout"), ASK_TIMEOUT);
   refreshAsk(num);
   if (S.demo) return demoAsk(r);
   try {
-    await receptor.requestTelemetry(num, ASK[type].field, S.nodes.get(num)?.channel || 0);
-    // Acuse sin datos todavía: seguimos esperando la telemetría.
+    const ch = S.nodes.get(num)?.channel || 0;
+    const id = await (isInfo
+      ? receptor.requestNodeInfo(num, encodeUser(S.myUser), ch)
+      : receptor.requestTelemetry(num, ASK[type].field, ch));
+    // Acuse sin respuesta todavía: seguimos esperando. Solo cuenta si lo manda el propio nodo.
+    if (r.state === "wait" && ackFrom.get(id) === num) { r.acked = true; patchAskStatus(num); }
   } catch (e) {
     const code = e && typeof e === "object" && "error" in e ? e.error : "send";
     // La librería no cuenta la respuesta como acuse y da TIMEOUT a los 60 s: manda nuestro temporizador.
@@ -314,8 +354,12 @@ function finishAsk(r, state, why = null) {
   if (r.state !== "wait" && !lateOk) return;
   clearTimeout(r.timer);
   Object.assign(r, { state, why, tDone: Date.now() });
-  const what = `${nodeName(r.num)} · ${ASK[r.type].label}`;
-  addLog("info", state === "ok" ? `${what}: datos recibidos a petición${lateOk ? " (tarde)" : ""}` : `${what}: ${askFailText(why)}`, r.num);
+  const what = `${nodeName(r.num)} · ${ASK_ALL[r.type].label}`;
+  let msg;
+  if (state !== "ok") msg = `${what}: ${askFailText(why, r)}`;
+  else if (r.type === "info") msg = `${what}: recibida${r.gotKey ? ", clave guardada" : ", el nodo no tiene clave"}`;
+  else msg = `${what}: datos recibidos a petición${lateOk ? " (tarde)" : ""}`;
+  addLog("info", msg, r.num);
   refreshAsk(r.num);
   render();
 }
@@ -325,7 +369,12 @@ function demoAsk(r) {
   const res = S.demoData.reply(r.num, r.type);
   setTimeout(() => {
     if (!S.demo || token !== S.demoToken) return;
-    if (res.error) return finishAsk(r, "fail", RE[res.error]);
+    if (res.error) return finishAsk(r, "fail", typeof res.error === "number" ? res.error : RE[res.error]);
+    if (r.type === "info") {
+      node(r.num).key = true;
+      r.gotKey = true;
+      return finishAsk(r, "ok");
+    }
     finishAsk(r, "ok");
     ingest(r.num, res.metrics, Date.now(), { kind: ASK[r.type].variant });
   }, res.delay);
@@ -335,28 +384,45 @@ function askChips(num) {
   const ok = canAsk();
   return Object.entries(ASK).map(([type, a]) => {
     const r = S.req.get(askKey(num, type));
-    const st = askVisible(r) ? r.state : "";
+    const st = askVisible(r) && !staleKeyFail(r) ? r.state : "";
     return `<button type="button" class="ask-b${st ? ` is-${st}` : ""}" data-ask="${type}" data-num="${num}" title="${esc(a.what)}"${!ok || st === "wait" ? " disabled" : ""}>${a.label}</button>`;
   }).join("");
 }
 function askStatus(num) {
-  return Object.keys(ASK).map((type) => S.req.get(askKey(num, type))).filter(askVisible).sort((a, b) => b.t0 - a.t0).map((r) => {
-    const l = ASK[r.type].label;
-    if (r.state === "wait") return `<span class="s-wait">${l}: esperando respuesta… ${Math.round((Date.now() - r.t0) / 1000)} s</span>`;
+  return Object.keys(ASK_ALL).map((type) => S.req.get(askKey(num, type))).filter((r) => askVisible(r) && !staleKeyFail(r)).sort((a, b) => b.t0 - a.t0).map((r) => {
+    const l = ASK_ALL[r.type].label;
+    const secs = Math.round((Date.now() - r.t0) / 1000);
+    if (r.state === "wait") return `<span class="s-wait">${l}: ${r.acked ? "la petición llegó, esperando respuesta" : "esperando respuesta"}… ${secs} s</span>`;
+    if (r.state === "ok" && r.type === "info") return `<span class="s-ok">${l}: recibida a las ${hhmm.format(new Date(r.tDone))}${r.gotKey ? ", clave guardada" : ", pero ese nodo no tiene clave (firmware anterior a 2.5)"}</span>`;
     if (r.state === "ok") return `<span class="s-ok">${l}: recibido a las ${hhmm.format(new Date(r.tDone))}, tardó ${Math.max(1, Math.round((r.tDone - r.t0) / 1000))} s</span>`;
-    return `<span class="s-fail">${l}: ${esc(askFailText(r.why))}</span>`;
+    return `<span class="s-fail">${l}: ${esc(askFailText(r.why, r))}</span>`;
   }).join("");
 }
-function askBlock(num) {
-  return `<span class="ask-l">Pedir datos ahora</span><div class="ask-row">${askChips(num)}</div><p class="ask-st" data-ask-st="${num}">${askStatus(num)}</p>`;
+function keyRow(num, sheet) {
+  if (num === S.myNode && !S.demo) return "";
+  const need = keyNeeded(num);
+  if (!sheet && !need) return "";
+  const n = S.nodes.get(num);
+  const r = S.req.get(askKey(num, "info"));
+  const waiting = r?.state === "wait";
+  const txt = need ? "Tu receptor no tiene la clave de este nodo y no le puede pedir datos."
+    : n?.key ? "Tu receptor tiene la clave de este nodo."
+    : "La ficha trae el nombre y la clave del nodo.";
+  return `<div class="key-row${need ? " need" : ""}"><span>${txt}</span><button type="button" class="btn ghost sm" data-ask="info" data-num="${num}"${!canAsk() || waiting ? " disabled" : ""}>${waiting ? "Pidiendo ficha…" : "Pedir ficha del nodo"}</button></div>`;
+}
+function askBlock(num, sheet = false) {
+  return `<span class="ask-l">Pedir datos ahora</span><div class="ask-row">${askChips(num)}</div>${keyRow(num, sheet)}<p class="ask-st" data-ask-st="${num}">${askStatus(num)}</p>`;
 }
 function refreshAsk(num) {
-  for (const el of $$(`[data-ask-box="${num}"]`)) el.innerHTML = askBlock(num);
+  for (const el of $$(`[data-ask-box="${num}"]`)) el.innerHTML = askBlock(num, el.dataset.sheet === "1");
+}
+function patchAskStatus(num) {
+  for (const el of $$(`[data-ask-st="${num}"]`)) el.innerHTML = askStatus(num);
 }
 // Solo se reescribe el texto de estado cada segundo, para no robar toques a los botones.
 setInterval(() => {
   const waiting = new Set([...S.req.values()].filter((r) => r.state === "wait").map((r) => r.num));
-  for (const num of waiting) for (const el of $$(`[data-ask-st="${num}"]`)) el.innerHTML = askStatus(num);
+  for (const num of waiting) patchAskStatus(num);
 }, 1000);
 
 function resetAsks() {
@@ -675,8 +741,8 @@ function renderMesh() {
     el.innerHTML = `<li class="empty-row">${S.demo || S.link.state === "ready" ? "No hay más nodos en la base de datos del receptor." : "Conecta el receptor para ver los nodos que oye."}</li>`;
   } else {
     el.innerHTML = shown.map((n) => {
-      const tags = [n.num === S.myNode ? "receptor" : "", n.hasEnv ? "sensores" : ""].filter(Boolean);
-      return `<li class="row"><button class="row-main" data-open="${n.num}"><span class="tag sm">${esc(n.short)}</span><span class="row-t"><span class="row-n">${esc(n.long)}${tags.map((t) => `<span class="chip">${t}</span>`).join("")}</span><span class="meta">${esc(metaLine(n))}</span></span></button><button class="btn ghost" data-watch="${n.num}">Vigilar</button></li>`;
+      const tags = [n.num === S.myNode ? "receptor" : "", n.hasEnv ? "sensores" : "", n.num !== S.myNode && n.key === false && receptorUsesPki() ? "sin clave" : ""].filter(Boolean);
+      return `<li class="row"><button class="row-main" data-open="${n.num}"><span class="tag sm">${esc(n.short)}</span><span class="row-t"><span class="row-n">${esc(n.long)}${tags.map((t) => `<span class="chip${t === "sin clave" ? " warn" : ""}">${t}</span>`).join("")}</span><span class="meta">${esc(metaLine(n))}</span></span></button><button class="btn ghost" data-watch="${n.num}">Vigilar</button></li>`;
     }).join("");
   }
   const more = $("#meshMore");
@@ -716,7 +782,7 @@ function renderDetail() {
   const w = S.cfg.watched[num];
   const keys = sortMetrics(new Set([...Object.keys(n.metrics), ...Object.keys(w?.rules || {})]));
   const tags = [hexId(num), n.hw ? n.hw.replaceAll("_", " ") : "", n.num === S.myNode ? "tu receptor" : ""].filter(Boolean).join(" · ");
-  let body = `<section class="blk"><h3>Pedir datos ahora</h3><div class="ask in-sheet" data-ask-box="${num}">${askBlock(num)}</div>
+  let body = `<section class="blk"><h3>Pedir datos ahora</h3><div class="ask in-sheet" data-ask-box="${num}" data-sheet="1">${askBlock(num, true)}</div>
     <p class="hint">La petición sale por LoRa desde tu receptor y el nodo contesta con una lectura recién tomada. Si está dormido para ahorrar batería o fuera de alcance, no contesta.</p></section>`;
   if (w) {
     const off = isNum(w.offlineMin) ? w.offlineMin : S.settings.defaultOfflineMin;
@@ -944,6 +1010,7 @@ function makeReceptor() {
     onNodeInfo(ni) {
       const n = node(ni.num);
       if (ni.user) setUser(n, ni.user);
+      if (ni.user && ni.num === S.myNode) S.myUser = pickUser(ni.user);
       const lh = ni.lastHeard ? ni.lastHeard * 1000 : 0;
       touch(ni.num, lh);
       if (isNum(ni.hopsAway)) n.hops = ni.hopsAway;
@@ -962,13 +1029,28 @@ function makeReceptor() {
       saveNodes();
       render();
     },
-    onUser(from, user) { setUser(node(from), user); saveNodes(); render(); },
+    onUser(from, user, meta) {
+      const n = node(from);
+      setUser(n, user);
+      if (from === S.myNode) S.myUser = pickUser(user);
+      // Un paquete en vivo (no la copia de la base de datos del receptor) responde a «Pedir ficha».
+      const live = meta && meta.to !== meta.from;
+      const r = S.req.get(askKey(from, "info"));
+      if (live && r && Date.now() - r.t0 < 5 * MIN) { r.gotKey = user.publicKey?.length === 32; finishAsk(r, "ok"); }
+      saveNodes();
+      render();
+    },
     onPacket(p) {
       const rx = p.rxTime ? p.rxTime * 1000 : 0;
       touch(p.from, validT(rx) ? rx : Date.now());
       const n = node(p.from);
       if (p.hopStart > 0 && isNum(p.hopLimit)) n.hops = Math.max(0, p.hopStart - p.hopLimit);
       if (isNum(p.rxSnr) && p.rxSnr !== 0) n.snr = p.rxSnr;
+      const dec = p.payloadVariant?.case === "decoded" ? p.payloadVariant.value : null;
+      if (dec && dec.portnum === Protobuf.Portnums.PortNum.ROUTING_APP && dec.requestId) {
+        ackFrom.set(dec.requestId, p.from);
+        if (ackFrom.size > 200) ackFrom.delete(ackFrom.keys().next().value);
+      }
       // Canal por el que emite el nodo, para pedirle datos por el mismo.
       if (p.to === 0xffffffff && isNum(p.channel) && p.channel < 8) n.channel = p.channel;
       saveNodes();
@@ -995,6 +1077,11 @@ function setUser(n, u) {
   if (u.longName) n.long = u.longName;
   if (u.shortName) n.short = u.shortName;
   if (typeof u.hwModel === "number" && u.hwModel > 0) n.hw = Protobuf.Mesh.HardwareModel?.[u.hwModel] || n.hw;
+  if (u.publicKey) n.key = u.publicKey.length === 32;
+}
+function pickUser(u) {
+  const { id, longName, shortName, macaddr, hwModel, isLicensed, role, publicKey, isUnmessagable } = u;
+  return { id, longName, shortName, macaddr, hwModel, isLicensed, role, publicKey, isUnmessagable };
 }
 
 function btErrorText(e) {

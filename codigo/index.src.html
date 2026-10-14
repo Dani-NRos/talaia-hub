@@ -171,6 +171,12 @@ button { font: inherit; color: inherit; }
 .ask-b.is-ok::before, .ask-b.is-fail::before { content: ""; width: 7px; height: 7px; border-radius: 50%; }
 .ask-b.is-ok::before { background: var(--ok); }
 .ask-b.is-fail::before { background: var(--warn); }
+.key-row { display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: 6px 10px; font-size: 13px; color: var(--ink-2); }
+.key-row span { flex: 1 1 180px; min-width: 0; }
+.key-row.need { color: var(--warn); font-weight: 600; padding: 8px 10px; border-radius: 10px; background: color-mix(in oklab, var(--warn) 10%, transparent); border: 1px solid color-mix(in oklab, var(--warn) 40%, var(--line)); }
+.btn.sm { min-height: 34px; padding: 0 12px; font-size: 13px; }
+.btn:disabled { opacity: .5; cursor: not-allowed; }
+.chip.warn { color: var(--warn); border-color: color-mix(in oklab, var(--warn) 50%, transparent); }
 .ask-st { display: grid; gap: 3px; font: 400 12px/1.35 var(--f-mono); color: var(--ink-2); }
 .ask-st:empty { display: none; }
 .ask-st .s-wait { color: var(--accent); }

@@ -12,6 +12,7 @@ Panel de telemetría y alarmas para nodos [Meshtastic](https://meshtastic.org) q
   - un nodo lleva más de X minutos sin dar señal;
   - el receptor se desconecta (la app reintenta la conexión sola).
 - **Pedir datos ahora.** Pide a un nodo una lectura en el momento: ambiente, batería, calidad del aire o energía (INA). Si el nodo no tiene ese sensor o no le llega la petición, la app lo dice.
+- **Pedir ficha del nodo.** Desde el firmware 2.5, el receptor solo manda peticiones a nodos de los que tiene la clave pública (si no, da el error 39). Este botón pide al nodo su ficha (nombre y clave) y de paso le envía la del receptor. Un nodo no repite su ficha si ya te la mandó en las últimas horas.
 - **Histórico en el propio móvil.** Gráficas de 24 h y 7 días, y exportación a CSV.
 - **Modo demostración** con nodos inventados, para probarla sin hardware.
 
