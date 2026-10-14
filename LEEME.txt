@@ -26,6 +26,11 @@ USO
 - Vigilar: toca "Vigilar" en un nodo de "Resto de la malla". Pasa arriba.
 - Toca la tarjeta para poner límites mínimo/máximo por métrica y los minutos
   sin señal que disparan la alarma.
+- Pedir ahora (en cada tarjeta y en la ficha): pide al nodo una lectura en el
+  momento. Ambiente = temperatura/humedad/presión, Batería = batería y tensión,
+  Aire = CO₂ y partículas, Energía = canales INA. Si el nodo no tiene ese
+  sensor, lo dice. Si no llega, el receptor reintenta y avisa. Para no saturar
+  la malla, cada tipo se puede repetir a los 30 s como pronto.
 - Ajustes > Mantener la pantalla encendida: para dejar el móvil enchufado
   como panel fijo.
 - Ajustes > Exportar CSV: todo el histórico, separado por punto y coma.

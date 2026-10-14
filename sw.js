@@ -1,5 +1,5 @@
 // Vigía Mesh: guarda la app en el móvil para que abra sin internet.
-const CACHE = "vigia-mv7yd8pr";
+const CACHE = "vigia-mv8ais5w";
 const SHELL = ["./", "./index.html", "./manifest.webmanifest", "./icon-192.png", "./icon-512.png", "./icon-maskable-512.png"];
 
 self.addEventListener("install", (e) => {
