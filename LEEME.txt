@@ -1,0 +1,47 @@
+VIGÍA MESH
+Panel de telemetría y alarmas para nodos Meshtastic. El móvil se conecta por
+Bluetooth al nodo receptor; los sensores le llegan por LoRa. No usa internet.
+
+QUÉ NECESITAS
+- Un móvil Android con Chrome (o Chrome/Edge en el ordenador). En iPhone no
+  funciona: Safari no tiene Bluetooth web.
+- Un nodo receptor con Bluetooth activado y en el mismo canal que los sensores.
+- Que ningún otro móvil (la app oficial de Meshtastic) esté conectado al
+  receptor a la vez: el nodo solo acepta un cliente Bluetooth.
+
+PONERLA EN EL MÓVIL (solo la primera vez necesita internet)
+Chrome solo permite Bluetooth en páginas https, así que hay que alojar esta
+carpeta una vez. Lo más sencillo, gratis, es GitHub Pages:
+  1. Crea un repositorio público en GitHub, por ejemplo "vigia-mesh".
+  2. Sube todos los archivos de esta carpeta (Add file > Upload files).
+  3. Settings > Pages > Branch: main / (root) > Save.
+  4. Al minuto tendrás https://TU-USUARIO.github.io/vigia-mesh/
+  5. Ábrela en Chrome del móvil > menú ⋮ > Instalar aplicación.
+Desde ese momento abre sin internet. Si cambias los archivos, se actualiza la
+próxima vez que la abras con conexión.
+
+USO
+- Conectar receptor: elige tu nodo en la lista de Chrome. Si no sale, en
+  Ajustes usa "Mi nodo no aparece" (enseña todos los dispositivos).
+- Vigilar: toca "Vigilar" en un nodo de "Resto de la malla". Pasa arriba.
+- Toca la tarjeta para poner límites mínimo/máximo por métrica y los minutos
+  sin señal que disparan la alarma.
+- Ajustes > Mantener la pantalla encendida: para dejar el móvil enchufado
+  como panel fijo.
+- Ajustes > Exportar CSV: todo el histórico, separado por punto y coma.
+
+LÍMITES QUE CONVIENE CONOCER
+- Las alarmas solo saltan con la app abierta y en pantalla. Con el móvil
+  bloqueado o la app en segundo plano, Chrome congela la página. Al volver,
+  recoge los paquetes que el receptor haya guardado (su cola es pequeña) y
+  avisa de lo que pasó mientras tanto, marcado como "recibida al reconectar".
+- La telemetría sale cada 30 min por defecto. Una alarma de umbral puede
+  llegar con ese retraso. Bajar mucho el intervalo satura la malla y en
+  868 MHz hay límite legal de ocupación del canal.
+- Si el receptor se desconecta, la app reintenta sola y deja en pausa la
+  alarma de "nodo sin señal" (sin receptor no puede saberlo).
+
+LICENCIA
+Usa las librerías oficiales @meshtastic/core y transport-web-bluetooth, que
+son GPL-3.0. Para uso propio no cambia nada. Si algún día la distribuyes o la
+vendes, tienes que publicar el código fuente con la misma licencia.
