@@ -38,6 +38,16 @@ Todos los datos se quedan en el dispositivo. La app no envía nada a ningún ser
 3. **Pon los límites.** Toca la tarjeta para fijar mínimo y máximo por métrica y los minutos sin señal que disparan la alarma.
 4. **Para usarlo como panel fijo,** activa Ajustes → *Mantener la pantalla encendida* y deja el móvil enchufado.
 
+## Si no conecta
+
+La app reconoce el tipo de fallo y te dice qué hacer. Lo más habitual:
+
+- **La app de Meshtastic tiene el nodo ocupado.** En Android sigue conectada en segundo plano aunque no la abras, y el nodo solo admite un cliente Bluetooth. Ciérrala del todo o desconecta el nodo desde ella.
+- **Emparejamiento roto.** Si conecta y se corta enseguida, olvida el nodo en los ajustes de Bluetooth del móvil y vuelve a conectar; Android pedirá el PIN que sale en la pantalla del nodo (sin pantalla suele ser 123456). Pasa al actualizar el firmware o al emparejar el nodo con varios aparatos. Para un receptor fijo en casa, el modo «Sin PIN» lo evita del todo, a cambio de que cualquiera a pocos metros pueda conectarse a él.
+- **Otra ventana de Vigía.** Solo una ventana puede tener el receptor; la otra ofrece «Conectar aquí».
+
+En Ajustes → *Diagnóstico de conexión* queda apuntado cada paso. Si falla, cópialo: dice en qué paso se corta.
+
 ## Límites conocidos
 
 - **Solo en primer plano.** Las alarmas saltan con la app abierta y en pantalla; con el móvil bloqueado, Chrome congela la página. Al volver, la app recoge lo que guardó el receptor y marca como «recibida al reconectar» lo que pasó mientras tanto.
@@ -58,6 +68,6 @@ El resultado queda en `dist/app/`.
 
 ## Licencia
 
-GPL-3.0. Vigía Mesh usa las librerías oficiales [`@meshtastic/core`](https://www.npmjs.com/package/@meshtastic/core) y [`@meshtastic/transport-web-bluetooth`](https://www.npmjs.com/package/@meshtastic/transport-web-bluetooth), publicadas con licencia GPL-3.0, así que todo el proyecto se distribuye con la misma licencia. El texto completo está en [LICENSE](LICENSE).
+GPL-3.0. Vigía Mesh usa la librería oficial [`@meshtastic/core`](https://www.npmjs.com/package/@meshtastic/core), publicada con licencia GPL-3.0, así que todo el proyecto se distribuye con la misma licencia. La conexión Bluetooth es propia (`codigo/src/ble.js`): serializa las operaciones porque Android solo admite una a la vez. El texto completo está en [LICENSE](LICENSE).
 
 Meshtastic® es una marca registrada de Meshtastic LLC. Este proyecto es independiente y no está afiliado a Meshtastic.

@@ -60,6 +60,9 @@ const S = {
   settings: { ...DEFAULT_SETTINGS },
   nodes: new Map(),
   myNode: null,
+  trouble: null, // último fallo de conexión clasificado
+  otherWindow: null, // "busy" | "lost" si otra ventana de Vigía tiene el receptor
+  diag: [],
   link: { state: "idle", extra: null },
   device: null,
   active: new Map(),
@@ -662,7 +665,13 @@ async function applyWake() {
   renderFoot();
 }
 document.addEventListener("visibilitychange", () => {
-  if (document.visibilityState === "visible") { applyWake(); evalOffline(); render(); }
+  if (document.visibilityState === "visible") {
+    applyWake();
+    // Con la página congelada no corrían los temporizadores de reintento: se reintenta ya.
+    if (receptor && S.link.state === "reconnecting" && S.link.extra?.at) receptor.retryNow();
+    evalOffline();
+    render();
+  }
 });
 
 /* ───────────── gráficas ───────────── */
@@ -796,6 +805,7 @@ const ICON = {
   close: `<svg viewBox="0 0 24 24" aria-hidden="true"><path d="M6 6l12 12M18 6L6 18" stroke="currentColor" stroke-width="2" stroke-linecap="round"/></svg>`,
 };
 
+const STAGE_TEXT = { gatt: "Buscando el nodo…", service: "Abriendo canal…", notify: "Abriendo canal…" };
 const LINK_TEXT = {
   idle: "Conectar receptor",
   connecting: "Conectando…",
@@ -810,8 +820,11 @@ function renderTop() {
   b.dataset.state = st;
   let label = S.demo ? "Demo" : LINK_TEXT[st] || st;
   if (st === "ready" && S.myNode != null) label = `${S.nodes.get(S.myNode)?.short || "Receptor"} conectado`;
-  if (st === "reconnecting" && S.link.extra?.at) {
-    const s = Math.max(0, Math.round((S.link.extra.at - Date.now()) / 1000));
+  const ex = S.link.extra || {};
+  if ((st === "connecting" || st === "reconnecting") && ex.stage && !ex.at) label = STAGE_TEXT[ex.stage] || label;
+  if (st === "configuring" && ex.packets) label = `Leyendo el nodo · ${ex.packets}`;
+  if (st === "reconnecting" && ex.at) {
+    const s = Math.max(0, Math.round((ex.at - Date.now()) / 1000));
     label = s > 0 ? `Reintento en ${s} s` : "Reconectando…";
   }
   b.innerHTML = `<span class="ld"></span>${ICON.bt}<span class="lt">${esc(label)}</span>`;
@@ -839,13 +852,97 @@ function renderBoard() {
       : ["Ningún nodo vigilado todavía"];
     html += `<div class="board calm"><span class="calm-dot"></span><div><h2>${watchedN ? "Todo en orden" : "Elige qué vigilar"}</h2><p>${esc(parts.join(" · "))}</p></div></div>`;
   }
-  if (!S.demo && S.link.state !== "ready" && !S.active.has("link")) {
+  const tHTML = troubleHTML();
+  html += tHTML;
+  if (!S.demo && S.otherWindow) {
+    html += S.otherWindow === "lost"
+      ? `<div class="notice"><p>La conexión con el receptor ha pasado a otra ventana de Vigía.</p><button class="btn primary" data-takeover>Recuperarla aquí</button></div>`
+      : `<div class="notice"><p>Vigía ya está conectada al receptor en otra ventana o pestaña. El nodo solo admite una conexión: usa esa, o tráete la conexión aquí.</p><button class="btn primary" data-takeover>Conectar aquí</button></div>`;
+  } else if (!S.demo && !tHTML && S.link.state !== "ready" && !S.active.has("link")) {
     const msg = S.link.state === "idle"
       ? "Sin receptor conectado. Mientras tanto ves los últimos datos guardados y no puedo saber si un nodo deja de emitir."
       : "Esperando al receptor. Las alarmas de nodo sin señal están en pausa hasta que vuelva.";
     html += `<div class="notice"><p>${esc(msg)}</p>${S.link.state === "idle" ? `<button class="btn primary" data-connect>Conectar receptor</button>` : ""}</div>`;
   }
   el.innerHTML = html;
+}
+
+/* ───────────── guía cuando no conecta ───────────── */
+const TROUBLE = {
+  busy: {
+    title: "El nodo no responde",
+    lead: "No se pudo abrir la conexión. Lo normal es que otro móvil o la app de Meshtastic lo tenga ocupado, o que esté apagado o lejos.",
+    steps: [
+      "Cierra del todo la app de Meshtastic, o desconecta el nodo desde ella. En Android sigue conectada en segundo plano aunque no la abras, y el nodo solo admite un móvil.",
+      "Si lo has usado desde el ordenador, cierra allí la pestaña o la app que lo tenga conectado.",
+      "Comprueba que el nodo está encendido y a pocos metros.",
+      "Apaga y enciende el Bluetooth del móvil. Si sigue igual, reinicia el nodo.",
+    ],
+  },
+  pairing: {
+    title: "Problema de emparejamiento",
+    lead: "La conexión se abre pero se corta al empezar a hablar con el nodo. Casi siempre es que el móvil y el nodo ya no coinciden en el emparejamiento (pasa al actualizar el firmware o al emparejar el nodo con varios aparatos).",
+    steps: [
+      "En los ajustes de Bluetooth del móvil, olvida «{name}».",
+      "Vuelve aquí y pulsa Conectar receptor. Android te pedirá un PIN: sale en la pantalla del nodo (si no tiene pantalla, suele ser 123456).",
+      "Si te pasa a menudo y el receptor es fijo en casa, puedes poner su Bluetooth en «Sin PIN» desde la app de Meshtastic. Se acaba este problema, a cambio de que cualquiera a pocos metros pueda conectarse a él.",
+    ],
+  },
+  service: {
+    title: "Ese aparato no parece un nodo Meshtastic",
+    lead: "Se conecta, pero no encuentra el servicio de Meshtastic.",
+    steps: [
+      "Comprueba que has elegido el nodo correcto.",
+      "Si acabas de actualizar su firmware, olvídalo en los ajustes de Bluetooth del móvil: Android guarda la lista de servicios antigua.",
+      "Pulsa Conectar receptor y elígelo otra vez.",
+    ],
+  },
+  lost: {
+    title: "La conexión se corta",
+    lead: "Conecta, pero se corta antes de terminar de leer el nodo.",
+    steps: [
+      "Acerca el móvil al nodo.",
+      "Cierra la app de Meshtastic y cualquier otra que use el nodo.",
+      "Apaga y enciende el Bluetooth del móvil.",
+    ],
+  },
+};
+TROUBLE.other = TROUBLE.lost;
+
+function troubleHTML() {
+  const tr = S.trouble;
+  if (S.demo || !tr || S.otherWindow || S.link.state === "ready") return "";
+  const urgent = tr.kind === "pairing" || tr.kind === "service";
+  if (!urgent && tr.count < 2) return "";
+  const g = TROUBLE[tr.kind] || TROUBLE.other;
+  const name = tr.name || S.device?.name || "el nodo";
+  const steps = g.steps.map((x) => `<li>${esc(x.replace("{name}", name))}</li>`).join("");
+  const retry = S.link.state === "idle" ? `<button class="btn primary" data-connect>Conectar receptor</button>` : `<button class="btn primary" data-retry>Reintentar ahora</button>`;
+  return `<div class="trouble" role="status"><h2>${esc(g.title)}</h2><p>${esc(g.lead)} <span class="tr-n">${tr.count === 1 ? "1 intento" : `${tr.count} intentos seguidos`}.</span></p><ol>${steps}</ol><div class="btns">${retry}<button class="btn ghost" data-diag>Ver diagnóstico</button></div></div>`;
+}
+
+/* ───────────── diagnóstico de conexión ───────────── */
+const APP_VERSION = "1.4.0";
+let diagSaveT = null;
+function pushDiag(e) {
+  S.diag.push(e);
+  if (S.diag.length > 150) S.diag.splice(0, S.diag.length - 150);
+  clearTimeout(diagSaveT);
+  diagSaveT = setTimeout(() => LS.set("vigia.diag", S.diag), 800);
+  const el = $("#diagList");
+  if (el) el.textContent = diagLines(40);
+}
+const diagLine = (e) => `${new Date(e.t).toLocaleString("es-ES", { day: "2-digit", month: "2-digit", hour: "2-digit", minute: "2-digit", second: "2-digit" })}  ${e.msg}`;
+const diagLines = (n) => S.diag.slice(-n).map(diagLine).join("\n") || "Sin registros todavía.";
+function diagText() {
+  const head = [
+    `Vigía Mesh ${APP_VERSION}`,
+    navigator.userAgent,
+    `Receptor: ${S.device?.name || "—"} · estado: ${S.link.state}${S.trouble ? ` · último fallo: ${S.trouble.kind} (${S.trouble.count})` : ""}`,
+    `Bluetooth web: ${navigator.bluetooth ? "sí" : "no"} · getDevices: ${navigator.bluetooth?.getDevices ? "sí" : "no"} · forget: ${typeof BluetoothDevice !== "undefined" && BluetoothDevice.prototype?.forget ? "sí" : "no"} · locks: ${navigator.locks ? "sí" : "no"}`,
+    "",
+  ];
+  return head.join("\n") + S.diag.map(diagLine).join("\n");
 }
 
 function nodeState(num) {
@@ -1097,7 +1194,13 @@ function renderSettings() {
     rec = `<p>${esc(statusTxt)}</p><div class="btns">`;
     if (st === "idle") rec += `<button class="btn primary" data-connect>Conectar receptor</button><button class="btn ghost" data-connect-all>Mi nodo no aparece</button>`;
     else rec += `${st === "reconnecting" ? `<button class="btn primary" data-retry>Reintentar ahora</button>` : ""}<button class="btn ghost" data-disconnect>Desconectar</button>`;
-    rec += `</div><p class="hint">El receptor es el nodo que tienes al lado del móvil; los sensores le llegan por LoRa. El móvil se conecta a él por Bluetooth, sin internet.</p>`;
+    rec += `${dev && st === "idle" ? `<button class="btn danger-ghost" data-forget>Olvidar este receptor</button>` : ""}</div><p class="hint">El receptor es el nodo que tienes al lado del móvil; los sensores le llegan por LoRa. El móvil se conecta a él por Bluetooth, sin internet.</p>
+      <details class="tips"><summary>Si no conecta</summary><ul>
+        <li><strong>La app de Meshtastic lo tiene ocupado.</strong> En Android sigue conectada en segundo plano aunque no la abras. Ciérrala del todo o desconecta el nodo desde ella: el nodo solo admite un móvil.</li>
+        <li><strong>Emparejamiento roto.</strong> Si se conecta y se corta enseguida, olvida el nodo en los ajustes de Bluetooth del móvil y vuelve a conectar; te pedirá el PIN que sale en su pantalla.</li>
+        <li><strong>Otra ventana de Vigía.</strong> Si la tienes abierta en Chrome y también instalada, solo una puede conectarse.</li>
+        <li><strong>Bluetooth del móvil atascado.</strong> Apagarlo y encenderlo arregla muchos fallos raros de Android.</li>
+      </ul></details>`;
   }
   const notifState = !("Notification" in window) ? "none" : Notification.permission;
   const notif = notifState === "granted" ? `<span class="okt">Activadas</span>`
@@ -1118,6 +1221,11 @@ function renderSettings() {
       <div class="set-row"><span id="histCount">Contando lecturas…</span><select id="setRet" class="inp sel" aria-label="Tiempo que se guardan las lecturas">${[7, 30, 90, 365].map((d) => `<option value="${d}"${S.settings.retentionDays === d ? " selected" : ""}>Guardar ${d} días</option>`).join("")}</select></div>
       <div class="btns">${PREVIEW ? "" : `<button class="btn ghost" data-export>Exportar CSV</button>`}<button class="btn danger-ghost" data-wipe>Borrar histórico</button></div>
     </section>
+    ${PREVIEW ? "" : `<section class="blk" id="diagBox"><h3>Diagnóstico de conexión</h3>
+      <p class="hint">Cada paso de la conexión queda apuntado aquí. Si falla, copia el diagnóstico: dice en qué paso se corta.</p>
+      <pre class="diag" id="diagList">${esc(diagLines(40))}</pre>
+      <div class="btns"><button class="btn ghost" data-copy-diag>Copiar diagnóstico</button><button class="btn ghost" data-clear-diag>Borrar</button></div>
+    </section>`}
     <section class="blk"><h3>Demostración</h3>${S.demo ? `<p>Los datos que ves son inventados y no se guardan.</p>${PREVIEW ? "" : `<button class="btn ghost" data-demo-off>Salir de la demo</button>`}` : `<p>Prueba el panel con nodos inventados. Tus datos reales no se tocan.</p><button class="btn ghost" data-demo-on>Ver la demo</button>`}</section>
   </div>`;
   S.store.count().then((c) => { const el = $("#histCount"); if (el) el.textContent = `${c.toLocaleString("es-ES")} lecturas${S.demo ? " (demo)" : ""}`; });
@@ -1160,6 +1268,8 @@ function makeReceptor() {
       LS.set("vigia.device", S.device);
     },
     onReady() {
+      S.trouble = null;
+      S.otherWindow = null;
       LS.set("vigia.ever", true);
       clearAlarm("link", {});
       addLog("info", `Receptor listo: ${S.myNode != null ? nodeName(S.myNode) : S.device?.name || "nodo"}`);
@@ -1170,9 +1280,14 @@ function makeReceptor() {
       if (wasReady) raise("link", { kind: "link", num: null, t: Date.now() });
       evalOffline();
     },
-    onError(e) {
-      if (S.link.state === "connecting" && !receptor.everReady) toast(btErrorText(e));
+    onTrouble(info) {
+      S.trouble = info;
+      if (info.count === 1 && info.kind !== "pairing" && info.kind !== "service") toast("No se pudo conectar. Reintentando…");
+      render();
     },
+    onDiag(e) { pushDiag(e); },
+    onOtherWindow() { S.otherWindow = "busy"; render(); },
+    onLockLost() { S.otherWindow = "lost"; addLog("info", "La conexión con el receptor ha pasado a otra ventana"); render(); },
     onMyNode(num) {
       S.myNode = num;
       LS.set("vigia.my", num);
@@ -1376,7 +1491,7 @@ function toast(msg) {
 }
 
 /* ───────────── eventos ───────────── */
-let wipeArmed = 0, unwatchArmed = 0;
+let wipeArmed = 0, unwatchArmed = 0, forgetArmed = 0;
 document.addEventListener("click", async (ev) => {
   const t = ev.target.closest("a, button, [data-open], [data-close]");
   if (t?.tagName === "A") return; // enlaces (Abrir en mapa) van a lo suyo
@@ -1397,7 +1512,33 @@ document.addEventListener("click", async (ev) => {
   if ("connect" in ds) { $("#settings").open && $("#settings").close(); return connectFlow(false); }
   if ("connectAll" in ds) { $("#settings").close(); return connectFlow(true); }
   if ("retry" in ds) return receptor?.retryNow();
-  if ("disconnect" in ds) { await receptor?.disconnect(); addLog("info", "Receptor desconectado a mano"); clearAlarm("link", { silent: true }); render(); return; }
+  if ("takeover" in ds) {
+    if (!receptor) receptor = makeReceptor();
+    if (!receptor.device) { S.otherWindow = null; render(); return connectFlow(false); }
+    if (!(await receptor.takeOver())) return toast("No se pudo tomar la conexión. Cierra la otra ventana de Vigía.");
+    S.otherWindow = null;
+    return render();
+  }
+  if ("diag" in ds) { openSettings(); setTimeout(() => $("#diagBox")?.scrollIntoView({ block: "start" }), 50); return; }
+  if ("copyDiag" in ds) {
+    const txt = diagText();
+    try { await navigator.clipboard.writeText(txt); toast("Diagnóstico copiado"); }
+    catch { const r = document.createRange(); const el = $("#diagList"); if (el) { el.textContent = txt; r.selectNodeContents(el); const sel = getSelection(); sel.removeAllRanges(); sel.addRange(r); } toast("Selecciona y copia el texto del diagnóstico"); }
+    return;
+  }
+  if ("clearDiag" in ds) { S.diag = []; LS.del("vigia.diag"); const el = $("#diagList"); if (el) el.textContent = diagLines(40); return; }
+  if ("forget" in ds) {
+    if (Date.now() - forgetArmed > 4000) { forgetArmed = Date.now(); t.textContent = "Toca otra vez para olvidarlo"; return; }
+    forgetArmed = 0;
+    await receptor?.forget();
+    LS.del("vigia.device");
+    S.device = null;
+    S.trouble = null;
+    renderSettings();
+    render();
+    return toast("Receptor olvidado. Al conectar podrás elegir otro.");
+  }
+  if ("disconnect" in ds) { await receptor?.disconnect(); S.trouble = null; addLog("info", "Receptor desconectado a mano"); clearAlarm("link", { silent: true }); render(); return; }
   if ("demoOn" in ds) { $("#settings").close(); startDemo(); return toast("Demo activada: datos inventados"); }
   if ("demoOff" in ds) { $("#settings").open && $("#settings").close(); if (PREVIEW) return toast(btSupportMsg()); stopDemo(); return connectFlow(false); }
   if ("notif" in ds) { try { await Notification.requestPermission(); } catch { /* nada */ } renderSettings(); return; }
@@ -1459,6 +1600,7 @@ window.addEventListener("resize", () => { clearTimeout(liveT); liveT = setTimeou
 /* ───────────── arranque ───────────── */
 async function boot() {
   S.settings = { ...DEFAULT_SETTINGS, ...LS.get("vigia.settings", {}) };
+  S.diag = LS.get("vigia.diag", []) || [];
   loadReal();
   const ever = LS.get("vigia.ever", false);
   if (!ever && S.nodes.size === 0) {

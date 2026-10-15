@@ -1,24 +1,33 @@
-// Conexión Bluetooth con el nodo receptor Meshtastic y reconexión automática.
+// Conexión Bluetooth con el nodo receptor Meshtastic, reconexión automática y diagnóstico.
 import { MeshDevice, Types, Protobuf } from "@meshtastic/core";
-import { TransportWebBluetooth } from "@meshtastic/transport-web-bluetooth";
+import { BleLink, BleError, SERVICE, classify } from "./ble.js";
 
-const SERVICE = TransportWebBluetooth.ServiceUuid;
 const ST = Types.DeviceStatusEnum;
 const BACKOFF_S = [2, 5, 10, 20, 30, 60];
+const LOCK = "vigia-receptor";
+const TT = (typeof window !== "undefined" && window.__VIGIA_BLE_TIMEOUTS) || {};
+const CFG_IDLE_MS = TT.config || 30000; // sin ningún paquete durante la lectura inicial
+const CFG_MAX_MS = 180000; // lectura inicial completa, aunque lleguen paquetes
 
 export class Receptor {
-  /** h: { onStatus, onDevice, onReady, onLost, onError, onMyNode, onNodeInfo, onUser, onTelemetry, onPacket } */
+  /**
+   * h: { onStatus(state, extra), onDevice, onReady, onLost(reason, wasReady), onTrouble({kind,count,err,name}),
+   *      onDiag(entry), onOtherWindow(), onLockLost(), onMyNode, onNodeInfo, onUser, onTelemetry, onPosition, onPacket }
+   */
   constructor(h) {
     this.h = h;
     this.device = null;
     this.mesh = null;
+    this.link = null;
     this.state = "idle";
     this.userClosed = true;
     this.everReady = false;
     this.retry = 0;
+    this.fails = 0;
+    this.lastKind = null;
     this.timer = null;
     this.cfgTimer = null;
-    this.onGattDisc = () => this._lost("gatt");
+    this.lockRelease = null;
   }
 
   /** Estado del Bluetooth web en este navegador. */
@@ -28,14 +37,45 @@ export class Receptor {
     return "ok";
   }
 
+  diag(msg, extra = {}) { this.h.onDiag?.({ t: Date.now(), msg, ...extra }); }
+
+  /* ── una sola ventana conectada al receptor ── */
+  acquireLock(steal = false) {
+    if (this.lockRelease) return Promise.resolve(true);
+    if (!navigator.locks?.request) return Promise.resolve(true);
+    return new Promise((resolve) => {
+      navigator.locks.request(LOCK, steal ? { steal: true } : { ifAvailable: true }, (lock) => {
+        if (!lock) { resolve(false); return undefined; }
+        resolve(true);
+        return new Promise((release) => { this.lockRelease = release; });
+      }).catch(() => {
+        // Otra ventana ha tomado el receptor (steal): soltamos aquí.
+        if (this.lockRelease) {
+          this.lockRelease = null;
+          this.diag("Otra ventana de Vigía ha tomado el receptor");
+          this.disconnect();
+          this.h.onLockLost?.();
+        }
+        resolve(false);
+      });
+    });
+  }
+  releaseLock() {
+    const r = this.lockRelease;
+    this.lockRelease = null;
+    r?.();
+  }
+
   /** Abre el selector de Chrome. all=true enseña todos los dispositivos, no solo los que anuncian Meshtastic. */
   async pick(all = false) {
     const opts = all
       ? { acceptAllDevices: true, optionalServices: [SERVICE] }
       : { filters: [{ services: [SERVICE] }], optionalServices: [SERVICE] };
-    const dev = await navigator.bluetooth.requestDevice(opts);
+    const dev = await navigator.bluetooth.requestDevice(opts); // primero, mientras dura el gesto del usuario
     this._adopt(dev);
-    await this.connect();
+    if (!(await this.acquireLock())) { this.userClosed = true; this._status("idle"); this.h.onOtherWindow?.(); return "locked"; }
+    this.connect();
+    return "ok";
   }
 
   /** Reconecta sin selector a un dispositivo ya autorizado (si el navegador lo permite). */
@@ -46,16 +86,28 @@ export class Receptor {
     const dev = list.find((d) => d.id === id);
     if (!dev) return false;
     this._adopt(dev);
+    if (!(await this.acquireLock())) { this.userClosed = true; this._status("idle"); this.h.onOtherWindow?.(); return false; }
+    this.diag("Reconectando al receptor guardado");
+    this.connect();
+    return true;
+  }
+
+  /** Quita el receptor a otra ventana de Vigía y conecta aquí. */
+  async takeOver() {
+    if (!this.device) return false;
+    if (!(await this.acquireLock(true))) return false;
+    this.userClosed = false;
+    this.retry = 0;
     this.connect();
     return true;
   }
 
   _adopt(dev) {
-    if (this.device && this.device !== dev) this.device.removeEventListener("gattserverdisconnected", this.onGattDisc);
     this.device = dev;
-    dev.addEventListener("gattserverdisconnected", this.onGattDisc);
     this.userClosed = false;
     this.retry = 0;
+    this.fails = 0;
+    this.lastKind = null;
     this.h.onDevice?.(dev);
   }
 
@@ -63,22 +115,53 @@ export class Receptor {
     if (!this.device || this.userClosed) return;
     clearTimeout(this.timer);
     this.timer = null;
-    this._status(this.everReady ? "reconnecting" : "connecting");
+    this._closeLink(); // restos del intento anterior, siempre antes de reintentar
+    this._status(this.everReady ? "reconnecting" : "connecting", { stage: "gatt" });
+    const link = new BleLink(this.device, {
+      log: (m) => this.diag(m),
+      onStage: (stage) => { if (link === this.link) this._status(this.state, { stage }); },
+      onFail: (err) => { if (link === this.link) this._fail(err); },
+      onPacket: () => { if (link === this.link && this.state === "configuring") this._cfgProgress(); },
+    });
+    this.link = link;
     try {
-      const transport = await TransportWebBluetooth.createFromDevice(this.device);
-      if (this.userClosed) { this._dropGatt(); return; }
-      const mesh = new MeshDevice(transport);
-      try { mesh.log.settings.type = "hidden"; mesh.log.settings.minLevel = 6; } catch { /* logger distinto */ }
-      this.mesh = mesh;
-      this._wire(mesh);
-      this._status("configuring");
-      mesh.configure().catch(() => {});
-      clearTimeout(this.cfgTimer);
-      this.cfgTimer = setTimeout(() => { if (this.state !== "ready") this._lost("timeout"); }, 45000);
-    } catch (e) {
-      if (this.userClosed) return;
-      this.h.onError?.(e);
-      this._schedule();
+      await link.open();
+    } catch (err) {
+      if (link === this.link && !this.userClosed) this._fail(err);
+      return;
+    }
+    if (link !== this.link || this.userClosed) { link.disconnect(); return; }
+
+    const mesh = new MeshDevice(link);
+    try { mesh.log.settings.type = "hidden"; mesh.log.settings.minLevel = 6; } catch { /* logger distinto */ }
+    this.mesh = mesh;
+    this._wire(mesh);
+    this.cfgPackets = 0;
+    this.cfgStart = Date.now();
+    this.cfgShown = 0;
+    this._status("configuring", { stage: "config", packets: 0 });
+    // Solo ahora, con los avisos ya activos, se pide la configuración (antes chocaban en Android).
+    mesh.configure().catch(() => {});
+    this._armCfgWatchdog();
+  }
+
+  _armCfgWatchdog() {
+    clearTimeout(this.cfgTimer);
+    this.cfgTimer = setTimeout(() => {
+      if (this.state === "configuring") this._fail(new BleError("config", null, `el nodo dejó de mandar datos durante la lectura inicial (${this.cfgPackets} paquetes)`));
+    }, CFG_IDLE_MS);
+  }
+
+  _cfgProgress() {
+    this.cfgPackets++;
+    if (Date.now() - this.cfgStart > CFG_MAX_MS) {
+      this._fail(new BleError("config", null, "la lectura inicial tarda demasiado"));
+      return;
+    }
+    this._armCfgWatchdog();
+    if (Date.now() - this.cfgShown > 250) {
+      this.cfgShown = Date.now();
+      this._status("configuring", { stage: "config", packets: this.cfgPackets });
     }
   }
 
@@ -86,16 +169,15 @@ export class Receptor {
     const ev = mesh.events;
     const mine = () => mesh === this.mesh;
     ev.onDeviceStatus.subscribe((s) => {
-      if (!mine()) return;
-      if (s === ST.DeviceConfigured) {
-        clearTimeout(this.cfgTimer);
-        this.retry = 0;
-        this.everReady = true;
-        this._status("ready");
-        this.h.onReady?.();
-      } else if (s === ST.DeviceDisconnected) {
-        this._lost("status");
-      }
+      if (!mine() || s !== ST.DeviceConfigured) return;
+      clearTimeout(this.cfgTimer);
+      this.retry = 0;
+      this.fails = 0;
+      this.lastKind = null;
+      this.everReady = true;
+      this.diag(`Receptor listo: ${this.cfgPackets} paquetes en ${((Date.now() - this.cfgStart) / 1000).toFixed(1)} s`);
+      this._status("ready");
+      this.h.onReady?.();
     });
     ev.onMyNodeInfo.subscribe((i) => mine() && this.h.onMyNode?.(i.myNodeNum));
     ev.onNodeInfoPacket.subscribe((n) => mine() && this.h.onNodeInfo?.(n));
@@ -105,22 +187,36 @@ export class Receptor {
     ev.onMeshPacket.subscribe((p) => mine() && this.h.onPacket?.(p));
   }
 
-  _dropGatt() {
-    try { if (this.device && this.device.gatt && this.device.gatt.connected) this.device.gatt.disconnect(); } catch { /* ya cerrado */ }
+  _closeLink() {
+    const l = this.link;
+    this.link = null;
+    if (l) l.disconnect();
   }
 
-  _lost(reason) {
+  _fail(err) {
     if (this.userClosed || this.timer) return;
     clearTimeout(this.cfgTimer);
     const wasReady = this.state === "ready";
+    const kind = wasReady ? "lost" : classify(err);
     this.mesh = null;
-    this._dropGatt();
-    this.h.onLost?.(reason, wasReady);
-    this._schedule();
+    this._closeLink();
+    const detail = `${err.causeName || ""} ${err.message || ""}`.trim();
+    this.diag(`Fallo en fase «${err.stage}» (${kind}): ${detail}`, { kind, stage: err.stage });
+    if (wasReady) {
+      this.fails = 0;
+      this.h.onLost?.(err.stage, true);
+    } else {
+      this.fails = this.lastKind === kind ? this.fails + 1 : 1;
+      this.lastKind = kind;
+      this.h.onTrouble?.({ kind, count: this.fails, detail, name: this.device?.name || "" });
+    }
+    this._schedule(kind);
   }
 
-  _schedule() {
-    const s = BACKOFF_S[Math.min(this.retry, BACKOFF_S.length - 1)];
+  _schedule(kind) {
+    // Un emparejamiento roto no se arregla reintentando: se espacian más los intentos.
+    const base = BACKOFF_S[Math.min(this.retry, BACKOFF_S.length - 1)];
+    const s = kind === "pairing" ? Math.max(base, 30) : base;
     this.retry++;
     clearTimeout(this.timer);
     this.timer = setTimeout(() => { this.timer = null; this.connect(); }, s * 1000);
@@ -170,16 +266,26 @@ export class Receptor {
     this.connect();
   }
 
+  /** Última vez que llegó algo del receptor (ms), para el diagnóstico. */
+  get lastRx() { return this.link?.lastRx || 0; }
+
   async disconnect() {
     this.userClosed = true;
     clearTimeout(this.timer);
     clearTimeout(this.cfgTimer);
     this.timer = null;
-    const m = this.mesh;
     this.mesh = null;
-    try { await m?.disconnect(); } catch { /* ya cerrado */ }
-    this._dropGatt();
+    this._closeLink();
+    this.releaseLock();
     this._status("idle");
+  }
+
+  /** Olvida el receptor en este navegador (no borra el emparejamiento del sistema). */
+  async forget() {
+    const d = this.device;
+    await this.disconnect();
+    try { await d?.forget?.(); } catch { /* sin soporte */ }
+    this.device = null;
   }
 
   _status(s, extra) {

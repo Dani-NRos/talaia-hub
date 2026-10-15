@@ -40,6 +40,13 @@ const num = (x) => typeof x === "number" && Number.isFinite(x);
 
 /** Saca las métricas numéricas de un paquete Telemetry (protobuf ya decodificado). */
 export function extractMetrics(tel) {
+  const out = raw(tel);
+  // Los float32 del protobuf llegan como 21.700000762939453: se redondean para guardar y exportar limpio.
+  for (const k of Object.keys(out)) out[k] = Math.round(out[k] * 1e4) / 1e4;
+  return out;
+}
+
+function raw(tel) {
   const out = {};
   const v = tel && tel.variant;
   if (!v || !v.value) return out;

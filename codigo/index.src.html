@@ -100,6 +100,17 @@ button { font: inherit; color: inherit; }
 .notice { display: flex; flex-wrap: wrap; align-items: center; gap: 10px 14px; padding: 12px 14px; border-radius: 12px; border: 1px dashed var(--line); background: var(--surface); }
 .notice p { flex: 1 1 240px; font-size: 14px; color: var(--ink-2); }
 
+/* guía cuando no conecta */
+.trouble { display: grid; gap: 10px; padding: 14px 16px; border-radius: var(--r); background: color-mix(in oklab, var(--warn) 9%, var(--surface)); border: 1px solid color-mix(in oklab, var(--warn) 50%, var(--line)); }
+.trouble h2 { font: 700 20px/1.15 var(--f-display); text-transform: uppercase; letter-spacing: .03em; color: var(--warn); }
+.trouble p { font-size: 14px; max-width: 70ch; }
+.trouble .tr-n { color: var(--ink-2); font: 400 12px/1.3 var(--f-mono); }
+.trouble ol { margin: 0; padding-left: 20px; display: grid; gap: 6px; font-size: 14px; max-width: 70ch; }
+.diag { margin: 0; max-height: 240px; overflow: auto; padding: 10px; border-radius: 10px; background: var(--bg); border: 1px solid var(--line); font: 400 11.5px/1.5 var(--f-mono); white-space: pre-wrap; overflow-wrap: anywhere; color: var(--ink-2); }
+.tips summary { cursor: pointer; font-weight: 600; color: var(--accent); padding: 4px 0; }
+.tips ul { margin: 6px 0 0; padding-left: 18px; display: grid; gap: 6px; font-size: 13.5px; color: var(--ink-2); }
+.tips strong { color: var(--ink); }
+
 /* botones */
 .btn { display: inline-flex; align-items: center; justify-content: center; gap: 6px; min-height: 40px; padding: 0 16px; border-radius: 10px; border: 1px solid var(--line); background: var(--surface); font-weight: 600; font-size: 14px; cursor: pointer; white-space: nowrap; }
 .btn.primary { background: var(--accent); border-color: var(--accent); color: var(--on-accent); }
