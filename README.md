@@ -3,7 +3,6 @@
 Panel de telemetría y alarmas para nodos [Meshtastic](https://meshtastic.org) que funciona **sin internet**. El móvil se conecta por Bluetooth a un nodo receptor, y los sensores le llegan por LoRa.
 
 **Abrir la app:** https://naikalabs.github.io/vigia-mesh/
-
 ## Qué hace
 
 - **Panel de sensores.** Muestra las últimas lecturas de cada nodo vigilado y una mini gráfica de 24 h.
@@ -14,6 +13,7 @@ Panel de telemetría y alarmas para nodos [Meshtastic](https://meshtastic.org) q
 - **Pedir datos ahora.** Pide a un nodo una lectura en el momento: ambiente, batería, calidad del aire o energía (INA). Si el nodo no tiene ese sensor o no le llega la petición, la app lo dice.
 - **Pedir ficha del nodo.** Desde el firmware 2.5, el receptor solo manda peticiones a nodos de los que tiene la clave pública (si no, da el error 39). Este botón pide al nodo su ficha (nombre y clave) y de paso le envía la del receptor. Un nodo no repite su ficha si ya te la mandó en las últimas horas.
 - **Ubicación y valla antirrobo.** Muestra las coordenadas de cada nodo (se copian con un toque y se abren en Google Maps), su precisión y si vienen del GPS o están fijadas a mano. Puedes pedirle la posición al momento. Para un nodo vigilado, fijas su sitio y un radio: si dos posiciones seguidas caen fuera, salta la alarma «Fuera de su sitio». Ojo: en el canal público la posición viaja recortada a unos 730 m, y un nodo con la posición fijada a mano no delata un robo (para eso está la alarma de «sin señal»).
+- **Avisos por la malla.** Cada alarma (umbral, sin señal, fuera de su sitio) puede salir como mensaje Meshtastic a un canal privado, a un nodo o a ambos, y si quieres también cuando se resuelve. En directo a un nodo, confirma la entrega. Los canales públicos (sin cifrar, con la clave por defecto o la de eventos) están bloqueados. Como mucho un mensaje cada 8 s y 20 por hora.
 - **Histórico en el propio móvil.** Gráficas de 24 h y 7 días, y exportación a CSV.
 - **Modo demostración** con nodos inventados, para probarla sin hardware.
 

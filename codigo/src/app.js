@@ -51,7 +51,8 @@ function parseNum(s) {
 }
 
 /* ───────────── estado ───────────── */
-const DEFAULT_SETTINGS = { sound: true, wake: false, retentionDays: 30, defaultOfflineMin: 75 };
+const DEFAULT_SETTINGS = { sound: true, wake: false, retentionDays: 30, defaultOfflineMin: 75, mesh: null };
+const MESH_DEFAULT = () => ({ enabled: false, channel: null, node: null, onClear: false });
 const S = {
   demo: false,
   demoTimer: null,
@@ -63,6 +64,9 @@ const S = {
   trouble: null, // último fallo de conexión clasificado
   otherWindow: null, // "busy" | "lost" si otra ventana de Vigía tiene el receptor
   diag: [],
+  channels: [], // canales del receptor: { index, name, primary, private, why } (sin claves)
+  demoMesh: null,
+  meshLast: null,
   link: { state: "idle", extra: null },
   device: null,
   active: new Map(),
@@ -100,6 +104,7 @@ function loadReal() {
   S.active = new Map((LS.get("vigia.active", []) || []).map((a) => [a.key, a]));
   S.myNode = LS.get("vigia.my", null);
   S.store = createIdbStore();
+  S.channels = LS.get("vigia.channels", []) || [];
   S.recent = new Map();
 }
 
@@ -247,6 +252,7 @@ function raise(key, a, opts = {}) {
   addLog("raise", alarmTitle(al) + (al.late ? " (recibida al reconectar)" : ""), al.num);
   saveActive();
   if (!opts.silent) fireAlarm(al);
+  if (!opts.silent) meshNotify("raise", al);
   render();
 }
 
@@ -255,6 +261,7 @@ function clearAlarm(key, info = {}) {
   if (!al) return;
   S.active.delete(key);
   if (!info.silent) addLog("clear", clearText(al, info), al.num);
+  if (!info.silent) meshNotify("clear", al, info);
   saveActive();
   render();
 }
@@ -601,6 +608,186 @@ function resetAsks() {
   S.req = new Map();
 }
 
+/* ───────────── avisos por la malla ───────────── */
+// Clave por defecto de Meshtastic (canales públicos) y la del canal de eventos, según Channels.h del firmware.
+const DEFAULT_PSK = [0xd4, 0xf1, 0xbb, 0x3a, 0x20, 0x29, 0x07, 0x59, 0xf0, 0xbc, 0xff, 0xab, 0xcf, 0x4e, 0x69, 0x01];
+const EVENT_PSK = [0x38, 0x4b, 0xbc, 0xc0, 0x1d, 0xc0, 0x22, 0xd1, 0x81, 0xbf, 0x36, 0xb8, 0x61, 0x21, 0xe1, 0xfb,
+  0x96, 0xb7, 0x2e, 0x55, 0xbf, 0x74, 0x22, 0x7e, 0x9d, 0x6a, 0xfb, 0x48, 0xd6, 0x4c, 0xb1, 0xa1];
+const MESH_GAP = 8000, MESH_HOURLY = 20, MESH_MAX_AGE = 30 * MIN;
+
+/** ¿Lo puede leer cualquiera? Sin cifrar, clave por defecto (o su atajo de 1 byte), clave corta o canal de eventos. */
+function channelPrivacy(psk) {
+  const k = psk ? [...psk] : [];
+  if (k.length === 0) return { private: false, why: "sin cifrar" };
+  if (k.length === 1) return { private: false, why: k[0] === 0 ? "sin cifrar" : "clave pública por defecto" };
+  if (k.length < 16) return { private: false, why: "clave demasiado corta" };
+  if (k.length === 16 && k.slice(0, 15).every((b, i) => b === DEFAULT_PSK[i])) return { private: false, why: "clave pública por defecto" };
+  if (k.length === 32 && k.every((b, i) => b === EVENT_PSK[i])) return { private: false, why: "clave pública de eventos" };
+  return { private: true, why: "" };
+}
+function setChannel(c) {
+  const idx = c.index;
+  S.channels = S.channels.filter((x) => x.index !== idx);
+  if (c.role !== 0) {
+    const primary = c.role === 1;
+    S.channels.push({ index: idx, name: c.settings?.name || (primary ? "Principal" : `Canal ${idx}`), primary, ...channelPrivacy(c.settings?.psk) });
+    S.channels.sort((a, b) => a.index - b.index);
+  }
+  if (!S.demo) LS.set("vigia.channels", S.channels); // solo nombre e índice: las claves no se guardan
+}
+
+const meshCfg = () => (S.demo ? (S.demoMesh ||= MESH_DEFAULT()) : (S.settings.mesh ||= MESH_DEFAULT()));
+function saveMeshCfg() { if (!S.demo) saveSettings(); }
+
+const te8 = new TextEncoder();
+/** Recorta a 200 bytes (el límite práctico de un texto Meshtastic); las tildes ocupan 2. */
+function fitBytes(str, max = 200) {
+  if (te8.encode(str).length <= max) return str;
+  let s2 = str;
+  while (s2 && te8.encode(s2 + "…").length > max) s2 = s2.slice(0, -1);
+  return s2 + "…";
+}
+function meshText(kind, al, info) {
+  const now = hhmm.format(new Date());
+  if (kind === "test") return `✓ Vigía: mensaje de prueba de avisos · ${now}`;
+  const name = nodeName(al.num);
+  if (kind === "clear") {
+    if (al.kind === "offline") return `✓ Vigía: ${name} vuelve a dar señal · ${now}`;
+    if (al.kind === "moved") return `✓ Vigía: ${name} de vuelta en su sitio · ${now}`;
+    return `✓ Vigía: ${name} · ${metricMeta(al.metric).label} de vuelta en rango${isNum(info?.v) ? ` (${fmtWithUnit(al.metric, info.v)})` : ""} · ${now}`;
+  }
+  const late = al.late ? " (con retraso)" : "";
+  if (al.kind === "offline") return `⚠ Vigía: ${name} sin señal desde las ${hhmm.format(new Date(al.value))} · ${now}`;
+  if (al.kind === "moved") {
+    const n = S.nodes.get(al.num), f = S.cfg.watched[al.num]?.fence;
+    const where = n?.pos ? ` · ${coordText(n.pos)}` : "";
+    return `⚠ Vigía: ${name} fuera de su sitio, a ${fmtDist(al.value)}${n?.pos && f ? ` al ${compass(f, n.pos)}` : ""}${where} · ${now}${late}`;
+  }
+  return `⚠ Vigía: ${name} · ${metricMeta(al.metric).label} ${fmtWithUnit(al.metric, al.value)} (${al.kind === "high" ? "máx" : "mín"} ${fmtLimit(al.metric, al.limit)}) · ${now}${late}`;
+}
+
+/** Destinos válidos ahora mismo. Un canal público nunca pasa, aunque se haya guardado antes. */
+function meshTargets(report = false) {
+  const cfg = meshCfg();
+  const out = [];
+  if (cfg.channel != null) {
+    const ch = S.channels.find((c) => c.index === cfg.channel);
+    if (ch?.private) out.push({ type: "channel", index: ch.index, label: `canal «${ch.name}»` });
+    else if (report) addLog("info", ch ? `Aviso por la malla bloqueado: el canal «${ch.name}» es público (${ch.why})` : "Aviso por la malla no enviado: el canal elegido ya no existe en el receptor");
+  }
+  if (cfg.node != null) {
+    const n = S.nodes.get(cfg.node);
+    if (!S.demo && !receptorUsesPki() && !S.channels.find((c) => c.index === (n?.channel || 0))?.private) {
+      if (report) addLog("info", `Aviso a ${nodeName(cfg.node)} bloqueado: sin cifrado por clave, iría por un canal público`);
+    } else out.push({ type: "node", num: cfg.node, label: nodeName(cfg.node) });
+  }
+  return out;
+}
+
+const meshQ = [];
+const meshSent = [];
+let meshBusy = false;
+function meshNotify(kind, al, info) {
+  const cfg = meshCfg();
+  if (kind !== "test" && !cfg.enabled) return;
+  if (al && (al.kind === "link" || al.kind === "test")) return; // sin receptor no hay malla; la prueba es local
+  if (kind === "clear" && !cfg.onClear) return;
+  const targets = meshTargets(true);
+  if (!targets.length) { if (kind === "test") toast("Elige un canal privado o un nodo."); return; }
+  const text = fitBytes(meshText(kind, al, info));
+  for (const tg of targets) meshQ.push({ tg, text, t: Date.now() });
+  pumpMesh();
+}
+async function pumpMesh() {
+  if (meshBusy) return;
+  meshBusy = true;
+  try {
+    while (meshQ.length) {
+      if (!S.demo && !(S.link.state === "ready" && receptor?.mesh)) break; // se reanuda al volver el receptor
+      while (meshSent.length && meshSent[0] < Date.now() - HOUR) meshSent.shift();
+      if (meshSent.length >= MESH_HOURLY) {
+        const n = meshQ.splice(0).length;
+        addLog("info", `Avisos por la malla en pausa: ya van ${MESH_HOURLY} en la última hora (${n} sin enviar)`);
+        break;
+      }
+      const it = meshQ.shift();
+      if (Date.now() - it.t > MESH_MAX_AGE) { addLog("info", `Aviso por la malla a ${it.tg.label} descartado: tenía más de 30 min`); continue; }
+      meshSent.push(Date.now());
+      sendMeshOne(it);
+      if (meshQ.length) await new Promise((r) => setTimeout(r, MESH_GAP));
+    }
+  } finally {
+    meshBusy = false;
+  }
+}
+async function sendMeshOne(it) {
+  const { tg, text } = it;
+  S.meshLast = { t: Date.now(), label: tg.label, result: "enviando…", text };
+  patchMeshLast();
+  let result, ok = false;
+  if (S.demo) {
+    await new Promise((r) => setTimeout(r, 1200));
+    result = tg.type === "node" ? "entregado" : "repetido por la malla";
+    ok = true;
+  } else {
+    try {
+      const dest = tg.type === "node" ? tg.num : "broadcast";
+      const ch = tg.type === "node" ? S.nodes.get(tg.num)?.channel || 0 : tg.index;
+      const id = await receptor.sendText(dest, ch, text);
+      ok = true;
+      result = tg.type === "node" ? (ackFrom.get(id) === tg.num ? "entregado" : "salió a la malla") : "repetido por la malla";
+    } catch (e) {
+      const code = e && typeof e === "object" && "error" in e ? e.error : "send";
+      result = code === RE.TIMEOUT ? "sin confirmación"
+        : code === RE.MAX_RETRANSMIT ? (tg.type === "node" ? "no llegó tras varios intentos" : "nadie lo repitió (¿hay nodos al alcance?)")
+        : askFailText(code);
+    }
+  }
+  const late = Date.now() - it.t > 2 * MIN ? " (con retraso)" : "";
+  S.meshLast = { t: Date.now(), label: tg.label, result: result + late, text, ok };
+  addLog("info", `Aviso por la malla a ${tg.label}: ${result}${late}`);
+  patchMeshLast();
+  renderLog();
+}
+function meshLastHTML() {
+  const l = S.meshLast;
+  if (!l) return "Todavía no se ha enviado ningún aviso.";
+  return `Último: «${esc(l.text)}» → ${esc(l.label)}: <strong class="${l.ok ? "okt" : l.result === "enviando…" ? "" : "warn-t"}">${esc(l.result)}</strong> · ${esc(stamp(l.t))}`;
+}
+function patchMeshLast() { const el = $("#meshLast"); if (el) el.innerHTML = meshLastHTML(); }
+
+function meshSection() {
+  const cfg = meshCfg();
+  const chs = S.channels;
+  const chOpts = [`<option value=""${cfg.channel == null ? " selected" : ""}>Ninguno</option>`]
+    .concat(chs.map((c) => `<option value="${c.index}"${c.private ? "" : " disabled"}${cfg.channel === c.index ? " selected" : ""}>${c.index} · ${esc(c.name)}${c.private ? "" : " — público"}</option>`)).join("");
+  const nodes = [...S.nodes.values()].filter((n) => n.num !== S.myNode).sort((a, b) => (a.long || "").localeCompare(b.long || "", "es"));
+  const pki = receptorUsesPki();
+  const nodeOpts = [`<option value=""${cfg.node == null ? " selected" : ""}>Ninguno</option>`]
+    .concat(nodes.map((n) => `<option value="${n.num}"${cfg.node === n.num ? " selected" : ""}>${esc(n.long)} (${esc(n.short)})${pki && n.key === false ? " — sin clave" : ""}</option>`)).join("");
+  let chHint = "";
+  if (!chs.length) chHint = `<p class="hint">Conecta el receptor para ver sus canales.</p>`;
+  const pub = chs.filter((c) => !c.private);
+  if (chs.length && pub.length) chHint = `<p class="hint">Bloqueados por públicos: ${pub.map((c) => `${esc(c.name)} (${esc(c.why)})`).join(", ")}.</p>`;
+  if (chs.length && !chs.some((c) => c.private)) chHint += `<p class="warn-t">Tu receptor no tiene ningún canal privado. Crea uno en la app de Meshtastic con una clave aleatoria y compártelo (con su código QR) con quien deba recibir los avisos.</p>`;
+  const sel = cfg.channel != null ? chs.find((c) => c.index === cfg.channel) : null;
+  if (sel && !sel.private) chHint += `<p class="warn-t">El canal guardado («${esc(sel.name)}») es público y no se usará.</p>`;
+  const nsel = cfg.node != null ? S.nodes.get(cfg.node) : null;
+  const nodeHint = nsel && pki && nsel.key === false
+    ? `<p class="warn-t">Tu receptor no tiene la clave de ${esc(nsel.long)}: pide su ficha en su tarjeta o el aviso no saldrá (error 39).</p>` : "";
+  return `<section class="blk" id="meshBox"><h3>Avisos por la malla</h3>
+      <div class="set-row"><label class="sw" for="meshOn"><input type="checkbox" id="meshOn" ${cfg.enabled ? "checked" : ""}><span class="sw-ui"></span><span>Mandar las alarmas por la malla</span></label></div>
+      <div class="set-row"><label for="meshCh">A un canal privado</label><select id="meshCh" class="inp sel">${chOpts}</select></div>
+      ${chHint}
+      <div class="set-row"><label for="meshNode">A un nodo</label><select id="meshNode" class="inp sel">${nodeOpts}</select></div>
+      ${nodeHint}
+      <div class="set-row"><label class="sw" for="meshClear"><input type="checkbox" id="meshClear" ${cfg.onClear ? "checked" : ""}><span class="sw-ui"></span><span>Avisar también cuando se resuelve</span></label></div>
+      <div class="btns"><button class="btn ghost" data-mesh-test>Enviar mensaje de prueba</button></div>
+      <p class="hint" id="meshLast">${meshLastHTML()}</p>
+      <p class="hint">Sale un mensaje al saltar cada alarma de umbral, sin señal o fuera de su sitio: en un canal lo leen todos los que lo tengan; a un nodo, solo él, y confirma la entrega. Como mucho uno cada 8 s y ${MESH_HOURLY} por hora, para no saturar la malla. Solo con Vigía abierta y el receptor conectado. Los canales públicos están bloqueados porque lo leería cualquiera.</p>
+    </section>`;
+}
+
 /* ───────────── avisos: sonido, vibración, notificación ───────────── */
 let actx = null;
 function unlockAudio() {
@@ -922,7 +1109,7 @@ function troubleHTML() {
 }
 
 /* ───────────── diagnóstico de conexión ───────────── */
-const APP_VERSION = "1.4.0";
+const APP_VERSION = "1.5.0";
 let diagSaveT = null;
 function pushDiag(e) {
   S.diag.push(e);
@@ -1217,6 +1404,7 @@ function renderSettings() {
       <div class="set-row"><label for="setOff">Sin señal, valor para nodos nuevos</label><span class="inp-u"><input id="setOff" class="inp" inputmode="numeric" autocomplete="off" value="${S.settings.defaultOfflineMin}"><span>min</span></span></div>
       <p class="hint">Las alarmas solo saltan con la app abierta y en pantalla. Con el móvil bloqueado, Chrome congela la página; al volver, recoge lo que guardó el receptor y avisa de lo que se perdió.</p>
     </section>
+    ${PREVIEW && !S.demo ? "" : meshSection()}
     <section class="blk"><h3>Histórico</h3>
       <div class="set-row"><span id="histCount">Contando lecturas…</span><select id="setRet" class="inp sel" aria-label="Tiempo que se guardan las lecturas">${[7, 30, 90, 365].map((d) => `<option value="${d}"${S.settings.retentionDays === d ? " selected" : ""}>Guardar ${d} días</option>`).join("")}</select></div>
       <div class="btns">${PREVIEW ? "" : `<button class="btn ghost" data-export>Exportar CSV</button>`}<button class="btn danger-ghost" data-wipe>Borrar histórico</button></div>
@@ -1268,6 +1456,7 @@ function makeReceptor() {
       LS.set("vigia.device", S.device);
     },
     onReady() {
+      setTimeout(pumpMesh, 1500);
       S.trouble = null;
       S.otherWindow = null;
       LS.set("vigia.ever", true);
@@ -1286,6 +1475,7 @@ function makeReceptor() {
       render();
     },
     onDiag(e) { pushDiag(e); },
+    onChannel(c) { setChannel(c); },
     onOtherWindow() { S.otherWindow = "busy"; render(); },
     onLockLost() { S.otherWindow = "lost"; addLog("info", "La conexión con el receptor ha pasado a otra ventana"); render(); },
     onMyNode(num) {
@@ -1429,6 +1619,13 @@ function startDemo() {
   }
   for (const [num, ms] of Object.entries(d.extraMetrics)) Object.assign(S.nodes.get(Number(num)).metrics, ms);
   S.myNode = d.myNode;
+  S.channels = [
+    { index: 0, name: "LongFast", primary: true, private: false, why: "clave pública por defecto" },
+    { index: 1, name: "avisos", primary: false, private: true, why: "" },
+    { index: 2, name: "familia", primary: false, private: true, why: "" },
+  ];
+  S.demoMesh = MESH_DEFAULT();
+  S.meshLast = null;
   S.cfg = { watched: JSON.parse(JSON.stringify(d.watched)) };
   S.active = new Map();
   S.log = [{ t: Date.now(), type: "info", text: "Demo cargada con nodos inventados" }];
@@ -1520,6 +1717,11 @@ document.addEventListener("click", async (ev) => {
     return render();
   }
   if ("diag" in ds) { openSettings(); setTimeout(() => $("#diagBox")?.scrollIntoView({ block: "start" }), 50); return; }
+  if ("meshTest" in ds) {
+    if (!S.demo && S.link.state !== "ready") return toast("Conecta el receptor para enviar la prueba.");
+    meshNotify("test");
+    return;
+  }
   if ("copyDiag" in ds) {
     const txt = diagText();
     try { await navigator.clipboard.writeText(txt); toast("Diagnóstico copiado"); }
@@ -1586,6 +1788,24 @@ document.addEventListener("change", (ev) => {
     S.settings.defaultOfflineMin = Math.round(v);
     saveSettings();
     return toast("Guardado");
+  }
+  if (t.id === "meshOn" || t.id === "meshClear") {
+    const cfg = meshCfg();
+    if (t.id === "meshOn") cfg.enabled = t.checked; else cfg.onClear = t.checked;
+    saveMeshCfg();
+    if (t.id === "meshOn" && t.checked && cfg.channel == null && cfg.node == null) toast("Elige ahora un canal privado o un nodo.");
+    return;
+  }
+  if (t.id === "meshCh" || t.id === "meshNode") {
+    const cfg = meshCfg();
+    const v = t.value === "" ? null : Number(t.value);
+    if (t.id === "meshCh") {
+      const ch = S.channels.find((c) => c.index === v);
+      if (v != null && !ch?.private) { t.value = ""; cfg.channel = null; saveMeshCfg(); return toast("Ese canal es público: no se puede usar para avisos."); }
+      cfg.channel = v;
+    } else cfg.node = v;
+    saveMeshCfg();
+    return renderSettings();
   }
   if (t.id === "setRet") {
     S.settings.retentionDays = Number(t.value);

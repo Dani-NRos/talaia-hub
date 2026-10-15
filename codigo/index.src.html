@@ -268,7 +268,9 @@ dialog::backdrop { background: rgb(8 14 12 / .5); }
 .inp { font: 500 16px/1 var(--f-mono); color: var(--ink); background: var(--bg); border: 1px solid var(--line); border-radius: 9px; padding: 9px 10px; width: 100%; min-width: 0; font-variant-numeric: tabular-nums; }
 .inp:focus { outline: 2px solid var(--accent); outline-offset: 0; border-color: var(--accent); }
 .inp::placeholder { color: var(--ink-2); opacity: .7; }
-.sel { width: auto; font-family: var(--f-body); }
+.sel { width: auto; max-width: 100%; min-width: 0; font-family: var(--f-body); text-overflow: ellipsis; }
+.set-row .sel { flex: 0 1 auto; }
+#meshBox .set-row .sel { flex: 1 1 200px; }
 .inp-u { display: inline-flex; align-items: center; gap: 6px; }
 .inp-u .inp { width: 84px; text-align: right; }
 .inp-u span { font: 400 13px/1 var(--f-mono); color: var(--ink-2); }

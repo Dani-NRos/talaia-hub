@@ -185,6 +185,7 @@ export class Receptor {
     ev.onTelemetryPacket.subscribe((p) => mine() && this.h.onTelemetry?.(p));
     ev.onPositionPacket.subscribe((p) => mine() && this.h.onPosition?.(p));
     ev.onMeshPacket.subscribe((p) => mine() && this.h.onPacket?.(p));
+    ev.onChannelPacket.subscribe((c) => mine() && this.h.onChannel?.(c));
   }
 
   _closeLink() {
@@ -255,6 +256,16 @@ export class Receptor {
     const mesh = this.mesh;
     if (!mesh || this.state !== "ready") return Promise.reject({ error: "send" });
     return mesh.sendPacket(new Uint8Array(), Protobuf.Portnums.PortNum.POSITION_APP, dest, channel, true, true, false);
+  }
+
+  /**
+   * Manda un mensaje de texto a la malla. dest: "broadcast" (a un canal) o el número de un nodo.
+   * Con want_ack: en directo confirma el destino; en un canal, que algún nodo lo ha repetido.
+   */
+  sendText(dest, channel, text) {
+    const mesh = this.mesh;
+    if (!mesh || this.state !== "ready") return Promise.reject({ error: "send" });
+    return mesh.sendPacket(new TextEncoder().encode(text), Protobuf.Portnums.PortNum.TEXT_MESSAGE_APP, dest, channel, true, false, false);
   }
 
   /** Reintenta ya, sin esperar al siguiente intervalo. */
