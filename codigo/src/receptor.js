@@ -101,6 +101,7 @@ export class Receptor {
     ev.onNodeInfoPacket.subscribe((n) => mine() && this.h.onNodeInfo?.(n));
     ev.onUserPacket.subscribe((p) => mine() && this.h.onUser?.(p.from, p.data, p));
     ev.onTelemetryPacket.subscribe((p) => mine() && this.h.onTelemetry?.(p));
+    ev.onPositionPacket.subscribe((p) => mine() && this.h.onPosition?.(p));
     ev.onMeshPacket.subscribe((p) => mine() && this.h.onPacket?.(p));
   }
 
@@ -148,6 +149,16 @@ export class Receptor {
     const mesh = this.mesh;
     if (!mesh || this.state !== "ready") return Promise.reject({ error: "send" });
     return mesh.sendPacket(userBytes, Protobuf.Portnums.PortNum.NODEINFO_APP, dest, channel, true, true, false);
+  }
+
+  /**
+   * Pide la posición a un nodo (Position vacío con want_response, como la librería oficial).
+   * Las posiciones no van cifradas con clave, así que no da el error 39.
+   */
+  requestPosition(dest, channel = 0) {
+    const mesh = this.mesh;
+    if (!mesh || this.state !== "ready") return Promise.reject({ error: "send" });
+    return mesh.sendPacket(new Uint8Array(), Protobuf.Portnums.PortNum.POSITION_APP, dest, channel, true, true, false);
   }
 
   /** Reintenta ya, sin esperar al siguiente intervalo. */

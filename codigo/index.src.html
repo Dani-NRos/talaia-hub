@@ -183,6 +183,26 @@ button { font: inherit; color: inherit; }
 .ask-st .s-ok { color: var(--ok); }
 .ask-st .s-fail { color: var(--warn); }
 
+/* ubicación y valla */
+.pos { display: grid; gap: 6px; padding-top: 10px; border-top: 1px solid var(--line); cursor: default; }
+.pos.in-sheet { padding-top: 0; border-top: 0; gap: 8px; }
+.pos-top { display: flex; align-items: baseline; justify-content: space-between; gap: 8px; }
+.pos-l { font: 400 11px/1 var(--f-mono); color: var(--ink-2); }
+.in-sheet .pos-l { font: 600 13px/1 var(--f-body); text-transform: uppercase; letter-spacing: .09em; }
+.pos-m { font: 400 11px/1.3 var(--f-mono); color: var(--ink-2); text-align: right; }
+.pos-row { display: flex; flex-wrap: wrap; align-items: center; gap: 6px; }
+.pos-c { font: 500 16px/1.2 var(--f-mono); font-variant-numeric: tabular-nums; user-select: all; overflow-wrap: anywhere; }
+.mini { display: inline-flex; align-items: center; min-height: 32px; padding: 0 10px; border-radius: 8px; border: 1px solid var(--line); background: var(--bg); color: var(--accent); font: 600 12.5px/1 var(--f-body); text-decoration: none; cursor: pointer; white-space: nowrap; }
+.mini:hover:not(:disabled) { border-color: var(--accent); }
+.mini:disabled { opacity: .45; cursor: not-allowed; }
+.fence { margin: 0; font: 500 13px/1.35 var(--f-body); padding: 6px 9px; border-radius: 8px; }
+.fence.ok { color: var(--ok); background: color-mix(in oklab, var(--ok) 10%, transparent); }
+.fence.warn { color: var(--warn); background: color-mix(in oklab, var(--warn) 12%, transparent); }
+.fence.bad { color: var(--on-crit); background: var(--crit); font-weight: 600; }
+.fence-box { display: grid; gap: 8px; margin-top: 4px; padding-top: 12px; border-top: 1px dashed var(--line); }
+.fence-box h4 { margin: 0; font: 600 13px/1 var(--f-body); text-transform: uppercase; letter-spacing: .09em; color: var(--ink-2); }
+.fence-box .warn-t { font-size: 13px; font-weight: 500; }
+
 .empty { padding: 18px; border: 1px dashed var(--line); border-radius: var(--r); background: var(--surface); }
 .empty p { max-width: 60ch; color: var(--ink-2); }
 .empty strong { color: var(--ink); }

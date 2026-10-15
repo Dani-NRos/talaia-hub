@@ -4,6 +4,7 @@ import { Receptor } from "./receptor.js";
 import { buildDemo, DEMO_IDS } from "./demo.js";
 import { Protobuf } from "@meshtastic/core";
 import { encodeUser } from "./pb.js";
+import { distM, compass, precisionM, fmtDist, coordText, mapsUrl, SOURCE } from "./geo.js";
 
 /* ───────────── utilidades ───────────── */
 const $ = (s, r = document) => r.querySelector(s);
@@ -170,9 +171,45 @@ function evalNode(num, opts = {}) {
     if (a.num === num && (a.kind === "high" || a.kind === "low") && !isWatched(num)) clearAlarm(key, { silent: true });
   }
   evalOffline(opts);
+  evalFence(num, { silent: opts.silent });
 }
 
 function linkKnown() { return S.demo || S.link.state === "ready"; }
+
+/* ───────────── valla antirrobo ───────────── */
+// Salta cuando dos posiciones nuevas seguidas caen fuera del radio; se cierra al volver con un 20 % de margen.
+const FENCE_CONFIRM = 2, FENCE_CLEAR = 0.8;
+function evalFence(num, opts = {}) {
+  const key = `${num}||moved`;
+  const w = S.cfg.watched[num];
+  const n = S.nodes.get(num);
+  if (!w?.fence || !n?.pos) { clearAlarm(key, { silent: true }); if (n) n.fenceOut = 0; return; }
+  const d = distM(w.fence, n.pos);
+  if (d > w.fence.r) {
+    if (opts.fresh) n.fenceOut = (n.fenceOut || 0) + 1;
+    if (opts.force || (n.fenceOut || 0) >= FENCE_CONFIRM || S.active.has(key)) {
+      raise(key, { num, kind: "moved", value: d, limit: w.fence.r, t: n.pos.t }, opts);
+    }
+  } else {
+    n.fenceOut = 0;
+    if (S.active.has(key) && d <= w.fence.r * FENCE_CLEAR) clearAlarm(key, { v: d, t: n.pos.t });
+  }
+}
+
+/** Guarda una posición nueva del nodo. live: llegó por la malla ahora (no es la copia de la base de datos). */
+function setPosition(num, pos, opts = {}) {
+  const n = node(num);
+  const prev = n.pos;
+  if (prev && pos.t < prev.t) return false;
+  if (!pos.bits && prev?.bits && prev.lat === pos.lat && prev.lon === pos.lon) pos.bits = prev.bits;
+  const fresh = !prev || pos.t > prev.t;
+  n.pos = pos;
+  evalFence(num, { fresh: fresh && opts.live, replay: opts.replay });
+  saveNodes();
+  refreshPos(num);
+  render();
+  return true;
+}
 
 function evalOffline(opts = {}) {
   const now = Date.now();
@@ -234,6 +271,7 @@ function alarmTitle(al) {
   if (al.kind === "test") return "Alarma de prueba";
   const name = nodeName(al.num);
   if (al.kind === "offline") return `${name} · Sin señal más de ${dur(al.limit * MIN)}`;
+  if (al.kind === "moved") return `${name} · Fuera de su sitio`;
   const m = metricMeta(al.metric);
   return `${name} · ${m.label} ${al.kind === "high" ? "por encima de" : "por debajo de"} ${fmtLimit(al.metric, al.limit, true)}`;
 }
@@ -241,6 +279,11 @@ function alarmDetail(al) {
   if (al.kind === "link") return "Reintentando la conexión Bluetooth. Las alarmas de nodo sin señal quedan en pausa.";
   if (al.kind === "test") return "Así suena y se ve un aviso. Pulsa Enterado para callarlo.";
   if (al.kind === "offline") return `Último dato ${ago(al.value)} (${stamp(al.value)}).`;
+  if (al.kind === "moved") {
+    const n = S.nodes.get(al.num), f = S.cfg.watched[al.num]?.fence;
+    const dir = n?.pos && f ? ` al ${compass(f, n.pos)}` : "";
+    return `Está a ${fmtDist(al.value)}${dir} de su sitio (valla de ${fmtDist(al.limit)}). Posición de las ${n?.pos ? hhmm.format(new Date(n.pos.t)) : "—"}.`;
+  }
   return `Ahora ${fmtWithUnit(al.metric, al.value)}.`;
 }
 function clearText(al, info) {
@@ -248,6 +291,7 @@ function clearText(al, info) {
   if (al.kind === "test") return "Alarma de prueba cerrada";
   const name = nodeName(al.num);
   if (al.kind === "offline") return `${name} · Vuelve a dar señal`;
+  if (al.kind === "moved") return `${name} · De vuelta en su sitio${isNum(info.v) ? ` (a ${fmtDist(info.v)})` : ""}`;
   const m = metricMeta(al.metric);
   return `${name} · ${m.label} de vuelta en rango${isNum(info.v) ? ` (${fmtWithUnit(al.metric, info.v)})` : ""}`;
 }
@@ -267,7 +311,7 @@ const ASK = {
   power:  { label: "Energía",  what: "Tensión y corriente de los canales INA", field: 5, variant: "powerMetrics" },
 };
 // Ficha del nodo (NodeInfo): nombre y clave pública. Sin la clave, el receptor no le manda peticiones.
-const ASK_ALL = { ...ASK, info: { label: "Ficha" } };
+const ASK_ALL = { ...ASK, info: { label: "Ficha" }, pos: { label: "Posición" } };
 const ASK_BY_VARIANT = Object.fromEntries(Object.entries(ASK).map(([k, a]) => [a.variant, k]));
 const ASK_TIMEOUT = 60000, ASK_COOLDOWN = 30000, INFO_COOLDOWN = 60000, ASK_SHOW = 10 * MIN;
 const RE = Protobuf.Mesh.Routing_Error;
@@ -294,6 +338,7 @@ function askFailText(code, r) {
     case RE.TOO_LARGE: case RE.BAD_REQUEST: return "el nodo rechazó la petición";
     case "timeout":
       if (r?.acked && r.type === "info") return "el nodo la recibió pero no contestó; no repite su ficha si te la mandó en las últimas horas o la anunció hace poco";
+      if (r?.acked && r.type === "pos") return "el nodo la recibió pero no contestó; como mucho repite su posición cada 3 min";
       if (r?.acked) return "el nodo la recibió pero no mandó datos";
       return `sin respuesta en ${ASK_TIMEOUT / 1000} s`;
     case "send": return "no se pudo enviar al receptor";
@@ -319,11 +364,11 @@ function keyNeeded(num) {
 }
 
 async function ask(num, type) {
-  const isInfo = type === "info";
+  const isInfo = type === "info", isPos = type === "pos";
   const k = askKey(num, type);
   const prev = S.req.get(k);
   if (prev?.state === "wait") return;
-  const cool = isInfo ? INFO_COOLDOWN : ASK_COOLDOWN;
+  const cool = isInfo || isPos ? INFO_COOLDOWN : ASK_COOLDOWN;
   const since = prev ? Date.now() - prev.t0 : Infinity;
   if (since < cool) return toast(`Espera ${Math.ceil((cool - since) / 1000)} s antes de repetir, para no saturar la malla.`);
   if (!canAsk()) return toast("Conecta el receptor para pedir datos.");
@@ -332,11 +377,12 @@ async function ask(num, type) {
   S.req.set(k, r);
   r.timer = setTimeout(() => finishAsk(r, "fail", "timeout"), ASK_TIMEOUT);
   refreshAsk(num);
+  refreshPos(num);
   if (S.demo) return demoAsk(r);
   try {
     const ch = S.nodes.get(num)?.channel || 0;
-    const id = await (isInfo
-      ? receptor.requestNodeInfo(num, encodeUser(S.myUser), ch)
+    const id = await (isInfo ? receptor.requestNodeInfo(num, encodeUser(S.myUser), ch)
+      : isPos ? receptor.requestPosition(num, ch)
       : receptor.requestTelemetry(num, ASK[type].field, ch));
     // Acuse sin respuesta todavía: seguimos esperando. Solo cuenta si lo manda el propio nodo.
     if (r.state === "wait" && ackFrom.get(id) === num) { r.acked = true; patchAskStatus(num); }
@@ -358,9 +404,11 @@ function finishAsk(r, state, why = null) {
   let msg;
   if (state !== "ok") msg = `${what}: ${askFailText(why, r)}`;
   else if (r.type === "info") msg = `${what}: recibida${r.gotKey ? ", clave guardada" : ", el nodo no tiene clave"}`;
+  else if (r.type === "pos") msg = `${what}: ${r.noLoc ? "el nodo no comparte su ubicación en ese canal" : "recibida a petición"}`;
   else msg = `${what}: datos recibidos a petición${lateOk ? " (tarde)" : ""}`;
   addLog("info", msg, r.num);
   refreshAsk(r.num);
+  refreshPos(r.num);
   render();
 }
 
@@ -375,6 +423,12 @@ function demoAsk(r) {
       r.gotKey = true;
       return finishAsk(r, "ok");
     }
+    if (r.type === "pos") {
+      r.noLoc = !res.pos;
+      finishAsk(r, "ok");
+      if (res.pos) setPosition(r.num, { ...res.pos, t: Date.now() }, { live: true });
+      return;
+    }
     finishAsk(r, "ok");
     ingest(r.num, res.metrics, Date.now(), { kind: ASK[r.type].variant });
   }, res.delay);
@@ -388,11 +442,12 @@ function askChips(num) {
     return `<button type="button" class="ask-b${st ? ` is-${st}` : ""}" data-ask="${type}" data-num="${num}" title="${esc(a.what)}"${!ok || st === "wait" ? " disabled" : ""}>${a.label}</button>`;
   }).join("");
 }
-function askStatus(num) {
-  return Object.keys(ASK_ALL).map((type) => S.req.get(askKey(num, type))).filter((r) => askVisible(r) && !staleKeyFail(r)).sort((a, b) => b.t0 - a.t0).map((r) => {
+function askStatus(num, types = Object.keys(ASK_ALL).filter((t) => t !== "pos")) {
+  return types.map((type) => S.req.get(askKey(num, type))).filter((r) => askVisible(r) && !staleKeyFail(r)).sort((a, b) => b.t0 - a.t0).map((r) => {
     const l = ASK_ALL[r.type].label;
     const secs = Math.round((Date.now() - r.t0) / 1000);
     if (r.state === "wait") return `<span class="s-wait">${l}: ${r.acked ? "la petición llegó, esperando respuesta" : "esperando respuesta"}… ${secs} s</span>`;
+    if (r.state === "ok" && r.type === "pos") return `<span class="s-ok">${l}: ${r.noLoc ? "el nodo no comparte su ubicación en este canal" : `recibida a las ${hhmm.format(new Date(r.tDone))}`}</span>`;
     if (r.state === "ok" && r.type === "info") return `<span class="s-ok">${l}: recibida a las ${hhmm.format(new Date(r.tDone))}${r.gotKey ? ", clave guardada" : ", pero ese nodo no tiene clave (firmware anterior a 2.5)"}</span>`;
     if (r.state === "ok") return `<span class="s-ok">${l}: recibido a las ${hhmm.format(new Date(r.tDone))}, tardó ${Math.max(1, Math.round((r.tDone - r.t0) / 1000))} s</span>`;
     return `<span class="s-fail">${l}: ${esc(askFailText(r.why, r))}</span>`;
@@ -418,6 +473,119 @@ function refreshAsk(num) {
 }
 function patchAskStatus(num) {
   for (const el of $$(`[data-ask-st="${num}"]`)) el.innerHTML = askStatus(num);
+  for (const el of $$(`[data-pos-st="${num}"]`)) el.innerHTML = askStatus(num, ["pos"]);
+}
+
+/* ───────────── bloque de ubicación ───────────── */
+function fenceLine(num) {
+  const w = S.cfg.watched[num], n = S.nodes.get(num);
+  if (!w?.fence || !n?.pos) return "";
+  const d = distM(w.fence, n.pos);
+  const r = `valla de ${fmtDist(w.fence.r)}`;
+  if (S.active.has(`${num}||moved`)) return `<p class="fence bad">Fuera de su sitio: a ${fmtDist(d)} al ${compass(w.fence, n.pos)} · ${r}</p>`;
+  if (d > w.fence.r) return `<p class="fence warn">Posible movimiento: a ${fmtDist(d)} al ${compass(w.fence, n.pos)}. Esperando otra posición para confirmar · ${r}</p>`;
+  return `<p class="fence ok">En su sitio${d >= 1 ? ` · a ${fmtDist(d)}` : ""} · ${r}</p>`;
+}
+function posMeta(p) {
+  const pm = precisionM(p.bits);
+  return [pm ? `±${fmtDist(pm)}` : p.bits >= 32 ? "precisión completa" : "", ago(p.t)].filter(Boolean).join(" · ");
+}
+function posBlock(num, sheet = false) {
+  const n = S.nodes.get(num), p = n?.pos;
+  const w = S.cfg.watched[num];
+  const r = S.req.get(askKey(num, "pos"));
+  const waiting = r?.state === "wait";
+  const askBtn = `<button type="button" class="mini" data-ask="pos" data-num="${num}"${!canAsk() || waiting ? " disabled" : ""}>${waiting ? "Pidiendo…" : "Pedir posición"}</button>`;
+  let h = `<div class="pos-top"><span class="pos-l">Ubicación</span>${p ? `<span class="pos-m">${esc(posMeta(p))}</span>` : ""}</div>`;
+  if (p) {
+    const c = coordText(p);
+    h += `<code class="pos-c">${c}</code><div class="pos-row"><button type="button" class="mini" data-copy="${c}">Copiar</button><a class="mini" href="${mapsUrl(p)}" target="_blank" rel="noopener">Abrir en mapa</a>${sheet ? askBtn : ""}</div>`;
+  } else {
+    h += `<div class="pos-row"><span class="hint">Este nodo aún no ha compartido su ubicación.</span>${askBtn}</div>`;
+  }
+  h += `<p class="ask-st" data-pos-st="${num}">${askStatus(num, ["pos"])}</p>`;
+  if (!sheet) return h + fenceLine(num);
+  if (p) {
+    const facts = [SOURCE[p.src] ? `Origen: ${SOURCE[p.src]}` : "", isNum(p.alt) ? `Altitud ${fmtNum(p.alt, 0)} m` : "", `Posición de las ${stamp(p.t)}`].filter(Boolean);
+    h += `<p class="hint">${esc(facts.join(" · "))}</p>`;
+  }
+  if (!w) return h;
+  // valla antirrobo (solo nodos vigilados)
+  const f = w.fence;
+  const pm = p ? precisionM(p.bits) : null;
+  const rVal = f ? f.r : Math.max(200, pm ? Math.ceil((pm * 2) / 50) * 50 : 0);
+  h += `<div class="fence-box"><h4>Valla antirrobo</h4>`;
+  h += f ? fenceLine(num) + `<p class="hint">Su sitio: ${coordText(f)}, fijado ${esc(stamp(f.at))}.</p>`
+    : `<p class="hint">Fija su sitio y un radio. Si dos posiciones seguidas caen fuera, salta la alarma.</p>`;
+  h += `<div class="off-row"><label for="fence-r">Radio</label><span class="inp-u"><input id="fence-r" class="inp" inputmode="numeric" autocomplete="off" value="${rVal}"><span>m</span></span></div>`;
+  h += `<div class="btns"><button type="button" class="btn ${f ? "ghost" : "primary"} sm" data-fence-set="${num}"${p ? "" : " disabled"}>${f ? "Mover su sitio a la posición actual" : "Fijar su sitio en la posición actual"}</button>${f ? `<button type="button" class="btn danger-ghost sm" data-fence-del="${num}">Quitar valla</button>` : ""}</div>`;
+  if (p?.src === 1) h += `<p class="warn-t">Este nodo tiene la posición fijada a mano: si se lo llevan seguirá mandando las mismas coordenadas. Para él, la alarma útil es la de «sin señal».</p>`;
+  if (pm && pm > (f ? f.r : rVal) / 2) h += `<p class="warn-t">Este nodo comparte su posición con ±${fmtDist(pm)} de precisión: no se notan movimientos menores. Para afinar, que la comparta en un canal privado con precisión completa.</p>`;
+  return h + `</div>`;
+}
+function refreshPos(num) {
+  for (const el of $$(`[data-pos-box="${num}"]`)) {
+    if (el.contains(document.activeElement) && document.activeElement.matches("input")) continue; // no pisar lo que se escribe
+    el.innerHTML = posBlock(num, el.dataset.sheet === "1");
+  }
+}
+
+function setFence(num) {
+  const w = S.cfg.watched[num], n = S.nodes.get(num);
+  if (!w || !n?.pos) return;
+  const r = parseNum($("#fence-r")?.value);
+  if (!r || Number.isNaN(r) || r < 20) return toast("Pon un radio de 20 m o más.");
+  w.fence = { lat: n.pos.lat, lon: n.pos.lon, r: Math.round(r), at: Date.now() };
+  n.fenceOut = 0;
+  saveCfg();
+  clearAlarm(`${num}||moved`, { silent: true });
+  addLog("info", `${nodeName(num)} · Valla de ${fmtDist(w.fence.r)} fijada en ${coordText(w.fence)}`, num);
+  refreshPos(num);
+  render();
+  toast("Valla fijada en su posición actual");
+}
+function setFenceRadius(num, input) {
+  const w = S.cfg.watched[num];
+  if (!w?.fence) return;
+  const r = parseNum(input.value);
+  if (!r || Number.isNaN(r) || r < 20) { input.value = w.fence.r; return toast("Pon un radio de 20 m o más."); }
+  w.fence.r = Math.round(r);
+  saveCfg();
+  evalFence(num, { force: true });
+  input.blur();
+  refreshPos(num);
+  render();
+  toast(`Radio de la valla: ${fmtDist(w.fence.r)}`);
+}
+function delFence(num) {
+  const w = S.cfg.watched[num];
+  if (!w?.fence) return;
+  delete w.fence;
+  saveCfg();
+  clearAlarm(`${num}||moved`, { silent: true });
+  addLog("info", `${nodeName(num)} · Valla quitada`, num);
+  refreshPos(num);
+  render();
+}
+
+async function copyText(text, btn) {
+  try {
+    await navigator.clipboard.writeText(text);
+  } catch {
+    // Respaldo: seleccionar el texto para copiarlo a mano o con execCommand.
+    const ta = document.createElement("textarea");
+    ta.value = text;
+    ta.setAttribute("readonly", "");
+    ta.style.cssText = "position:fixed;opacity:0;left:0;top:0";
+    document.body.append(ta);
+    ta.select();
+    let ok = false;
+    try { ok = document.execCommand("copy"); } catch { /* sin portapapeles */ }
+    ta.remove();
+    if (!ok) return toast(`No se pudo copiar. Coordenadas: ${text}`);
+  }
+  if (btn) { btn.textContent = "Copiado"; setTimeout(() => { if (btn.isConnected) btn.textContent = "Copiar"; }, 1600); }
+  toast("Coordenadas copiadas");
 }
 // Solo se reescribe el texto de estado cada segundo, para no robar toques a los botones.
 setInterval(() => {
@@ -682,6 +850,7 @@ function renderBoard() {
 
 function nodeState(num) {
   const al = [...S.active.values()].filter((a) => a.num === num);
+  if (al.some((a) => a.kind === "moved")) return ["crit", "Fuera de sitio"];
   if (al.some((a) => a.kind === "high" || a.kind === "low")) return ["crit", "Alarma"];
   if (al.some((a) => a.kind === "offline")) return ["off", "Sin señal"];
   const n = S.nodes.get(num);
@@ -725,6 +894,7 @@ function renderCards() {
     return `<article class="card st-${st}" data-open="${num}">
       <header class="card-h"><span class="tag">${esc(n.short)}</span><div class="card-t"><h3><button type="button" class="name-btn" data-open="${num}" aria-label="Abrir ficha de ${esc(n.long)}, estado ${stLabel}">${esc(n.long)}</button></h3><p class="meta">${esc(metaLine(n))}</p></div><span class="pill p-${st}">${stLabel}</span></header>
       ${readings ? `<div class="rds">${readings}</div>` : `<p class="no-rd">Este nodo aún no ha mandado telemetría.</p>`}
+      ${n.pos ? `<div class="pos" data-pos-box="${num}">${posBlock(num)}</div>` : ""}
       ${spark}
       <div class="ask" data-ask-box="${num}">${askBlock(num)}</div>
     </article>`;
@@ -784,6 +954,7 @@ function renderDetail() {
   const tags = [hexId(num), n.hw ? n.hw.replaceAll("_", " ") : "", n.num === S.myNode ? "tu receptor" : ""].filter(Boolean).join(" · ");
   let body = `<section class="blk"><h3>Pedir datos ahora</h3><div class="ask in-sheet" data-ask-box="${num}" data-sheet="1">${askBlock(num, true)}</div>
     <p class="hint">La petición sale por LoRa desde tu receptor y el nodo contesta con una lectura recién tomada. Si está dormido para ahorrar batería o fuera de alcance, no contesta.</p></section>`;
+  body += `<section class="blk"><div class="pos in-sheet" data-pos-box="${num}" data-sheet="1">${posBlock(num, true)}</div></section>`;
   if (w) {
     const off = isNum(w.offlineMin) ? w.offlineMin : S.settings.defaultOfflineMin;
     const rows = keys.filter((k) => !metricMeta(k).minor).map((k) => {
@@ -1056,6 +1227,21 @@ function makeReceptor() {
       saveNodes();
       render();
     },
+    onPosition(p) {
+      const d = p.data;
+      const live = p.to !== p.from; // la copia de la base de datos del receptor llega con from = to
+      const hasLoc = !!(d && (d.latitudeI || d.longitudeI));
+      const r = S.req.get(askKey(p.from, "pos"));
+      if (live && r && Date.now() - r.t0 < 5 * MIN) { r.noLoc = !hasLoc; finishAsk(r, "ok"); }
+      if (!hasLoc) return;
+      const tPos = d.time ? d.time * 1000 : 0;
+      const rx = p.rxTime?.getTime?.() || 0;
+      const t = validT(tPos) ? tPos : live && validT(rx) ? rx : S.nodes.get(p.from)?.lastHeard || Date.now();
+      setPosition(p.from, {
+        lat: d.latitudeI / 1e7, lon: d.longitudeI / 1e7, t,
+        alt: d.altitude || null, bits: d.precisionBits || 0, src: d.locationSource || 0,
+      }, { live, replay: live && Date.now() - t > 5 * MIN });
+    },
     onTelemetry(p) {
       const id = `${p.from}:${p.id}`;
       if (p.id && S.seen.has(id)) return;
@@ -1192,7 +1378,8 @@ function toast(msg) {
 /* ───────────── eventos ───────────── */
 let wipeArmed = 0, unwatchArmed = 0;
 document.addEventListener("click", async (ev) => {
-  const t = ev.target.closest("button, [data-open], [data-close]");
+  const t = ev.target.closest("a, button, [data-open], [data-close]");
+  if (t?.tagName === "A") return; // enlaces (Abrir en mapa) van a lo suyo
   if (!t) {
     const dlg = ev.target.closest("dialog");
     if (dlg && ev.target === dlg) dlg.close();
@@ -1200,6 +1387,9 @@ document.addEventListener("click", async (ev) => {
   }
   const ds = t.dataset;
   if ("ask" in ds) return ask(Number(ds.num), ds.ask);
+  if ("copy" in ds) return copyText(ds.copy, t);
+  if ("fenceSet" in ds) return setFence(Number(ds.fenceSet));
+  if ("fenceDel" in ds) return delFence(Number(ds.fenceDel));
   if ("ack" in ds) return ack(ds.ack);
   if ("ackall" in ds) return ackAll();
   if ("watch" in ds) return watch(Number(ds.watch));
@@ -1245,6 +1435,7 @@ document.addEventListener("keydown", (ev) => {
 
 document.addEventListener("change", (ev) => {
   const t = ev.target;
+  if (t.id === "fence-r") return S.detail && setFenceRadius(S.detail.num, t);
   if (t.matches("#detail .inp")) return saveRuleFromInput(t);
   if (t.id === "setSound") { S.settings.sound = t.checked; saveSettings(); if (t.checked) { unlockAudio(); beep(); } return; }
   if (t.id === "setWake") { S.settings.wake = t.checked; saveSettings(); return applyWake(); }

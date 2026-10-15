@@ -59,14 +59,14 @@ export function buildDemo(now = Date.now()) {
   });
 
   const nodes = [
-    { num: recv, short: "RCPT", long: "Receptor casa", hw: "HELTEC_V4", lastHeard: now, hops: 0, key: true },
-    { num: caseta, short: "CSTA", long: "Caseta huerto", hw: "RAK4631", lastHeard: lastT, hops: 1, snr: 7.5, hasEnv: true, key: true },
-    { num: garaje, short: "GARJ", long: "Garaje", hw: "HELTEC_V3", lastHeard: end, hops: 0, snr: 11, hasEnv: true, key: true },
-    { num: monte, short: "MONT", long: "Nodo solar monte", hw: "SEEED_XIAO_S3", lastHeard: monteLast, hops: 2, snr: -9.25, hasEnv: true, key: true },
-    { num: 0x2299aa10, short: "MURT", long: "Repetidor Murta", hw: "RAK4631", lastHeard: now - 12 * MIN, hops: 2, key: true },
-    { num: 0x44c10e7b, short: "CULL", long: "Base Cullera", hw: "TBEAM", lastHeard: now - 41 * MIN, hops: 3, hasEnv: true, key: false },
+    { num: recv, short: "RCPT", long: "Receptor casa", hw: "HELTEC_V4", lastHeard: now, hops: 0, key: true, pos: { lat: 39.15204, lon: -0.43797, bits: 32, src: 1, t: now } },
+    { num: caseta, short: "CSTA", long: "Caseta huerto", hw: "RAK4631", lastHeard: lastT, hops: 1, snr: 7.5, hasEnv: true, key: true, pos: { lat: 39.15881, lon: -0.44118, bits: 32, src: 2, t: lastT } },
+    { num: garaje, short: "GARJ", long: "Garaje", hw: "HELTEC_V3", lastHeard: end, hops: 0, snr: 11, hasEnv: true, key: true, pos: { lat: 39.15031, lon: -0.43508, bits: 32, src: 1, t: end } },
+    { num: monte, short: "MONT", long: "Nodo solar monte", hw: "SEEED_XIAO_S3", lastHeard: monteLast, hops: 2, snr: -9.25, hasEnv: true, key: true, pos: { lat: 39.13022, lon: -0.41264, bits: 32, src: 1, t: monteLast } },
+    { num: 0x2299aa10, short: "MURT", long: "Repetidor Murta", hw: "RAK4631", lastHeard: now - 12 * MIN, hops: 2, key: true, pos: { lat: 39.11915, lon: -0.39251, bits: 15, src: 1, t: now - 12 * MIN } },
+    { num: 0x44c10e7b, short: "CULL", long: "Base Cullera", hw: "TBEAM", lastHeard: now - 41 * MIN, hops: 3, hasEnv: true, key: false, pos: { lat: 39.16521, lon: -0.25473, bits: 15, src: 2, t: now - 41 * MIN } },
     { num: 0x19f3d2c6, short: "PEPE", long: "Nodo de Pepe", hw: "TLORA_V2_1_1P6", lastHeard: now - 3 * HOUR, hops: 1, key: true },
-    { num: 0x0be7714d, short: "TRKR", long: "Tracker de ruta", hw: "TRACKER_T1000_E", lastHeard: now - 2 * 24 * HOUR, hops: 4, key: true },
+    { num: 0x0be7714d, short: "TRKR", long: "Tracker de ruta", hw: "TRACKER_T1000_E", lastHeard: now - 2 * 24 * HOUR, hops: 4, key: true, pos: { lat: 39.21043, lon: -0.51307, bits: 32, src: 2, t: now - 2 * 24 * HOUR } },
   ];
   const extraMetrics = {
     0x44c10e7b: { temperature: { v: 21.3, t: now - 41 * MIN }, relativeHumidity: { v: 66, t: now - 41 * MIN } },
@@ -74,7 +74,7 @@ export function buildDemo(now = Date.now()) {
   };
 
   const watched = {
-    [caseta]: { offlineMin: 75, rules: { temperature: { max: 35 }, relativeHumidity: { min: 25 } } },
+    [caseta]: { offlineMin: 75, rules: { temperature: { max: 35 }, relativeHumidity: { min: 25 } }, fence: { lat: 39.15881, lon: -0.44118, r: 150, at: now - 3 * 24 * HOUR } },
     [garaje]: { offlineMin: 75, rules: { temperature: { min: 3 } } },
     [monte]: { offlineMin: 75, rules: { batteryLevel: { min: 25 } } },
   };
@@ -103,6 +103,12 @@ export function buildDemo(now = Date.now()) {
     const delay = 2500 + rnd() * 4500;
     if (num === monte || num === tracker) return { delay: 9000, error: "MAX_RETRANSMIT" };
     if (type === "info") { noKey.delete(num); return { delay: delay + 1500 }; }
+    if (type === "pos") {
+      const p = nodes.find((n) => n.num === num)?.pos;
+      if (!p) return { delay };
+      const j = p.src === 2 ? () => (rnd() - 0.5) * 0.00006 : () => 0;
+      return { delay, pos: { ...p, lat: p.lat + j(), lon: p.lon + j() } };
+    }
     if (noKey.has(num)) return { delay: 400, error: 39 };
     if (type === "device") {
       const base = { [caseta]: { batteryLevel: 88, voltage: 4.05 }, [garaje]: { batteryLevel: 101, voltage: 5.08 }, [recv]: { batteryLevel: 101, voltage: 5.1 } }[num]
