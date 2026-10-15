@@ -12,6 +12,9 @@ const $$ = (s, r = document) => [...r.querySelectorAll(s)];
 const esc = (s) => String(s ?? "").replace(/[&<>"']/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[c]));
 const isNum = (x) => typeof x === "number" && Number.isFinite(x);
 const MIN = 60000, HOUR = 60 * MIN, DAY = 24 * HOUR;
+const APP_VERSION = "1.6.0";
+const REPO_URL = "https://github.com/Dani-NRos/vigia-mesh";
+const ISSUES_URL = `${REPO_URL}/issues`;
 const validT = (t) => isNum(t) && t > 1.6e12 && t < Date.now() + 5 * MIN;
 
 const LS = {
@@ -1109,7 +1112,6 @@ function troubleHTML() {
 }
 
 /* ───────────── diagnóstico de conexión ───────────── */
-const APP_VERSION = "1.5.0";
 let diagSaveT = null;
 function pushDiag(e) {
   S.diag.push(e);
@@ -1130,6 +1132,21 @@ function diagText() {
     "",
   ];
   return head.join("\n") + S.diag.map(diagLine).join("\n");
+}
+/** Enlace a un aviso nuevo en GitHub con el diagnóstico ya pegado (recortado para que quepa en la URL). */
+function issueUrl() {
+  const intro = "**Qué pasó:**\n\n\n**Modelo del nodo receptor y versión de firmware:**\n\n\n**Diagnóstico** (revísalo antes de enviar: el aviso es público)\n";
+  const lines = diagText().split("\n");
+  const keep = 4; // cabecera: versión, navegador, receptor y capacidades
+  let cut = false;
+  const build = () => `${ISSUES_URL}/new?title=${encodeURIComponent("Fallo de conexión")}&body=${encodeURIComponent(`${intro}\n\`\`\`\n${[...lines.slice(0, keep), ...(cut ? ["(líneas más antiguas recortadas)"] : []), ...lines.slice(keep)].join("\n")}\n\`\`\`\n`)}`;
+  let url = build();
+  while (url.length > 7000 && lines.length > keep + 1) {
+    lines.splice(keep, Math.max(1, Math.ceil((lines.length - keep) / 8)));
+    cut = true;
+    url = build();
+  }
+  return url;
 }
 
 function nodeState(num) {
@@ -1219,6 +1236,8 @@ function renderFoot() {
   const bits = ["Sin internet: los datos se guardan solo en este dispositivo."];
   if (wake) bits.push("Pantalla fija activada.");
   $("#foot").textContent = bits.join(" ");
+  const v = $("#footVer");
+  if (v) v.textContent = `Vigía Mesh ${APP_VERSION}`;
 }
 
 /* ───────────── detalle de nodo ───────────── */
@@ -1412,9 +1431,16 @@ function renderSettings() {
     ${PREVIEW ? "" : `<section class="blk" id="diagBox"><h3>Diagnóstico de conexión</h3>
       <p class="hint">Cada paso de la conexión queda apuntado aquí. Si falla, copia el diagnóstico: dice en qué paso se corta.</p>
       <pre class="diag" id="diagList">${esc(diagLines(40))}</pre>
-      <div class="btns"><button class="btn ghost" data-copy-diag>Copiar diagnóstico</button><button class="btn ghost" data-clear-diag>Borrar</button></div>
+      <div class="btns"><button class="btn ghost" data-copy-diag>Copiar diagnóstico</button><button class="btn ghost" data-report>Avisar del fallo en GitHub</button><button class="btn ghost" data-clear-diag>Borrar</button></div>
+      <p class="hint">«Avisar del fallo» abre un aviso nuevo en GitHub con el diagnóstico ya pegado. Necesita internet y una cuenta de GitHub, y el aviso es público: revisa el texto antes de enviarlo.</p>
     </section>`}
     <section class="blk"><h3>Demostración</h3>${S.demo ? `<p>Los datos que ves son inventados y no se guardan.</p>${PREVIEW ? "" : `<button class="btn ghost" data-demo-off>Salir de la demo</button>`}` : `<p>Prueba el panel con nodos inventados. Tus datos reales no se tocan.</p><button class="btn ghost" data-demo-on>Ver la demo</button>`}</section>
+    <section class="blk about"><h3>Acerca de</h3>
+      <p><strong>Vigía Mesh ${APP_VERSION}</strong>. Panel de alarmas para nodos Meshtastic que funciona sin internet. Hecho por Dani-NRos.</p>
+      <div class="btns"><a class="btn ghost" href="${REPO_URL}" target="_blank" rel="noopener">Código en GitHub</a><a class="btn ghost" href="${ISSUES_URL}" target="_blank" rel="noopener">Avisos y sugerencias</a></div>
+      <p class="hint">Para abrir los enlaces hace falta internet. Si algo falla o echas algo en falta, cuéntalo en los avisos de GitHub.</p>
+      <p class="hint">Código abierto con licencia GPL-3.0. Proyecto independiente, no afiliado a Meshtastic. Meshtastic® es una marca registrada de Meshtastic LLC.</p>
+    </section>
   </div>`;
   S.store.count().then((c) => { const el = $("#histCount"); if (el) el.textContent = `${c.toLocaleString("es-ES")} lecturas${S.demo ? " (demo)" : ""}`; });
 }
@@ -1726,6 +1752,11 @@ document.addEventListener("click", async (ev) => {
     const txt = diagText();
     try { await navigator.clipboard.writeText(txt); toast("Diagnóstico copiado"); }
     catch { const r = document.createRange(); const el = $("#diagList"); if (el) { el.textContent = txt; r.selectNodeContents(el); const sel = getSelection(); sel.removeAllRanges(); sel.addRange(r); } toast("Selecciona y copia el texto del diagnóstico"); }
+    return;
+  }
+  if ("report" in ds) {
+    if (!navigator.onLine) return toast("Sin internet: copia el diagnóstico y avisa cuando tengas conexión.");
+    window.open(issueUrl(), "_blank", "noopener");
     return;
   }
   if ("clearDiag" in ds) { S.diag = []; LS.del("vigia.diag"); const el = $("#diagList"); if (el) el.textContent = diagLines(40); return; }

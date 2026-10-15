@@ -2,7 +2,12 @@
 
 Panel de telemetría y alarmas para nodos [Meshtastic](https://meshtastic.org) que funciona **sin internet**. El móvil se conecta por Bluetooth a un nodo receptor, y los sensores le llegan por LoRa.
 
-**Abrir la app:** https://naikalabs.github.io/vigia-mesh/
+**Abrir la app:** https://dani-nros.github.io/vigia-mesh/
+
+> **Versión beta.** La app funciona, pero aún se está probando con distintos nodos y móviles. Si algo falla o echas algo en falta, [abre un aviso](https://github.com/Dani-NRos/vigia-mesh/issues).
+
+<p align="center"><img src="capturas/panel.png" alt="Tres pantallas de Vigía Mesh en modo demostración: el panel con una alarma de temperatura activa, la ficha de un nodo con los botones para pedir datos, su ubicación y la valla antirrobo, y los límites de alarma por métrica"></p>
+
 ## Qué hace
 
 - **Panel de sensores.** Muestra las últimas lecturas de cada nodo vigilado y una mini gráfica de 24 h.
@@ -47,6 +52,10 @@ La app reconoce el tipo de fallo y te dice qué hacer. Lo más habitual:
 - **Otra ventana de Vigía.** Solo una ventana puede tener el receptor; la otra ofrece «Conectar aquí».
 
 En Ajustes → *Diagnóstico de conexión* queda apuntado cada paso. Si falla, cópialo: dice en qué paso se corta.
+
+## Avisar de un fallo
+
+Los fallos y las sugerencias se recogen en los [avisos de GitHub](https://github.com/Dani-NRos/vigia-mesh/issues). Si es un problema de conexión, el botón **Avisar del fallo en GitHub** (en Ajustes → *Diagnóstico de conexión*) abre un aviso nuevo con el diagnóstico ya pegado. Añade el modelo del nodo receptor y su versión de firmware. Los avisos son públicos: revisa el texto antes de enviarlo.
 
 ## Límites conocidos
 

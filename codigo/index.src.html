@@ -241,7 +241,10 @@ button { font: inherit; color: inherit; }
 .lg-ack::before { background: var(--line); }
 .lg time { font: 400 12px/1 var(--f-mono); color: var(--ink-2); white-space: nowrap; font-variant-numeric: tabular-nums; }
 .lg span { min-width: 0; overflow-wrap: anywhere; }
-.foot { margin: 28px 0 32px; font: 400 12px/1.5 var(--f-mono); color: var(--ink-2); }
+.foot { margin: 28px 0 32px; display: grid; gap: 6px; font: 400 12px/1.5 var(--f-mono); color: var(--ink-2); }
+.foot-id a, .about a:not(.btn) { color: var(--accent); text-underline-offset: 3px; }
+.foot-id a { display: inline-block; padding: 6px 0; }
+a.btn { color: inherit; text-decoration: none; }
 
 /* hojas (detalle y ajustes) */
 dialog.sheet { border: 0; padding: 0; width: min(660px, 100%); max-width: 100%; max-height: min(92dvh, 940px); margin: auto auto 0; border-radius: 18px 18px 0 0; background: var(--surface); color: var(--ink); box-shadow: 0 -10px 40px rgb(0 0 0 / .25); overflow: hidden; }
@@ -367,7 +370,10 @@ dialog::backdrop { background: rgb(8 14 12 / .5); }
     <button id="logMore" class="more" type="button" hidden>Ver todo el registro</button>
   </section>
 
-  <p id="foot" class="foot">Sin internet: los datos se guardan solo en este dispositivo.</p>
+  <footer class="foot">
+    <p id="foot">Sin internet: los datos se guardan solo en este dispositivo.</p>
+    <p class="foot-id"><span id="footVer">Vigía Mesh</span> · <a href="https://github.com/Dani-NRos/vigia-mesh" target="_blank" rel="noopener">Código en GitHub</a> · <a href="https://github.com/Dani-NRos/vigia-mesh/issues" target="_blank" rel="noopener">Avisar de un fallo</a> · Dani-NRos</p>
+  </footer>
 </main>
 
 <dialog id="detail" class="sheet" aria-label="Ficha del nodo"></dialog>

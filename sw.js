@@ -1,5 +1,5 @@
 // Vigía Mesh: guarda la app en el móvil para que abra sin internet.
-const CACHE = "vigia-mv9w1cdd";
+const CACHE = "vigia-mv9ywx9k";
 const SHELL = ["./", "./index.html", "./manifest.webmanifest", "./icon-192.png", "./icon-512.png", "./icon-maskable-512.png"];
 
 self.addEventListener("install", (e) => {
@@ -25,9 +25,10 @@ self.addEventListener("fetch", (e) => {
   }
   if (url.origin !== self.location.origin) return;
   // App: primero la red (para coger actualizaciones), si no hay, la copia guardada.
-  e.respondWith(fetch(req).then((res) => {
-    if (res.ok) { const copy = res.clone(); caches.open(CACHE).then((c) => c.put(req, copy)); }
-    return res;
+  e.respondWith(fetch(req).then(async (res) => {
+    if (res.ok) { const copy = res.clone(); caches.open(CACHE).then((c) => c.put(req, copy)); return res; }
+    // La web responde con error (GitHub Pages caído, dirección movida): mejor la copia guardada que una página de error.
+    return (await caches.match(req)) || (req.mode === "navigate" && (await caches.match("./index.html"))) || res;
   }).catch(async () => (await caches.match(req)) || (await caches.match("./index.html"))));
 });
 
