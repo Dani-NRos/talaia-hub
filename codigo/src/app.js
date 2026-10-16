@@ -1,5 +1,6 @@
 import { METRICS, extractMetrics, metricMeta, sortMetrics, fmtValue, fmtWithUnit, fmtNum, fmtLimit } from "./metrics.js";
 import { createIdbStore, createMemStore } from "./store.js";
+import { createMapView } from "./map.js";
 import { Receptor } from "./receptor.js";
 import { buildDemo, DEMO_IDS } from "./demo.js";
 import { Protobuf } from "@meshtastic/core";
@@ -86,6 +87,7 @@ const S = {
 };
 let receptor = null;
 let swReg = null;
+let mapView = null; // se crea al abrir el mapa por primera vez
 
 /* ───────────── persistencia (solo modo real) ───────────── */
 function saveCfg() { if (!S.demo) LS.set("vigia.cfg", S.cfg); }
@@ -986,6 +988,7 @@ function render() {
     renderMesh();
     renderLog();
     renderFoot();
+    mapView?.update();
     const n = unacked().length;
     document.title = n ? `(${n}) Alarma · Vigía Mesh` : "Vigía Mesh";
   });
@@ -1240,6 +1243,20 @@ function renderFoot() {
   $("#foot").textContent = bits.join(" ");
   const v = $("#footVer");
   if (v) v.textContent = `Vigía Mesh ${APP_VERSION}`;
+}
+
+/* ───────────── mapa ───────────── */
+function openMap() {
+  if (!mapView) {
+    mapView = createMapView({
+      nodes: () => [...S.nodes.values()],
+      myNode: () => S.myNode,
+      esc, ago, stamp,
+      load: () => LS.get("vigia.map", {}),
+      save: (v) => LS.set("vigia.map", v),
+    });
+  }
+  mapView.open();
 }
 
 /* ───────────── detalle de nodo ───────────── */
@@ -1665,6 +1682,7 @@ function startDemo() {
     S.recent.get(k).push({ t: r.t, v: r.v });
   }
   for (const num of Object.keys(S.cfg.watched)) evalNode(Number(num), { silent: true });
+  mapView?.reset();
   const seen = S.active.get(`${DEMO_IDS.monte}||offline`);
   if (seen) seen.acked = true;
   clearInterval(S.demoTimer);
@@ -1683,6 +1701,7 @@ function stopDemo() {
   S.demoToken++;
   resetAsks();
   loadReal();
+  mapView?.reset();
   if (S.detail && $("#detail").open) $("#detail").close();
   loadRecent().then(render);
   render();
@@ -1799,6 +1818,7 @@ document.addEventListener("click", async (ev) => {
   if ("range" in ds) { S.detail.range = ds.range; $$("#detail [data-range]").forEach((b) => b.setAttribute("aria-pressed", String(b.dataset.range === ds.range))); return drawCharts(); }
   if (t.id === "linkBtn") { if (!S.demo && S.link.state === "idle" && !btSupportMsg()) return connectFlow(false); return openSettings(); }
   if (t.id === "setBtn") return openSettings();
+  if (t.id === "mapBtn") return openMap();
   if (t.id === "meshMore") { S.meshExpanded = !S.meshExpanded; return renderMesh(); }
   if (t.id === "logMore") { S.logExpanded = !S.logExpanded; return renderLog(); }
   if ("open" in ds) return openDetail(Number(ds.open));

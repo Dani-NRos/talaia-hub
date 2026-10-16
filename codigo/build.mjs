@@ -20,6 +20,7 @@ const res = await build({
   minify: true,
   write: false,
   legalComments: "none",
+  loader: { ".css": "text" }, // la hoja de Leaflet va como texto y se inserta al abrir el mapa
   alias: {
     os: path.join(root, "src/shims/os.js"),
     path: path.join(root, "src/shims/path.js"),
