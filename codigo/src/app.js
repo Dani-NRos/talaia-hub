@@ -13,7 +13,7 @@ const $$ = (s, r = document) => [...r.querySelectorAll(s)];
 const esc = (s) => String(s ?? "").replace(/[&<>"']/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[c]));
 const isNum = (x) => typeof x === "number" && Number.isFinite(x);
 const MIN = 60000, HOUR = 60 * MIN, DAY = 24 * HOUR;
-const APP_VERSION = "1.6.0";
+const APP_VERSION = "1.7.0";
 const REPO_URL = "https://github.com/Dani-NRos/vigia-mesh";
 const ISSUES_URL = `${REPO_URL}/issues`;
 const validT = (t) => isNum(t) && t > 1.6e12 && t < Date.now() + 5 * MIN;
