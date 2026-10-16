@@ -3,7 +3,8 @@
   "version": "1.6.0",
   "description": "Panel de telemetría y alarmas para nodos Meshtastic por Bluetooth, sin internet",
   "scripts": {
-    "build": "node build.mjs"
+    "build": "node build.mjs",
+    "test": "node --test test/*.test.mjs"
   },
   "license": "GPL-3.0-only",
   "dependencies": {

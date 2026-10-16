@@ -66,11 +66,14 @@ export function buildDemo(now = Date.now()) {
     { num: 0x2299aa10, short: "MURT", long: "Repetidor Murta", hw: "RAK4631", lastHeard: now - 12 * MIN, hops: 2, key: true, pos: { lat: 39.11915, lon: -0.39251, bits: 15, src: 1, t: now - 12 * MIN } },
     { num: 0x44c10e7b, short: "CULL", long: "Base Cullera", hw: "TBEAM", lastHeard: now - 41 * MIN, hops: 3, hasEnv: true, key: false, pos: { lat: 39.16521, lon: -0.25473, bits: 15, src: 2, t: now - 41 * MIN } },
     { num: 0x19f3d2c6, short: "PEPE", long: "Nodo de Pepe", hw: "TLORA_V2_1_1P6", lastHeard: now - 3 * HOUR, hops: 1, key: true },
-    { num: 0x0be7714d, short: "TRKR", long: "Tracker de ruta", hw: "TRACKER_T1000_E", lastHeard: now - 2 * 24 * HOUR, hops: 4, key: true, pos: { lat: 39.21043, lon: -0.51307, bits: 32, src: 2, t: now - 2 * 24 * HOUR } },
+    { num: 0x0be7714d, short: "TRKR", long: "Tracker de ruta", hw: "TRACKER_T1000_E", lastHeard: now - 2 * 24 * HOUR, hops: 4, key: true, pos: { lat: 39.21043, lon: -0.51307, bits: 32, src: 2, t: now - 2 * 24 * HOUR },
+      // Se movió: llegó a este sitio hace 2 días y 25 min. Su temperatura es de antes, de otro sitio.
+      place: { lat: 39.21043, lon: -0.51307, since: now - 2 * 24 * HOUR - 25 * MIN, moved: true, bits: 32 } },
   ];
   const extraMetrics = {
     0x44c10e7b: { temperature: { v: 21.3, t: now - 41 * MIN }, relativeHumidity: { v: 66, t: now - 41 * MIN } },
     0x2299aa10: { batteryLevel: { v: 78, t: now - 12 * MIN } },
+    0x0be7714d: { temperature: { v: 27.4, t: now - 2 * 24 * HOUR - 90 * MIN }, batteryLevel: { v: 64, t: now - 2 * 24 * HOUR } },
   };
 
   const watched = {

@@ -4,7 +4,7 @@ import { Receptor } from "./receptor.js";
 import { buildDemo, DEMO_IDS } from "./demo.js";
 import { Protobuf } from "@meshtastic/core";
 import { encodeUser } from "./pb.js";
-import { distM, compass, precisionM, fmtDist, coordText, mapsUrl, SOURCE } from "./geo.js";
+import { distM, compass, precisionM, fmtDist, coordText, mapsUrl, SOURCE, nextPlace, placeFromPos } from "./geo.js";
 
 /* ───────────── utilidades ───────────── */
 const $ = (s, r = document) => r.querySelector(s);
@@ -215,6 +215,8 @@ function setPosition(num, pos, opts = {}) {
   if (!pos.bits && prev?.bits && prev.lat === pos.lat && prev.lon === pos.lon) pos.bits = prev.bits;
   const fresh = !prev || pos.t > prev.t;
   n.pos = pos;
+  // Sitio actual y desde cuándo está en él: para saber si sus lecturas se midieron aquí (mapa).
+  n.place = nextPlace(n.place || placeFromPos(prev), pos);
   evalFence(num, { fresh: fresh && opts.live, replay: opts.replay });
   saveNodes();
   refreshPos(num);

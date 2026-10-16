@@ -40,3 +40,44 @@ export const coordText = (p) => `${p.lat.toFixed(5)}, ${p.lon.toFixed(5)}`;
 export const mapsUrl = (p) => `https://www.google.com/maps/search/?api=1&query=${p.lat.toFixed(6)},${p.lon.toFixed(6)}`;
 
 export const SOURCE = { 1: "fijada a mano", 2: "GPS del nodo", 3: "GPS externo o del móvil" };
+
+/* ── Sitio actual del nodo, sin guardar recorrido ──
+ * place = { lat, lon, since, moved, bits }
+ *   lat/lon: primera posición recibida en este sitio (el ancla; no se arrastra con cada posición).
+ *   bits:    precisión con que llegó el ancla.
+ *   since:   hora de esa primera posición, es decir, desde cuándo consta que está aquí.
+ *   moved:   true si llegó aquí desde otro sitio; un nodo que nunca se ha movido no tiene lecturas «de otro sitio».
+ * Se compara siempre con el ancla, no con la posición anterior: así también se detecta a quien avanza a pasos cortos.
+ */
+export const MOVE_MIN_M = 200;
+const SAME_PLACE_SLACK_MS = 60000; // desfase admitido entre la hora de la posición (GPS del nodo) y la de la lectura (móvil)
+
+/** Distancia a partir de la cual dos posiciones son sitios distintos. Con la posición recortada del canal
+ *  público (≈730 m) el ruido es de una celda entera, así que el umbral crece con la imprecisión. */
+export function moveThreshold(bits) {
+  const p = precisionM(bits);
+  return Math.max(MOVE_MIN_M, p ? 1.5 * p : 0);
+}
+
+/** Sitio que corresponde tras recibir pos ({lat, lon, t, bits}). Devuelve el mismo objeto si no ha cambiado de sitio. */
+export function nextPlace(place, pos) {
+  if (!place) return placeFromPos(pos);
+  const thr = Math.max(moveThreshold(pos.bits), moveThreshold(place.bits));
+  if (distM(place, pos) <= thr) return place;
+  return { lat: pos.lat, lon: pos.lon, since: pos.t, moved: true, bits: pos.bits || 0 };
+}
+
+/** Sitio inicial para un nodo guardado antes de que existiera place: lo que hay es su última posición. */
+export function placeFromPos(pos) {
+  return pos ? { lat: pos.lat, lon: pos.lon, since: pos.t, moved: false, bits: pos.bits || 0 } : null;
+}
+
+/**
+ * ¿Dónde se midió una lectura de hora t respecto a la posición actual del nodo?
+ *   "here"      → en el sitio donde está ahora (o el nodo no se ha movido nunca);
+ *   "elsewhere" → antes de llegar aquí: se midió en otro sitio o por el camino.
+ */
+export function readingPlace(place, t) {
+  if (!place || !place.moved) return "here";
+  return t >= place.since - SAME_PLACE_SLACK_MS ? "here" : "elsewhere";
+}
