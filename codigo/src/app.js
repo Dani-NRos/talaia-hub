@@ -1246,7 +1246,11 @@ function renderFoot() {
 }
 
 /* ───────────── mapa ───────────── */
+const TILE_CACHE = "teselas-osm"; // el mismo nombre que en sw.js
+let persistAsked = false;
 function openMap() {
+  // Que el navegador no vacíe el fondo guardado cuando el móvil vaya justo de espacio.
+  if (!persistAsked && window.__VIGIA_PWA) { persistAsked = true; navigator.storage?.persist?.().catch(() => {}); }
   if (!mapView) {
     mapView = createMapView({
       nodes: () => [...S.nodes.values()],
@@ -1447,7 +1451,12 @@ function renderSettings() {
       <div class="set-row"><span id="histCount">Contando lecturas…</span><select id="setRet" class="inp sel" aria-label="Tiempo que se guardan las lecturas">${[7, 30, 90, 365].map((d) => `<option value="${d}"${S.settings.retentionDays === d ? " selected" : ""}>Guardar ${d} días</option>`).join("")}</select></div>
       <div class="btns">${PREVIEW ? "" : `<button class="btn ghost" data-export>Exportar CSV</button>`}<button class="btn danger-ghost" data-wipe>Borrar histórico</button></div>
     </section>
-    ${PREVIEW ? "" : `<section class="blk" id="diagBox"><h3>Diagnóstico de conexión</h3>
+    ${PREVIEW ? "" : `<section class="blk"><h3>Mapa sin internet</h3>
+      <div class="set-row"><span id="tileCount">Contando el fondo guardado…</span><button class="btn ghost" data-wipe-tiles>Borrar fondo guardado</button></div>
+      <p class="hint">El fondo del mapa se guarda solo de las zonas que ves con conexión y en los zooms que usas, hasta unas 2.000 teselas (unos 40 MB). Antes de ir a un sitio sin cobertura, recórrelo en el mapa con internet.</p>
+      <p class="hint" id="tilePersist"></p>
+    </section>
+    <section class="blk" id="diagBox"><h3>Diagnóstico de conexión</h3>
       <p class="hint">Cada paso de la conexión queda apuntado aquí. Si falla, copia el diagnóstico: dice en qué paso se corta.</p>
       <pre class="diag" id="diagList">${esc(diagLines(40))}</pre>
       <div class="btns"><button class="btn ghost" data-copy-diag>Copiar diagnóstico</button><button class="btn ghost" data-report>Avisar del fallo en GitHub</button><button class="btn ghost" data-clear-diag>Borrar</button></div>
@@ -1462,6 +1471,19 @@ function renderSettings() {
     </section>
   </div>`;
   S.store.count().then((c) => { const el = $("#histCount"); if (el) el.textContent = `${c.toLocaleString("es-ES")} lecturas${S.demo ? " (demo)" : ""}`; });
+  if (!PREVIEW) tileInfo();
+}
+
+async function tileInfo() {
+  let n = 0, mb = null, kept = null;
+  try { n = (await (await caches.open(TILE_CACHE)).keys()).length; } catch { /* sin caché */ }
+  try { const e = await navigator.storage.estimate(); if (e.usageDetails?.caches != null) mb = e.usageDetails.caches / 1048576; } catch { /* sin estimación */ }
+  try { kept = await navigator.storage.persisted(); } catch { /* sin dato */ }
+  const el = $("#tileCount");
+  if (el) el.textContent = n ? `${n.toLocaleString("es-ES")} teselas${mb != null ? ` (≈ ${fmtNum(mb, mb < 10 ? 1 : 0)} MB)` : ""}` : "Nada guardado todavía";
+  const p = $("#tilePersist");
+  if (p) p.textContent = kept === true ? "Guardado permanente: el navegador no lo borra aunque falte espacio."
+    : kept === false ? "El navegador puede borrarlo si el móvil se queda sin espacio. Instalar la app suele evitarlo." : "";
 }
 function openSettings() {
   renderSettings();
@@ -1806,6 +1828,11 @@ document.addEventListener("click", async (ev) => {
     renderSettings();
     render();
     return toast("Histórico borrado");
+  }
+  if ("wipeTiles" in ds) {
+    try { await caches.delete(TILE_CACHE); } catch { /* nada que borrar */ }
+    tileInfo();
+    return toast("Fondo del mapa borrado. Se volverá a guardar al usarlo con internet.");
   }
   if ("unwatch" in ds) {
     if (Date.now() - unwatchArmed > 4000) { unwatchArmed = Date.now(); t.textContent = "Toca otra vez para dejar de vigilar"; return; }

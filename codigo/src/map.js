@@ -19,7 +19,7 @@ export function createMapView(ctx) {
   const countEl = document.getElementById("mapCount");
   const st = { metric: null, age: "24h", ...(ctx.load() || {}) };
   const markers = new Map(); // clave → { mk, html, lat, lon }
-  let m = null, guides = null, legendEl = null, emptyEl = null, fitted = false;
+  let m = null, guides = null, legendEl = null, emptyEl = null, offEl = null, fitted = false;
   let shown = { metric: null, points: [], others: [] };
 
   selA.innerHTML = AGES.map((a) => `<option value="${a.key}">${a.label}</option>`).join("");
@@ -69,6 +69,19 @@ export function createMapView(ctx) {
     new Legend({ position: "bottomleft" }).addTo(m);
 
     guides = layerGroup().addTo(m); // punto exacto y línea de las píldoras apartadas, por debajo de todas ellas
+    const Offline = Control.extend({
+      onAdd() {
+        offEl = DomUtil.create("div", "map-off");
+        offEl.textContent = "Sin conexión: el fondo solo sale en las zonas que ya has visto con internet.";
+        offEl.hidden = navigator.onLine;
+        return offEl;
+      },
+    });
+    new Offline({ position: "topleft" }).addTo(m);
+    const onNet = () => { if (offEl) offEl.hidden = navigator.onLine; };
+    window.addEventListener("online", onNet);
+    window.addEventListener("offline", onNet);
+
     m.on("zoomend viewreset", spread);
     emptyEl = DomUtil.create("div", "map-empty", box);
     emptyEl.hidden = true;

@@ -355,6 +355,8 @@ dialog.full[open] { display: grid; grid-template-rows: auto minmax(0, 1fr); }
 .mpop p { margin: 0; } /* Leaflet pone 17 px de margen a los párrafos del globo */
 .mpop-far { font-size: 13px; font-weight: 500; color: var(--warn); }
 .mpop .mini { justify-self: start; margin-top: 6px; }
+.map-off { max-width: min(300px, calc(100vw - 90px)); padding: 7px 10px; border-radius: 10px; background: var(--surface); color: var(--warn); border: 1px solid color-mix(in oklab, var(--warn) 45%, var(--line)); box-shadow: var(--shadow); font: 500 12.5px/1.35 var(--f-body); }
+.map-off[hidden] { display: none; }
 .map-legend { display: grid; gap: 4px; width: 200px; padding: 9px 11px; border-radius: 10px; background: color-mix(in oklab, var(--surface) 94%, transparent); border: 1px solid var(--line); box-shadow: var(--shadow); color: var(--ink); }
 .map-legend[hidden] { display: none; }
 .ml-t { font: 600 12px/1.2 var(--f-body); text-transform: uppercase; letter-spacing: .07em; }
