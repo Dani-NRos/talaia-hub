@@ -1,7 +1,7 @@
 // Datos y escalas del mapa: qué nodos se pintan, con qué valor, color y opacidad.
 // Sin Leaflet ni DOM, para poder probarlo con node --test.
 import { metricMeta, sortMetrics, fmtValue } from "./metrics.js";
-import { readingPlace, placeFromPos } from "./geo.js";
+import { readingPlace, placeFromPos, precisionM } from "./geo.js";
 
 const MIN = 60000, HOUR = 60 * MIN, DAY = 24 * HOUR;
 
@@ -47,7 +47,8 @@ export function defaultMetric(counts, wanted = null) {
 
 /**
  * Puntos del mapa para la métrica elegida.
- * Cada punto: { num, lat, lon, v, t, far } — far: la lectura se midió antes de que el nodo llegara a donde está.
+ * Cada punto: { num, lat, lon, v, t, far, acc } — far: la lectura se midió antes de que el nodo llegara a donde está;
+ * acc: radio en metros de la zona donde puede estar el nodo (posición recortada por el canal), o null si es exacta o no se sabe.
  * Los nodos con ubicación oídos en el periodo pero sin esa métrica van aparte, en «others».
  */
 export function mapPoints(nodes, metric, maxAge, now = Date.now()) {
@@ -57,9 +58,9 @@ export function mapPoints(nodes, metric, maxAge, now = Date.now()) {
     const r = metric ? readingOf(n, metric, maxAge, now) : null;
     if (r) {
       const place = n.place || placeFromPos(n.pos);
-      points.push({ num: n.num, lat: n.pos.lat, lon: n.pos.lon, v: r.v, t: r.t, far: readingPlace(place, r.t) === "elsewhere" });
+      points.push({ num: n.num, lat: n.pos.lat, lon: n.pos.lon, v: r.v, t: r.t, far: readingPlace(place, r.t) === "elsewhere", acc: precisionM(n.pos.bits) });
     } else if (now - (n.lastHeard || n.pos.t || 0) <= maxAge) {
-      others.push({ num: n.num, lat: n.pos.lat, lon: n.pos.lon });
+      others.push({ num: n.num, lat: n.pos.lat, lon: n.pos.lon, acc: precisionM(n.pos.bits) });
     }
   }
   return { points, others };

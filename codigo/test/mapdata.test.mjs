@@ -40,6 +40,21 @@ test("puntos: los que tienen la métrica, y aparte los nodos oídos sin ella", (
   assert.equal(points.find((p) => p.num === 1).far, false);
 });
 
+test("radio de precisión: solo cuando el canal recorta la posición", () => {
+  const ns = [
+    { num: 1, lastHeard: NOW, pos: pos(39.1, -0.4, NOW, 15), metrics: { temperature: { v: 20, t: NOW } } }, // canal público
+    { num: 2, lastHeard: NOW, pos: pos(39.2, -0.4, NOW, 32), metrics: { temperature: { v: 20, t: NOW } } }, // completa
+    { num: 3, lastHeard: NOW, pos: pos(39.3, -0.4, NOW, 0), metrics: { temperature: { v: 20, t: NOW } } },  // desconocida
+    { num: 4, lastHeard: NOW, pos: pos(39.4, -0.4, NOW, 13), metrics: {} },                                    // sin sensor
+  ];
+  const { points, others } = mapPoints(ns, "temperature", ageMs("24h"), NOW);
+  const acc = Object.fromEntries([...points, ...others].map((q) => [q.num, q.acc]));
+  assert.ok(acc[1] > 700 && acc[1] < 760);
+  assert.equal(acc[2], null);
+  assert.equal(acc[3], null);
+  assert.ok(acc[4] > 2800 && acc[4] < 3000);
+});
+
 test("píldoras que se pisan: la primera se queda, las demás se apartan arriba y abajo", () => {
   const pill = (key, x, y) => ({ key, x, y, w: 52, h: 26 });
   const off = declutter([pill(1, 100, 100), pill(2, 100, 100), pill(3, 104, 100), pill(4, 400, 100)]);

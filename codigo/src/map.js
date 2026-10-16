@@ -1,6 +1,6 @@
 // Mapa a pantalla completa: la última lectura de cada nodo con ubicación, filtrada por sensor y antigüedad.
 // Leaflet va dentro de la app (sin CDN) para que abra sin internet; el fondo son teselas de OpenStreetMap.
-import { map as lmap, tileLayer, marker, divIcon, latLngBounds, control, Control, DomUtil, DomEvent, layerGroup, circleMarker, polyline, point } from "leaflet/dist/leaflet-src.esm.js";
+import { map as lmap, tileLayer, marker, divIcon, latLngBounds, control, Control, DomUtil, DomEvent, layerGroup, circleMarker, circle, polyline, point } from "leaflet/dist/leaflet-src.esm.js";
 import leafletCss from "leaflet/dist/leaflet.css";
 import { metricMeta, fmtWithUnit, fmtNum } from "./metrics.js";
 import { precisionM, fmtDist } from "./geo.js";
@@ -19,7 +19,7 @@ export function createMapView(ctx) {
   const countEl = document.getElementById("mapCount");
   const st = { metric: null, age: "24h", ...(ctx.load() || {}) };
   const markers = new Map(); // clave → { mk, html, lat, lon }
-  let m = null, guides = null, legendEl = null, emptyEl = null, offEl = null, fitted = false;
+  let m = null, rings = null, guides = null, legendEl = null, emptyEl = null, offEl = null, fitted = false;
   let shown = { metric: null, points: [], others: [] };
 
   selA.innerHTML = AGES.map((a) => `<option value="${a.key}">${a.label}</option>`).join("");
@@ -68,6 +68,9 @@ export function createMapView(ctx) {
     });
     new Legend({ position: "bottomleft" }).addTo(m);
 
+    // Círculos de precisión en una capa propia, por debajo de las líneas y de las píldoras.
+    m.createPane("precision").style.zIndex = 350;
+    rings = layerGroup().addTo(m);
     guides = layerGroup().addTo(m); // punto exacto y línea de las píldoras apartadas, por debajo de todas ellas
     const Offline = Control.extend({
       onAdd() {
@@ -132,7 +135,7 @@ export function createMapView(ctx) {
   }
 
   /* ── leyenda ── */
-  function legendHTML(metric, sc, anyFar, n) {
+  function legendHTML(metric, sc, anyFar, anyRing, n) {
     if (!metric || !n) return "";
     const meta = metricMeta(metric);
     const lab = (v) => {
@@ -148,6 +151,7 @@ export function createMapView(ctx) {
       h += `<div class="ml-ticks"><span>${sc.kind === "div" ? "≤ " : ""}${lab(sc.lo)}</span>${sc.kind === "div" ? `<span>${lab(sc.mid)}</span>` : ""}<span>${sc.kind === "div" ? "≥ " : ""}${lab(sc.hi)}</span></div>`;
     }
     if (anyFar) h += `<p class="ml-far"><i></i>Medida en otro sitio</p>`;
+    if (anyRing) h += `<p class="ml-ring"><i></i>Posición aproximada</p>`;
     h += `<p class="ml-age">Más pálido, lectura más antigua</p>`;
     return h;
   }
@@ -184,6 +188,15 @@ export function createMapView(ctx) {
       place(`p:${p.num}`, p.lat, p.lon, html, 1000 + i, `${n?.long || ""}: ${pillText(metric, p.v)}`);
       keep.add(`p:${p.num}`);
     });
+    // Zona donde puede estar cada nodo cuyo canal recorta la posición (≈730 m en el canal público).
+    rings.clearLayers();
+    // Borde siempre oscuro (un gris neutro de 18 °C no se vería sobre el mapa); el relleno, del color del valor.
+    const ring = (q, fill) => {
+      if (!q.acc) return;
+      circle([q.lat, q.lon], { radius: q.acc, pane: "precision", interactive: false, color: "#152320", weight: 1.5, opacity: 0.45, dashArray: "5 5", fillColor: fill, fillOpacity: 0.18 }).addTo(rings);
+    };
+    for (const p of points) ring(p, sc.color(p.v));
+    for (const o of others) ring(o, "#66726e");
     for (const o of others) {
       const html = `<div class="md${o.num === me ? " me" : ""}"></div>`;
       place(`o:${o.num}`, o.lat, o.lon, html, 0, nodeOf(o.num)?.long || "");
@@ -194,7 +207,7 @@ export function createMapView(ctx) {
 
     countEl.textContent = points.length ? `${points.length} ${points.length === 1 ? "nodo" : "nodos"}` : "";
     if (legendEl) {
-      const h = legendHTML(metric, sc, points.some((p) => p.far), points.length);
+      const h = legendHTML(metric, sc, points.some((p) => p.far), [...points, ...others].some((q) => q.acc), points.length);
       if (legendEl.dataset.h !== h) { legendEl.innerHTML = h; legendEl.dataset.h = h; }
       legendEl.hidden = !h;
     }
