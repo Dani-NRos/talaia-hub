@@ -1500,7 +1500,7 @@ function renderMesh() {
   const res = searchNodes(pool, { q, filters, sort: S.meshView.sort, now: Date.now(), from });
   $("#meshTools").hidden = S.nodes.size < 2;
   renderMeshTools();
-  $("#meshCount").textContent = searching ? `${res.length} de ${rest.length}` : rest.length ? String(rest.length) : "";
+  $("#meshCount").textContent = searching ? `${res.length} de ${pool.length}` : rest.length ? String(rest.length) : "";
   const limit = S.meshExpanded ? Infinity : searching ? 50 : 8;
   const shown = res.slice(0, limit);
   let html;
