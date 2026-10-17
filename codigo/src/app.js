@@ -6,6 +6,7 @@ import { buildDemo, DEMO_IDS } from "./demo.js";
 import { Protobuf } from "@meshtastic/core";
 import { encodeUser, routingErrorReason } from "./pb.js";
 import { distM, compass, precisionM, fmtDist, coordText, mapsUrl, SOURCE, nextPlace, placeFromPos } from "./geo.js";
+import { trendCheck, trendDefault, parseTrendRule } from "./trend.js";
 
 /* ───────────── utilidades ───────────── */
 const $ = (s, r = document) => r.querySelector(s);
@@ -13,7 +14,7 @@ const $$ = (s, r = document) => [...r.querySelectorAll(s)];
 const esc = (s) => String(s ?? "").replace(/[&<>"']/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[c]));
 const isNum = (x) => typeof x === "number" && Number.isFinite(x);
 const MIN = 60000, HOUR = 60 * MIN, DAY = 24 * HOUR;
-const APP_VERSION = "1.8.1";
+const APP_VERSION = "1.9.0";
 const REPO_URL = "https://github.com/Dani-NRos/vigia-mesh";
 const ISSUES_URL = `${REPO_URL}/issues`;
 const validT = (t) => isNum(t) && t > 1.6e12 && t < Date.now() + 5 * MIN;
@@ -155,7 +156,7 @@ function ingest(num, metrics, t, opts = {}) {
     if (arr.length > 1 && arr[arr.length - 2].t > t) arr.sort((a, b) => a.t - b.t);
     while (arr.length && arr[0].t < Date.now() - 26 * HOUR) arr.shift();
     S.recent.set(key, arr);
-    if (newer) evalThreshold(num, k, v, t, opts);
+    if (newer) { evalThreshold(num, k, v, t, opts); evalTrend(num, k, opts); }
   }
   if (opts.env || opts.kind === "environmentMetrics") n.hasEnv = true;
   if (opts.store !== false) S.store.add(rows);
@@ -180,16 +181,69 @@ function evalThreshold(num, metric, v, t, opts = {}) {
 function evalNode(num, opts = {}) {
   const n = S.nodes.get(num);
   if (n) for (const [k, m] of Object.entries(n.metrics)) evalThreshold(num, k, m.v, m.t, opts);
+  for (const k of Object.keys(S.cfg.watched[num]?.rules || {})) evalTrend(num, k, opts);
   // métricas con regla pero que ya no tienen dato: nada que evaluar
   for (const key of [...S.active.keys()]) {
     const a = S.active.get(key);
-    if (a.num === num && (a.kind === "high" || a.kind === "low") && !isWatched(num)) clearAlarm(key, { silent: true });
+    if (a.num === num && (a.kind === "high" || a.kind === "low" || a.kind === "trend") && !isWatched(num)) clearAlarm(key, { silent: true });
   }
   evalOffline(opts);
   evalFence(num, { silent: opts.silent });
 }
 
 function linkKnown() { return S.demo || S.link.state === "ready"; }
+
+/* ───────────── cambio rápido (tendencia) ───────────── */
+// Avisa cuando un valor baja o sube mucho en poco tiempo aunque no llegue a ningún límite
+// (la presión que cae antes de una tormenta, la batería que se vacía de golpe).
+const trendKey = (num, k) => `${num}|${k}|trend`;
+/** Lecturas de las últimas 26 h; la batería «USB» (101) no cuenta. */
+function trendSeries(num, k) {
+  const s = S.recent.get(seriesKey(num, k)) || [];
+  return k === "batteryLevel" ? s.filter((p) => p.v <= 100) : s;
+}
+/** Cambio en la ventana de la regla, hasta la última lectura; null sin historia suficiente. */
+function trendNow(num, k, rule) {
+  const last = S.nodes.get(num)?.metrics?.[k];
+  if (!last || (k === "batteryLevel" && last.v > 100)) return null;
+  return trendCheck(trendSeries(num, k), last.t, rule);
+}
+/** strict: al cambiar la regla, se cierra en cuanto deja de cumplirse (sin el margen del 70 %). */
+function evalTrend(num, k, opts = {}) {
+  const key = trendKey(num, k);
+  const rule = S.cfg.watched[num]?.rules?.[k]?.trend;
+  if (!rule) return clearAlarm(key, { silent: true });
+  const last = S.nodes.get(num)?.metrics?.[k];
+  if (k === "batteryLevel" && last?.v > 100) return clearAlarm(key, { v: last.v, t: last.t }); // ya está enchufado
+  const r = trendNow(num, k, rule);
+  if (!r) return;
+  if (r.fire) raise(key, { num, metric: k, kind: "trend", dir: rule.dir, value: r.change, limit: rule.delta, hours: rule.hours, from: r.from, to: r.to, t: r.to.t }, opts);
+  else if (S.active.has(key) && (r.clear || opts.strict)) clearAlarm(key, { v: r.to.v, t: r.to.t });
+}
+/** Decimales para un cambio: los pequeños llevan uno más (3,4 hPa, no 3 hPa). */
+const trendDec = (k, change) => Math.max(metricMeta(k).dec, Math.abs(change) < 10 ? 1 : 0);
+function fmtTrend(k, v, dec) {
+  const u = metricMeta(k).unit;
+  return u ? `${fmtNum(v, dec)} ${u}` : fmtNum(v, dec);
+}
+const trendVerb = (dir) => (dir === "down" ? "baja" : "sube");
+/** «30 min», «1,5 h», «3 h». */
+const hoursText = (h) => (h < 1 ? `${Math.round(h * 60)} min` : `${fmtNum(h, h % 1 ? 1 : 0)} h`);
+/** «en las últimas 3 horas», «en la última hora», «en los últimos 30 min». */
+function lastWindow(h) {
+  if (h < 1) return `en los últimos ${Math.round(h * 60)} min`;
+  if (h === 1) return "en la última hora";
+  return `en las últimas ${fmtNum(h, h % 1 ? 1 : 0)} horas`;
+}
+/** «ha bajado 1,2 hPa en las últimas 3 horas» con los datos de ahora, para la ficha. */
+function trendNowText(num, k, rule) {
+  const r = trendNow(num, k, rule);
+  if (!r) return `Ahora: aún no hay lecturas de hace ${hoursText(rule.hours / 2)} o más para comparar.`;
+  if (r.change <= 0) return `Ahora: no ${rule.dir === "down" ? "ha bajado" : "ha subido"} ${lastWindow(rule.hours)}.`;
+  return `Ahora: ${rule.dir === "down" ? "ha bajado" : "ha subido"} ${fmtTrend(k, r.change, trendDec(k, r.change))} ${lastWindow(rule.hours)}.`;
+}
+/** Para la tarjeta: «↓3/3 h». */
+const trendShort = (k, rule) => `${rule.dir === "down" ? "↓" : "↑"}${fmtLimit(k, rule.delta)}/${hoursText(rule.hours)}`;
 
 /* ───────────── valla antirrobo ───────────── */
 // Salta cuando dos posiciones nuevas seguidas caen fuera del radio; se cierra al volver con un 20 % de margen.
@@ -253,6 +307,7 @@ function raise(key, a, opts = {}) {
     ex.value = a.value;
     ex.lastT = a.t;
     if (isNum(a.limit)) ex.limit = a.limit;
+    if (a.kind === "trend") Object.assign(ex, { dir: a.dir, hours: a.hours, from: a.from, to: a.to });
     saveActive();
     return;
   }
@@ -292,6 +347,10 @@ function alarmTitle(al) {
   if (al.kind === "offline") return `${name} · Sin señal más de ${dur(al.limit * MIN)}`;
   if (al.kind === "moved") return `${name} · Fuera de su sitio`;
   const m = metricMeta(al.metric);
+  if (al.kind === "trend") {
+    const sign = al.dir === "down" ? "−" : "+";
+    return `${name} · ${m.label} ${al.dir === "down" ? "bajando" : "subiendo"} rápido (${sign}${fmtTrend(al.metric, al.value, trendDec(al.metric, al.value))} en ${dur(al.to.t - al.from.t)})`;
+  }
   return `${name} · ${m.label} ${al.kind === "high" ? "por encima de" : "por debajo de"} ${fmtLimit(al.metric, al.limit, true)}`;
 }
 function alarmDetail(al) {
@@ -303,6 +362,10 @@ function alarmDetail(al) {
     const dir = n?.pos && f ? ` al ${compass(f, n.pos)}` : "";
     return `Está a ${fmtDist(al.value)}${dir} de su sitio (valla de ${fmtDist(al.limit)}). Posición de las ${n?.pos ? hhmm.format(new Date(n.pos.t)) : "—"}.`;
   }
+  if (al.kind === "trend") {
+    const d = trendDec(al.metric, al.value);
+    return `De ${fmtTrend(al.metric, al.from.v, d)} a las ${stamp(al.from.t)} a ${fmtTrend(al.metric, al.to.v, d)} a las ${stamp(al.to.t)}. Avisa si ${trendVerb(al.dir)} ${fmtLimit(al.metric, al.limit, true)} o más en ${hoursText(al.hours)}.`;
+  }
   return `Ahora ${fmtWithUnit(al.metric, al.value)}.`;
 }
 function clearText(al, info) {
@@ -312,6 +375,7 @@ function clearText(al, info) {
   if (al.kind === "offline") return `${name} · Vuelve a dar señal`;
   if (al.kind === "moved") return `${name} · De vuelta en su sitio${isNum(info.v) ? ` (a ${fmtDist(info.v)})` : ""}`;
   const m = metricMeta(al.metric);
+  if (al.kind === "trend") return `${name} · ${m.label} ya no ${trendVerb(al.dir)} tan rápido${isNum(info.v) ? ` (${fmtWithUnit(al.metric, info.v)})` : ""}`;
   return `${name} · ${m.label} de vuelta en rango${isNum(info.v) ? ` (${fmtWithUnit(al.metric, info.v)})` : ""}`;
 }
 
@@ -717,6 +781,7 @@ function meshText(kind, al, info) {
   if (kind === "clear") {
     if (al.kind === "offline") return `✓ Vigía: ${name} vuelve a dar señal · ${now}`;
     if (al.kind === "moved") return `✓ Vigía: ${name} de vuelta en su sitio · ${now}`;
+    if (al.kind === "trend") return `✓ Vigía: ${name} · ${metricMeta(al.metric).label} ya no ${trendVerb(al.dir)} tan rápido · ${now}`;
     return `✓ Vigía: ${name} · ${metricMeta(al.metric).label} de vuelta en rango${isNum(info?.v) ? ` (${fmtWithUnit(al.metric, info.v)})` : ""} · ${now}`;
   }
   const late = al.late ? " (con retraso)" : "";
@@ -725,6 +790,10 @@ function meshText(kind, al, info) {
     const n = S.nodes.get(al.num), f = S.cfg.watched[al.num]?.fence;
     const where = n?.pos ? ` · ${coordText(n.pos)}` : "";
     return `⚠ Vigía: ${name} fuera de su sitio, a ${fmtDist(al.value)}${n?.pos && f ? ` al ${compass(f, n.pos)}` : ""}${where} · ${now}${late}`;
+  }
+  if (al.kind === "trend") {
+    const d = trendDec(al.metric, al.value), u = metricMeta(al.metric).unit;
+    return `⚠ Vigía: ${name} · ${metricMeta(al.metric).label} ${al.dir === "down" ? "bajando" : "subiendo"} rápido: ${al.dir === "down" ? "−" : "+"}${fmtTrend(al.metric, al.value, d)} en ${dur(al.to.t - al.from.t)} (${fmtNum(al.from.v, d)}→${fmtNum(al.to.v, d)}${u ? ` ${u}` : ""}) · ${now}${late}`;
   }
   return `⚠ Vigía: ${name} · ${metricMeta(al.metric).label} ${fmtWithUnit(al.metric, al.value)} (${al.kind === "high" ? "máx" : "mín"} ${fmtLimit(al.metric, al.limit)}) · ${now}${late}`;
 }
@@ -1213,7 +1282,7 @@ function issueUrl() {
 function nodeState(num) {
   const al = [...S.active.values()].filter((a) => a.num === num);
   if (al.some((a) => a.kind === "moved")) return ["crit", "Fuera de sitio"];
-  if (al.some((a) => a.kind === "high" || a.kind === "low")) return ["crit", "Alarma"];
+  if (al.some((a) => a.kind === "high" || a.kind === "low" || a.kind === "trend")) return ["crit", "Alarma"];
   if (al.some((a) => a.kind === "offline")) return ["off", "Sin señal"];
   const n = S.nodes.get(num);
   if (!n || !n.lastHeard) return ["none", "Sin datos"];
@@ -1244,8 +1313,8 @@ function renderCards() {
     const readings = keys.map((k) => {
       const m = metricMeta(k), r = (w.rules || {})[k] || {};
       const v = n.metrics[k].v;
-      const bad = (isNum(r.max) && v > r.max) || (isNum(r.min) && v < r.min);
-      const lim = [isNum(r.min) ? `mín ${fmtLimit(k, r.min)}` : "", isNum(r.max) ? `máx ${fmtLimit(k, r.max)}` : ""].filter(Boolean).join(" · ");
+      const bad = (isNum(r.max) && v > r.max) || (isNum(r.min) && v < r.min) || S.active.has(trendKey(num, k));
+      const lim = [isNum(r.min) ? `mín ${fmtLimit(k, r.min)}` : "", isNum(r.max) ? `máx ${fmtLimit(k, r.max)}` : "", r.trend ? trendShort(k, r.trend) : ""].filter(Boolean).join(" · ");
       const unit = k === "batteryLevel" && v > 100 ? "" : m.unit;
       return `<div class="rd${bad ? " bad" : ""}"><span class="rd-l">${esc(m.label)}</span><span class="rd-v">${fmtValue(k, v)}${unit ? `<small>${esc(unit)}</small>` : ""}</span><span class="rd-lim">${lim || "&nbsp;"}</span></div>`;
     }).join("");
@@ -1358,7 +1427,8 @@ function renderDetail() {
       <p class="hint">Por defecto la telemetría sale cada 30 min. Deja margen para dos envíos perdidos; vacío desactiva este aviso.</p>
       ${rows ? `<div class="tbl"><table class="thr-t"><thead><tr><th scope="col">Métrica</th><th scope="col">Ahora</th><th scope="col">Mín.</th><th scope="col">Máx.</th></tr></thead><tbody>${rows}</tbody></table></div>
       <p class="hint">Escribe el límite y sal de la casilla para guardarlo. Vacía la casilla para quitarlo.</p>` : `<p class="hint">Cuando este nodo mande telemetría aparecerán aquí sus métricas para ponerles límites.</p>`}
-      <p class="form-err" id="ruleErr" role="alert" hidden></p></section>`;
+      <p class="form-err" id="ruleErr" role="alert" hidden></p>
+      <div class="trend-box" id="trendBox">${trendBlock(num)}</div></section>`;
   } else {
     body += `<section class="blk cta"><p>Vigila este nodo para fijarlo arriba y ponerle alarmas de umbral y de nodo sin señal.</p><button class="btn primary" data-watch="${num}">Vigilar este nodo</button></section>`;
   }
@@ -1397,6 +1467,11 @@ function refreshDetailLive() {
     if (a) a.textContent = fmtValue(k, m.v);
     const b = $(`#detail [data-cur="${k}"]`);
     if (b) b.textContent = fmtWithUnit(k, m.v);
+    const c = $(`#detail [data-trend-now="${k}"]`), rule = S.cfg.watched[S.detail.num]?.rules?.[k]?.trend;
+    if (c && rule) {
+      c.textContent = trendNowText(S.detail.num, k, rule);
+      c.closest("li")?.classList.toggle("bad", S.active.has(trendKey(S.detail.num, k)));
+    }
   }
   clearTimeout(liveT);
   liveT = setTimeout(drawCharts, 400);
@@ -1426,7 +1501,7 @@ function saveRuleFromInput(inp) {
   if (v === null) delete r[side]; else r[side] = v;
   if (isNum(r.min) && isNum(r.max) && r.min >= r.max) { showErr(err, `En ${metricMeta(k).label.toLowerCase()} el mínimo tiene que ser menor que el máximo.`); inp.focus(); return; }
   err.hidden = true;
-  if (isNum(r.min) || isNum(r.max)) w.rules[k] = r; else delete w.rules[k];
+  if (isNum(r.min) || isNum(r.max) || r.trend) w.rules[k] = r; else delete w.rules[k];
   saveCfg();
   const cur = S.nodes.get(num)?.metrics[k];
   if (cur) evalThreshold(num, k, cur.v, cur.t);
@@ -1436,6 +1511,84 @@ function saveRuleFromInput(inp) {
   toast("Límite guardado");
 }
 function showErr(el, msg) { el.textContent = msg; el.hidden = false; }
+
+/* ── cambio rápido: bloque de la ficha ── */
+function trendMetrics(num) {
+  const n = S.nodes.get(num), w = S.cfg.watched[num];
+  return sortMetrics(new Set([...Object.keys(n?.metrics || {}), ...Object.keys(w?.rules || {})])).filter((k) => !metricMeta(k).minor);
+}
+/** sel: métrica que queda elegida en el formulario (la que se acaba de guardar). */
+function trendBlock(num, sel = null) {
+  const w = S.cfg.watched[num];
+  if (!w) return "";
+  const ks = trendMetrics(num);
+  let h = `<h4>Cambio rápido</h4><p class="hint">Avisa si un valor baja o sube mucho en poco tiempo, aunque no llegue a ningún límite. Por ejemplo, una bajada de presión de 3 hPa en 3 h suele anunciar tormenta.</p>`;
+  const set = ks.filter((k) => w.rules?.[k]?.trend);
+  if (set.length) {
+    h += `<ul class="tr-list">${set.map((k) => {
+      const rule = w.rules[k].trend, on = S.active.has(trendKey(num, k));
+      return `<li${on ? ` class="bad"` : ""}><span class="tr-t"><span><b>${esc(metricMeta(k).label)}</b>: si ${trendVerb(rule.dir)} ${esc(fmtLimit(k, rule.delta, true))} o más en ${esc(hoursText(rule.hours))}</span><small data-trend-now="${k}">${esc(trendNowText(num, k, rule))}</small></span><button type="button" class="mini" data-trend-del="${k}" aria-label="Quitar el aviso de cambio rápido de ${esc(metricMeta(k).label)}">Quitar</button></li>`;
+    }).join("")}</ul>`;
+  }
+  if (!ks.length) return h + `<p class="hint">Cuando este nodo mande telemetría podrás ponerle este aviso.</p>`;
+  const pick = (sel && ks.includes(sel) && sel) || ks.find((k) => k === "barometricPressure" && !w.rules?.[k]?.trend) || ks.find((k) => !w.rules?.[k]?.trend) || ks[0];
+  const d = w.rules?.[pick]?.trend || trendDefault(pick);
+  h += `<div class="tr-form"><span>Avisar si</span>
+    <select id="tr-metric" class="inp sel" aria-label="Métrica">${ks.map((k) => `<option value="${k}"${k === pick ? " selected" : ""}>${esc(metricMeta(k).label)}</option>`).join("")}</select>
+    <select id="tr-dir" class="inp sel" aria-label="Dirección"><option value="down"${d.dir === "down" ? " selected" : ""}>baja</option><option value="up"${d.dir === "up" ? " selected" : ""}>sube</option></select>
+    <span class="inp-u"><input id="tr-delta" class="inp" inputmode="decimal" autocomplete="off" value="${fmtLimit(pick, d.delta)}" aria-label="Cuánto"><span id="tr-unit">${esc(metricMeta(pick).unit)}</span></span>
+    <span>o más en</span>
+    <span class="inp-u"><input id="tr-hours" class="inp" inputmode="decimal" autocomplete="off" value="${fmtNum(d.hours, d.hours % 1 ? 1 : 0)}" aria-label="Horas"><span>h</span></span></div>
+    <p class="form-err" id="trErr" role="alert" hidden></p>
+    <div class="btns"><button type="button" class="btn primary sm" data-trend-add="${num}">${w.rules?.[pick]?.trend ? "Guardar aviso" : "Añadir aviso"}</button></div>`;
+  return h;
+}
+function refreshTrend(num, sel = null) {
+  const box = $("#trendBox");
+  if (box && S.detail?.num === num) box.innerHTML = trendBlock(num, sel);
+}
+/** Al cambiar de métrica en el formulario: sus valores (los guardados o los recomendados). */
+function trendFormFill() {
+  const num = S.detail?.num, k = $("#tr-metric")?.value;
+  if (!k) return;
+  const cur = S.cfg.watched[num]?.rules?.[k]?.trend;
+  const d = cur || trendDefault(k);
+  $("#tr-dir").value = d.dir;
+  $("#tr-delta").value = fmtLimit(k, d.delta);
+  $("#tr-hours").value = fmtNum(d.hours, d.hours % 1 ? 1 : 0);
+  $("#tr-unit").textContent = metricMeta(k).unit;
+  $("[data-trend-add]").textContent = cur ? "Guardar aviso" : "Añadir aviso";
+  $("#trErr").hidden = true;
+}
+function addTrend(num) {
+  const w = S.cfg.watched[num];
+  if (!w) return;
+  const k = $("#tr-metric").value, err = $("#trErr");
+  const delta = parseNum($("#tr-delta").value), hours = parseNum($("#tr-hours").value);
+  const { rule, error } = parseTrendRule($("#tr-dir").value, delta ?? NaN, hours ?? NaN);
+  if (error) { showErr(err, error); return; }
+  w.rules = w.rules || {};
+  const had = !!w.rules[k]?.trend;
+  w.rules[k] = { ...(w.rules[k] || {}), trend: rule };
+  saveCfg();
+  addLog("info", `${nodeName(num)} · Aviso de cambio rápido: ${metricMeta(k).label} si ${trendVerb(rule.dir)} ${fmtLimit(k, rule.delta, true)} o más en ${hoursText(rule.hours)}`, num);
+  evalTrend(num, k, { strict: true });
+  refreshTrend(num, k);
+  render();
+  toast(had ? "Aviso de cambio rápido actualizado" : "Aviso de cambio rápido añadido");
+}
+function delTrend(num, k) {
+  const w = S.cfg.watched[num];
+  if (!w?.rules?.[k]?.trend) return;
+  delete w.rules[k].trend;
+  if (!Object.keys(w.rules[k]).length) delete w.rules[k];
+  saveCfg();
+  clearAlarm(trendKey(num, k), { silent: true });
+  addLog("info", `${nodeName(num)} · Quitado el aviso de cambio rápido de ${metricMeta(k).label.toLowerCase()}`, num);
+  refreshTrend(num);
+  render();
+  toast("Aviso quitado");
+}
 
 function watch(num) {
   if (isWatched(num)) return;
@@ -1841,6 +1994,8 @@ document.addEventListener("click", async (ev) => {
   if ("copy" in ds) return copyText(ds.copy, t);
   if ("fenceSet" in ds) return setFence(Number(ds.fenceSet));
   if ("fenceDel" in ds) return delFence(Number(ds.fenceDel));
+  if ("trendAdd" in ds) return addTrend(Number(ds.trendAdd));
+  if ("trendDel" in ds) return S.detail && delTrend(S.detail.num, ds.trendDel);
   if ("ack" in ds) return ack(ds.ack);
   if ("ackall" in ds) return ackAll();
   if ("watch" in ds) return watch(Number(ds.watch));
@@ -1923,12 +2078,15 @@ document.addEventListener("click", async (ev) => {
 
 document.addEventListener("keydown", (ev) => {
   if ((ev.key === "Enter" || ev.key === " ") && ev.target.matches?.(".card[data-open]")) { ev.preventDefault(); openDetail(Number(ev.target.dataset.open)); }
+  if (ev.key === "Enter" && ev.target.closest?.(".tr-form") && ev.target.matches("input")) { ev.preventDefault(); return S.detail && addTrend(S.detail.num); }
   if (ev.key === "Enter" && ev.target.matches?.("#detail .inp")) ev.target.blur();
 });
 
 document.addEventListener("change", (ev) => {
   const t = ev.target;
   if (t.id === "fence-r") return S.detail && setFenceRadius(S.detail.num, t);
+  if (t.id === "tr-metric") return trendFormFill();
+  if (t.closest(".tr-form")) return; // se guarda con el botón
   if (t.matches("#detail .inp")) return saveRuleFromInput(t);
   if (t.id === "setSound") { S.settings.sound = t.checked; saveSettings(); if (t.checked) { unlockAudio(); beep(); } return; }
   if (t.id === "setWake") { S.settings.wake = t.checked; saveSettings(); return applyWake(); }

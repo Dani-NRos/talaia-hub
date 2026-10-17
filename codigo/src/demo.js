@@ -58,6 +58,13 @@ export function buildDemo(now = Date.now()) {
     if (i >= 0) rows[i].v = v;
   });
 
+  // Y la presión cae algo más de 4 hPa en las últimas 3 h: se acerca una tormenta (alarma de cambio rápido).
+  const pres = rows.filter((r) => r.node === caseta && r.metric === "barometricPressure" && r.t > lastT - 6 * step);
+  const p0 = rows.find((r) => r.node === caseta && r.metric === "barometricPressure" && r.t === lastT - 6 * step)?.v ?? 1011;
+  const drop = [0.3, 0.9, 1.8, 2.7, 3.6, 4.3];
+  pres.forEach((r, i) => { r.v = Math.round((p0 - drop[i] + noise(0.1)) * 10) / 10; });
+  const presLast = pres.length ? pres[pres.length - 1].v : p0 - 4.3;
+
   const nodes = [
     { num: recv, short: "RCPT", long: "Receptor casa", hw: "HELTEC_V4", lastHeard: now, hops: 0, key: true, pos: { lat: 39.15204, lon: -0.43797, bits: 32, src: 1, t: now } },
     { num: caseta, short: "CSTA", long: "Caseta huerto", hw: "RAK4631", lastHeard: lastT, hops: 1, snr: 7.5, hasEnv: true, key: true, pos: { lat: 39.15881, lon: -0.44118, bits: 32, src: 2, t: lastT } },
@@ -77,13 +84,13 @@ export function buildDemo(now = Date.now()) {
   };
 
   const watched = {
-    [caseta]: { offlineMin: 75, rules: { temperature: { max: 35 }, relativeHumidity: { min: 25 } }, fence: { lat: 39.15881, lon: -0.44118, r: 150, at: now - 3 * 24 * HOUR } },
+    [caseta]: { offlineMin: 75, rules: { temperature: { max: 35 }, relativeHumidity: { min: 25 }, barometricPressure: { trend: { dir: "down", delta: 3, hours: 3 } } }, fence: { lat: 39.15881, lon: -0.44118, r: 150, at: now - 3 * 24 * HOUR } },
     [garaje]: { offlineMin: 75, rules: { temperature: { min: 3 } } },
     [monte]: { offlineMin: 75, rules: { batteryLevel: { min: 25 } } },
   };
 
   // Nuevas lecturas cada pocos segundos para ver el panel vivo.
-  const live = { [caseta]: { temperature: 36.4, relativeHumidity: 41 }, [garaje]: { temperature: 18.6, relativeHumidity: 69 } };
+  const live = { [caseta]: { temperature: 36.4, relativeHumidity: 41, barometricPressure: presLast }, [garaje]: { temperature: 18.6, relativeHumidity: 69 } };
   function tick() {
     const id = rnd() < 0.6 ? caseta : garaje;
     const cur = live[id];
@@ -120,7 +127,7 @@ export function buildDemo(now = Date.now()) {
     }
     if (type === "env" && live[num]) {
       const c = live[num];
-      return { delay, metrics: { temperature: r(c.temperature + noise(0.2)), relativeHumidity: Math.round(c.relativeHumidity), barometricPressure: Math.round(1009 + rnd() * 3) } };
+      return { delay, metrics: { temperature: r(c.temperature + noise(0.2)), relativeHumidity: Math.round(c.relativeHumidity), barometricPressure: c.barometricPressure != null ? r(c.barometricPressure + noise(0.2)) : Math.round(1009 + rnd() * 3) } };
     }
     if (type === "env" && num === cullera) return { delay: delay + 3000, metrics: { temperature: r(21 + noise(0.6)), relativeHumidity: Math.round(64 + noise(3)) } };
     if (type === "power" && num === garaje) return { delay, metrics: { ch1Voltage: r(13.1 + noise(0.1), 2), ch1Current: Math.round(210 + noise(25)) } };
