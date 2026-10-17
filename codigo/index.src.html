@@ -271,6 +271,25 @@ b.q-ok { color: var(--ok); } b.q-warn { color: var(--warn); } b.q-bad { color: v
 .chip { font: 500 10px/1 var(--f-mono); text-transform: uppercase; letter-spacing: .06em; color: var(--accent); border: 1px solid color-mix(in oklab, var(--accent) 45%, transparent); padding: 3px 5px; border-radius: 5px; margin-left: 6px; vertical-align: 2px; }
 .row .btn { min-height: 36px; padding: 0 12px; }
 .empty-row { padding: 14px; color: var(--ink-2); font-size: 14px; list-style: none; }
+.mesh-tools { display: grid; gap: 8px; margin-bottom: 10px; }
+.mesh-tools[hidden] { display: none; }
+.search { position: relative; }
+.search svg { position: absolute; left: 11px; top: 50%; transform: translateY(-50%); width: 18px; height: 18px; color: var(--ink-2); pointer-events: none; }
+.search .inp { padding: 10px 40px 10px 38px; font: 500 16px/1.2 var(--f-body); }
+.search .inp::-webkit-search-cancel-button { cursor: pointer; }
+.search-k { position: absolute; right: 10px; top: 50%; transform: translateY(-50%); font: 500 12px/1 var(--f-mono); color: var(--ink-2); border: 1px solid var(--line); border-radius: 5px; padding: 3px 6px; pointer-events: none; }
+.search .inp:focus ~ .search-k, .search .inp:not(:placeholder-shown) ~ .search-k { display: none; }
+@media (hover: none) { .search-k { display: none; } }
+/* Filtros y orden en una sola fila; en el móvil se desliza de lado. */
+.mesh-f { display: flex; gap: 6px; align-items: center; overflow-x: auto; scrollbar-width: none; margin: 0 -16px; padding: 2px 16px; }
+.mesh-f::-webkit-scrollbar { display: none; }
+.fchips { display: flex; gap: 6px; flex: none; }
+.fchip { flex: none; white-space: nowrap; min-height: 32px; padding: 0 12px; border-radius: 999px; border: 1px solid var(--line); background: var(--surface); color: var(--ink); font: 500 13px/1 var(--f-body); cursor: pointer; }
+.fchip:hover { border-color: var(--accent); }
+.fchip[aria-pressed="true"] { background: var(--accent); border-color: var(--accent); color: var(--on-accent); }
+#meshSort { flex: none; width: auto; font-size: 14px; padding: 6px 9px; min-height: 32px; border-radius: 999px; }
+.mesh mark { background: color-mix(in oklab, var(--warn) 28%, transparent); color: inherit; border-radius: 3px; padding: 0 1px; }
+.row .chip.watch { color: var(--ok); border-color: color-mix(in oklab, var(--ok) 45%, transparent); }
 .more { margin-top: 8px; background: none; border: 0; color: var(--accent); font-weight: 600; cursor: pointer; padding: 6px 0; }
 
 /* registro */
@@ -461,7 +480,11 @@ dialog.full[open] { display: grid; grid-template-rows: auto minmax(0, 1fr); }
 
   <section class="sec" aria-labelledby="h-mesh">
     <div class="sec-h"><h2 id="h-mesh">Resto de la malla</h2><span id="meshCount" class="count"></span></div>
-    <ul id="mesh" class="mesh"></ul>
+    <div class="mesh-tools" id="meshTools" hidden>
+      <div class="search"><svg viewBox="0 0 24 24" aria-hidden="true"><circle cx="10.5" cy="10.5" r="6.5" fill="none" stroke="currentColor" stroke-width="2"/><path d="M15.5 15.5 21 21" stroke="currentColor" stroke-width="2" stroke-linecap="round"/></svg><input id="meshQ" class="inp" type="search" placeholder="Buscar por nombre, ID o modelo" autocomplete="off" spellcheck="false" enterkeyhint="search" aria-label="Buscar nodos por nombre, ID o modelo" aria-controls="mesh"><kbd class="search-k" aria-hidden="true">/</kbd></div>
+      <div class="mesh-f"><label class="vh" for="meshSort">Ordenar</label><select id="meshSort" class="inp sel"></select><div class="fchips" id="meshFilters" role="group" aria-label="Filtros"></div></div>
+    </div>
+    <ul id="mesh" class="mesh" aria-live="polite" aria-relevant="additions removals"></ul>
     <button id="meshMore" class="more" type="button" hidden>Ver todos</button>
   </section>
 

@@ -8,6 +8,7 @@ import { encodeUser, routingErrorReason, decodeRouteDiscovery } from "./pb.js";
 import { readTrace, relays, snrQuality, loraSf, weakest, traceTimeout, UNKNOWN_NODE, PRESET_NAME } from "./route.js";
 import { distM, compass, precisionM, fmtDist, coordText, mapsUrl, SOURCE, nextPlace, placeFromPos } from "./geo.js";
 import { trendCheck, trendDefault, parseTrendRule } from "./trend.js";
+import { searchNodes, highlight, tokens, FILTERS, SORTS } from "./meshsearch.js";
 
 /* ───────────── utilidades ───────────── */
 const $ = (s, r = document) => r.querySelector(s);
@@ -15,7 +16,7 @@ const $$ = (s, r = document) => [...r.querySelectorAll(s)];
 const esc = (s) => String(s ?? "").replace(/[&<>"']/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[c]));
 const isNum = (x) => typeof x === "number" && Number.isFinite(x);
 const MIN = 60000, HOUR = 60 * MIN, DAY = 24 * HOUR;
-const APP_VERSION = "1.11.0";
+const APP_VERSION = "1.12.0";
 const REPO_URL = "https://github.com/Dani-NRos/vigia-mesh";
 const ISSUES_URL = `${REPO_URL}/issues`;
 const validT = (t) => isNum(t) && t > 1.6e12 && t < Date.now() + 5 * MIN;
@@ -80,6 +81,8 @@ const S = {
   recent: new Map(),
   seen: new Set(),
   meshExpanded: false,
+  meshQ: "", // texto del buscador de «Resto de la malla» (no se guarda)
+  meshView: { filters: [], sort: "auto" }, // filtros y orden del buscador (se guardan)
   logExpanded: false,
   detail: null, // { num, range }
   req: new Map(), // peticiones a nodos en curso o recientes, por nodo|tipo
@@ -117,6 +120,7 @@ function loadReal() {
   S.store = createIdbStore();
   S.channels = LS.get("vigia.channels", []) || [];
   S.infoAsked = LS.get("vigia.infoAsk", {}) || {};
+  S.meshView = { filters: [], sort: "auto", ...(LS.get("vigia.meshView", {}) || {}) };
   S.traces = LS.get("vigia.traces", {}) || {};
   S.lora = LS.get("vigia.lora", null);
   S.recent = new Map();
@@ -1461,23 +1465,80 @@ function renderCards() {
   }).join("");
 }
 
+/* ───────────── resto de la malla y buscador ───────────── */
+function setHTML(el, html) { if (el._h !== html) { el.innerHTML = html; el._h = html; } } // sin repintar si no cambia
+const markHTML = (text, words) => highlight(text, words).map((p) => (p.hit ? `<mark>${esc(p.text)}</mark>` : esc(p.text))).join("");
+
+/** Chips de filtro y orden. Se crean una vez y luego solo se cambia su estado, para no perder el foco. */
+function renderMeshTools() {
+  const v = S.meshView;
+  const box = $("#meshFilters");
+  if (box.children.length !== FILTERS.length) {
+    box.innerHTML = FILTERS.map((f) => `<button type="button" class="fchip" data-mf="${f.key}" aria-pressed="false"${f.title ? ` title="${esc(f.title)}"` : ""}>${esc(f.label)}</button>`).join("");
+  }
+  for (const b of box.children) b.setAttribute("aria-pressed", String(v.filters.includes(b.dataset.mf)));
+  const sel = $("#meshSort");
+  const myPos = S.myNode != null ? S.nodes.get(S.myNode)?.pos : null;
+  setHTML(sel, SORTS.map((o) => {
+    const off = o.key === "dist" && !myPos;
+    return `<option value="${o.key}"${off ? " disabled" : ""}>${esc(o.label)}${off ? " (tu receptor no tiene ubicación)" : ""}</option>`;
+  }).join(""));
+  if (sel.value !== v.sort) sel.value = v.sort;
+}
+function saveMeshView() { LS.set("vigia.meshView", S.meshView); }
+
 function renderMesh() {
   const el = $("#mesh");
-  const all = [...S.nodes.values()].filter((n) => !isWatched(n.num))
-    .sort((a, b) => (b.hasEnv - a.hasEnv) || ((b.lastHeard || 0) - (a.lastHeard || 0)));
-  $("#meshCount").textContent = all.length ? String(all.length) : "";
-  const shown = S.meshExpanded ? all : all.slice(0, 8);
-  if (!all.length) {
-    el.innerHTML = `<li class="empty-row">${S.demo || S.link.state === "ready" ? "No hay más nodos en la base de datos del receptor." : "Conecta el receptor para ver los nodos que oye."}</li>`;
+  const q = S.meshQ.trim();
+  const words = tokens(q);
+  const filters = new Set(S.meshView.filters);
+  const searching = words.length > 0 || filters.size > 0;
+  const rest = [...S.nodes.values()].filter((n) => !isWatched(n.num));
+  // Con texto también salen los vigilados, marcados: quien busca «DNN 4» espera encontrarlo esté donde esté.
+  const pool = words.length ? [...S.nodes.values()] : rest;
+  const from = S.myNode != null ? S.nodes.get(S.myNode)?.pos : null;
+  const res = searchNodes(pool, { q, filters, sort: S.meshView.sort, now: Date.now(), from });
+  $("#meshTools").hidden = S.nodes.size < 2;
+  renderMeshTools();
+  $("#meshCount").textContent = searching ? `${res.length} de ${rest.length}` : rest.length ? String(rest.length) : "";
+  const limit = S.meshExpanded ? Infinity : searching ? 50 : 8;
+  const shown = res.slice(0, limit);
+  let html;
+  if (!rest.length && !words.length) {
+    html = `<li class="empty-row">${S.demo || S.link.state === "ready" ? "No hay más nodos en la base de datos del receptor." : "Conecta el receptor para ver los nodos que oye."}</li>`;
+  } else if (!res.length) {
+    const why = [q ? `con «${esc(q)}»` : "", filters.size ? "con esos filtros" : ""].filter(Boolean).join(" y ");
+    html = `<li class="empty-row">Ningún nodo coincide ${why}. <button type="button" class="link-btn" data-mesh-clear>Quitar la búsqueda</button></li>`;
   } else {
-    el.innerHTML = shown.map((n) => {
-      const tags = [n.num === S.myNode ? "receptor" : "", n.hasEnv ? "sensores" : "", n.num !== S.myNode && n.key === false && receptorUsesPki() ? "sin clave" : ""].filter(Boolean);
-      return `<li class="row"><button class="row-main" data-open="${n.num}"><span class="tag sm">${esc(n.short)}</span><span class="row-t"><span class="row-n">${esc(n.long)}${tags.map((t) => `<span class="chip${t === "sin clave" ? " warn" : ""}">${t}</span>`).join("")}</span><span class="meta">${esc(metaLine(n))}</span></span></button><button class="btn ghost" data-watch="${n.num}">Vigilar</button></li>`;
+    html = shown.map(({ n, dist, score }) => {
+      const watched = isWatched(n.num);
+      const tags = [watched ? "vigilado" : "", n.num === S.myNode ? "receptor" : "", n.hasEnv ? "sensores" : "", n.num !== S.myNode && n.key === false && receptorUsesPki() ? "sin clave" : ""].filter(Boolean);
+      const chipCls = (t) => (t === "sin clave" ? " warn" : t === "vigilado" ? " watch" : "");
+      // Lo que decide el orden va delante, para que se vea aunque la línea se corte en el móvil.
+      const far = dist != null && n.num !== S.myNode ? `a ${fmtDist(dist)}` : "";
+      const sort = S.meshView.sort;
+      const lead = sort === "dist" ? far : sort === "snr" && isNum(n.snr) && n.snr !== 0 ? `SNR ${fmtNum(n.snr, 1)} dB` : "";
+      const meta = [lead, metaLine(n).replace(lead && sort === "snr" ? ` · ${lead}` : "\u0000", ""), lead === far ? "" : far].filter(Boolean).join(" · ");
+      // Si coincide solo por ID o modelo, se enseñan para que se vea por qué ha salido.
+      const why = score === 4 ? ` · ${markHTML(hexId(n.num), words)}${n.hw ? ` · ${markHTML(n.hw.replaceAll("_", " "), words)}` : ""}` : "";
+      const action = watched ? "" : `<button class="btn ghost" data-watch="${n.num}">Vigilar</button>`;
+      return `<li class="row"><button class="row-main" data-open="${n.num}"><span class="tag sm">${markHTML(n.short, words)}</span><span class="row-t"><span class="row-n">${markHTML(n.long, words)}${tags.map((t) => `<span class="chip${chipCls(t)}">${t}</span>`).join("")}</span><span class="meta">${esc(meta)}${why}</span></span></button>${action}</li>`;
     }).join("");
   }
+  setHTML(el, html);
   const more = $("#meshMore");
-  more.hidden = all.length <= 8;
-  more.textContent = S.meshExpanded ? "Ver menos" : `Ver los ${all.length} nodos`;
+  more.hidden = res.length <= (searching ? 50 : 8);
+  more.textContent = S.meshExpanded ? "Ver menos" : `Ver los ${res.length} nodos`;
+}
+
+let meshQT = null;
+function onMeshQuery(value) {
+  clearTimeout(meshQT);
+  meshQT = setTimeout(() => {
+    S.meshQ = value;
+    S.meshExpanded = false;
+    renderMesh();
+  }, 120);
 }
 
 function renderLog() {
@@ -2283,18 +2344,58 @@ document.addEventListener("click", async (ev) => {
   if (t.id === "setBtn") return openSettings();
   if (t.id === "mapBtn") return openMap();
   if (t.id === "meshMore") { S.meshExpanded = !S.meshExpanded; return renderMesh(); }
+  if ("mf" in ds) {
+    const f = new Set(S.meshView.filters);
+    if (f.has(ds.mf)) f.delete(ds.mf); else f.add(ds.mf);
+    S.meshView.filters = FILTERS.map((x) => x.key).filter((k) => f.has(k));
+    S.meshExpanded = false;
+    saveMeshView();
+    return renderMesh();
+  }
+  if ("meshClear" in ds) {
+    S.meshQ = "";
+    $("#meshQ").value = "";
+    S.meshView.filters = [];
+    saveMeshView();
+    renderMesh();
+    return $("#meshQ").focus();
+  }
   if (t.id === "logMore") { S.logExpanded = !S.logExpanded; return renderLog(); }
   if ("open" in ds) return openDetail(Number(ds.open));
 });
 
 document.addEventListener("keydown", (ev) => {
+  // «/» lleva al buscador, salvo escribiendo en otra casilla o con una ficha abierta.
+  if (ev.key === "/" && !ev.ctrlKey && !ev.metaKey && !ev.altKey && !ev.target.closest?.("input, textarea, select, [contenteditable]") && !document.querySelector("dialog[open]") && !$("#meshTools").hidden) {
+    ev.preventDefault();
+    $("#meshQ").focus();
+    $("#meshQ").scrollIntoView({ block: "center", behavior: "smooth" });
+    return;
+  }
+  if (ev.key === "Escape" && ev.target.id === "meshQ") {
+    if (ev.target.value) { ev.preventDefault(); ev.target.value = ""; onMeshQuery(""); } else ev.target.blur();
+    return;
+  }
+  if (ev.key === "Enter" && ev.target.id === "meshQ") {
+    // Intro abre el primer resultado.
+    ev.preventDefault();
+    clearTimeout(meshQT);
+    S.meshQ = ev.target.value;
+    renderMesh();
+    const first = $("#mesh .row-main");
+    if (first && S.meshQ.trim()) openDetail(Number(first.dataset.open));
+    return;
+  }
   if ((ev.key === "Enter" || ev.key === " ") && ev.target.matches?.(".card[data-open]")) { ev.preventDefault(); openDetail(Number(ev.target.dataset.open)); }
   if (ev.key === "Enter" && ev.target.closest?.(".tr-form") && ev.target.matches("input")) { ev.preventDefault(); return S.detail && addTrend(S.detail.num); }
   if (ev.key === "Enter" && ev.target.matches?.("#detail .inp")) ev.target.blur();
 });
 
+document.addEventListener("input", (ev) => { if (ev.target.id === "meshQ") onMeshQuery(ev.target.value); });
+
 document.addEventListener("change", (ev) => {
   const t = ev.target;
+  if (t.id === "meshSort") { S.meshView.sort = t.value; S.meshExpanded = false; saveMeshView(); return renderMesh(); }
   if (t.id === "fence-r") return S.detail && setFenceRadius(S.detail.num, t);
   if (t.id === "tr-metric") return trendFormFill();
   if (t.closest(".tr-form")) return; // se guarda con el botón
