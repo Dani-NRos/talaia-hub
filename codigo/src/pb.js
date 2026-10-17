@@ -36,3 +36,35 @@ export function encodeUser(u) {
   num(9, u.isUnmessagable ? 1 : 0);
   return new Uint8Array(out);
 }
+
+/**
+ * Saca error_reason (campo 3) de un mensaje meshtastic.Routing. 0 = acuse (todo bien); otro número = el error;
+ * null si el mensaje no es un acuse ni un error (route_request / route_reply) o viene mal formado.
+ */
+export function routingErrorReason(bytes) {
+  if (!bytes || !bytes.length) return null;
+  let i = 0;
+  const varint = () => {
+    let v = 0, mul = 1, b;
+    do {
+      if (i >= bytes.length) throw new Error("corto");
+      b = bytes[i++];
+      v += (b & 0x7f) * mul;
+      mul *= 128;
+    } while (b & 0x80);
+    return v;
+  };
+  try {
+    while (i < bytes.length) {
+      const key = varint();
+      const field = Math.floor(key / 8), wire = key & 7;
+      if (field === 3 && wire === 0) return varint();
+      if (wire === 0) varint();
+      else if (wire === 2) i += varint();
+      else if (wire === 1) i += 8;
+      else if (wire === 5) i += 4;
+      else return null;
+    }
+  } catch { return null; }
+  return null;
+}

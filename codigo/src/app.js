@@ -4,7 +4,7 @@ import { createMapView } from "./map.js";
 import { Receptor } from "./receptor.js";
 import { buildDemo, DEMO_IDS } from "./demo.js";
 import { Protobuf } from "@meshtastic/core";
-import { encodeUser } from "./pb.js";
+import { encodeUser, routingErrorReason } from "./pb.js";
 import { distM, compass, precisionM, fmtDist, coordText, mapsUrl, SOURCE, nextPlace, placeFromPos } from "./geo.js";
 
 /* ───────────── utilidades ───────────── */
@@ -82,6 +82,7 @@ const S = {
   detail: null, // { num, range }
   req: new Map(), // peticiones a nodos en curso o recientes, por nodo|tipo
   myUser: null, // ficha de nuestro receptor, se manda al pedir la de otro nodo
+  infoAsked: {}, // última vez que se pidió la ficha a cada nodo: los nodos no contestan otra vez en 12 h
   demoData: null,
   demoToken: 0,
 };
@@ -110,6 +111,7 @@ function loadReal() {
   S.myNode = LS.get("vigia.my", null);
   S.store = createIdbStore();
   S.channels = LS.get("vigia.channels", []) || [];
+  S.infoAsked = LS.get("vigia.infoAsk", {}) || {};
   S.recent = new Map();
 }
 
@@ -340,6 +342,35 @@ const canAsk = () => S.demo || (S.link.state === "ready" && !!receptor?.mesh);
 const askVisible = (r) => r && (r.state === "wait" || Date.now() - r.tDone < ASK_SHOW);
 // Quién confirmó cada paquete nuestro (requestId → nodo), para saber si el acuse vino del destino.
 const ackFrom = new Map();
+const askById = new Map(); // id del paquete de cada petición → la petición, para casar acuses y errores tardíos
+const INFO_SUPPRESS = 12 * HOUR;
+let infoArmed = null;
+
+/**
+ * Acuse o error de la malla para una de nuestras peticiones. err: 0 acuse, otro número error, null otro tipo.
+ * El acuse solo cuenta si lo manda el propio nodo (el de tu receptor al oír que otro la repite no dice nada).
+ * Un error, venga de quien venga, cierra la petición: NO_RESPONSE (no tiene ese sensor), PKI (falta una clave),
+ * MAX_RETRANSMIT (no llegó)… La librería solo atiende el primer acuse y los perdía si llegaban después.
+ */
+function askRouting(reqId, from, err) {
+  const r = askById.get(reqId);
+  if (!r || r.state !== "wait" || err == null) return;
+  if (err === 0) {
+    if (from === r.num && !r.acked) { r.acked = true; patchAskStatus(r.num); }
+    return;
+  }
+  finishAsk(r, "fail", err);
+}
+
+/** Avisa en el diagnóstico si el reloj del receptor va muy desfasado (las horas de las lecturas las pone él). */
+const clock = { n: 0, min: Infinity, said: false };
+function checkClock(rx) {
+  clock.n++;
+  clock.min = Math.min(clock.min, Date.now() - rx); // el paquete más reciente da el desfase real
+  if (clock.said || clock.n < 30 || Math.abs(clock.min) < 2 * MIN) return;
+  clock.said = true;
+  pushDiag({ t: Date.now(), msg: `El reloj del receptor va ${dur(Math.abs(clock.min))} ${clock.min > 0 ? "atrasado" : "adelantado"}: las horas de las lecturas saldrán desplazadas. Se corrige dándole hora (GPS, o conectándolo un momento a la app de Meshtastic).` });
+}
 
 function askFailText(code, r) {
   switch (code) {
@@ -354,9 +385,10 @@ function askFailText(code, r) {
     case E_RATE_LIMIT: return "límite de uso del canal alcanzado, prueba en unos minutos";
     case RE.TOO_LARGE: case RE.BAD_REQUEST: return "el nodo rechazó la petición";
     case "timeout":
-      if (r?.acked && r.type === "info") return "el nodo la recibió pero no contestó; no repite su ficha si te la mandó en las últimas horas o la anunció hace poco";
+      if (r?.acked && r.type === "info") return "el nodo la recibió y ya tiene la clave de tu receptor, pero no contestó: no repite su ficha a quien se la pidió en las últimas 12 h, ni si acaba de anunciarla";
       if (r?.acked && r.type === "pos") return "el nodo la recibió pero no contestó; como mucho repite su posición cada 3 min";
       if (r?.acked) return "el nodo la recibió pero no mandó datos";
+      if (r?.type === "info") return `sin respuesta en ${ASK_TIMEOUT / 1000} s; si se la pediste en las últimas 12 h, no contesta`;
       return `sin respuesta en ${ASK_TIMEOUT / 1000} s`;
     case "send": return "no se pudo enviar al receptor";
     default: return `error ${RE[code] ?? code}`;
@@ -390,6 +422,18 @@ async function ask(num, type) {
   if (since < cool) return toast(`Espera ${Math.ceil((cool - since) / 1000)} s antes de repetir, para no saturar la malla.`);
   if (!canAsk()) return toast("Conecta el receptor para pedir datos.");
   if (isInfo && !S.demo && !S.myUser) return toast("Espera a que el receptor termine de cargar sus datos.");
+  if (isInfo) {
+    // El firmware no contesta a la misma petición de ficha en 12 h, y cada petición nueva reinicia esa cuenta.
+    const ago = Date.now() - (S.infoAsked[num] || 0);
+    if (ago < INFO_SUPPRESS && infoArmed !== num) {
+      infoArmed = num;
+      setTimeout(() => { if (infoArmed === num) infoArmed = null; }, 6000);
+      return toast(`Ya se la pediste ${ago < MIN ? "hace un momento" : `hace ${dur(ago)}`}. Los nodos no vuelven a contestar en 12 h y cada intento alarga la espera. Toca otra vez si aun así quieres pedirla.`);
+    }
+    infoArmed = null;
+    S.infoAsked[num] = Date.now();
+    if (!S.demo) LS.set("vigia.infoAsk", Object.fromEntries(Object.entries(S.infoAsked).filter(([, t]) => Date.now() - t < INFO_SUPPRESS)));
+  }
   const r = { num, type, state: "wait", t0: Date.now(), tDone: 0, why: null, timer: null, acked: false };
   S.req.set(k, r);
   r.timer = setTimeout(() => finishAsk(r, "fail", "timeout"), ASK_TIMEOUT);
@@ -398,9 +442,15 @@ async function ask(num, type) {
   if (S.demo) return demoAsk(r);
   try {
     const ch = S.nodes.get(num)?.channel || 0;
-    const id = await (isInfo ? receptor.requestNodeInfo(num, encodeUser(S.myUser), ch)
+    const sent = isInfo ? receptor.requestNodeInfo(num, encodeUser(S.myUser), ch)
       : isPos ? receptor.requestPosition(num, ch)
-      : receptor.requestTelemetry(num, ASK[type].field, ch));
+      : receptor.requestTelemetry(num, ASK[type].field, ch);
+    if (sent.id != null) {
+      r.id = sent.id;
+      askById.set(sent.id, r);
+      if (askById.size > 100) askById.delete(askById.keys().next().value);
+    }
+    const id = await sent.done;
     // Acuse sin respuesta todavía: seguimos esperando. Solo cuenta si lo manda el propio nodo.
     if (r.state === "wait" && ackFrom.get(id) === num) { r.acked = true; patchAskStatus(num); }
   } catch (e) {
@@ -413,7 +463,7 @@ async function ask(num, type) {
 
 function finishAsk(r, state, why = null) {
   if (S.req.get(askKey(r.num, r.type)) !== r) return;
-  const lateOk = state === "ok" && r.state === "fail" && r.why === "timeout";
+  const lateOk = state === "ok" && r.state === "fail";
   if (r.state !== "wait" && !lateOk) return;
   clearTimeout(r.timer);
   Object.assign(r, { state, why, tDone: Date.now() });
@@ -1530,6 +1580,7 @@ function makeReceptor() {
       LS.set("vigia.device", S.device);
     },
     onReady() {
+      Object.assign(clock, { n: 0, min: Infinity, said: false });
       setTimeout(pumpMesh, 1500);
       S.trouble = null;
       S.otherWindow = null;
@@ -1600,7 +1651,9 @@ function makeReceptor() {
       if (dec && dec.portnum === Protobuf.Portnums.PortNum.ROUTING_APP && dec.requestId) {
         ackFrom.set(dec.requestId, p.from);
         if (ackFrom.size > 200) ackFrom.delete(ackFrom.keys().next().value);
+        askRouting(dec.requestId, p.from, routingErrorReason(dec.payload));
       }
+      if (validT(rx) && S.link.state === "ready") checkClock(rx);
       // Canal por el que emite el nodo, para pedirle datos por el mismo.
       if (p.to === 0xffffffff && isNum(p.channel) && p.channel < 8) n.channel = p.channel;
       saveNodes();
@@ -1630,7 +1683,9 @@ function makeReceptor() {
       const t = validT(rx) ? rx : validT(sent) ? sent : Date.now();
       const kind = p.data.variant?.case;
       const pending = ASK_BY_VARIANT[kind] && S.req.get(askKey(p.from, ASK_BY_VARIANT[kind]));
-      if (pending && t >= pending.t0 - 5000 && Date.now() - pending.t0 < 5 * MIN) finishAsk(pending, "ok");
+      // Es la respuesta si llega después de pedirla. No se compara la hora del paquete: la pone el reloj del
+      // receptor, y si va unos segundos atrasado la lectura parecía anterior a la petición y se perdía la respuesta.
+      if (pending && Date.now() - pending.t0 < 5 * MIN) finishAsk(pending, "ok");
       const metrics = extractMetrics(p.data);
       if (!Object.keys(metrics).length) return;
       ingest(p.from, metrics, t, { kind, replay: Date.now() - t > 5 * MIN });
@@ -1699,6 +1754,7 @@ function startDemo() {
     { index: 2, name: "familia", primary: false, private: true, why: "" },
   ];
   S.demoMesh = MESH_DEFAULT();
+  S.infoAsked = {};
   S.meshLast = null;
   S.cfg = { watched: JSON.parse(JSON.stringify(d.watched)) };
   S.active = new Map();

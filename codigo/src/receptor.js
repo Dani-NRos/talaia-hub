@@ -231,10 +231,32 @@ export class Receptor {
    * contesta NO_RESPONSE si no tiene ese tipo de sensor. La respuesta en sí llega como telemetría normal.
    */
   requestTelemetry(dest, field, channel = 0) {
-    const mesh = this.mesh;
-    if (!mesh || this.state !== "ready") return Promise.reject({ error: "send" });
     const payload = new Uint8Array([(field << 3) | 2, 0]);
-    return mesh.sendPacket(payload, Protobuf.Portnums.PortNum.TELEMETRY_APP, dest, channel, true, true, false);
+    return this._sendTracked(payload, Protobuf.Portnums.PortNum.TELEMETRY_APP, dest, channel);
+  }
+
+  /**
+   * Manda una petición (want_ack + want_response) y devuelve { id, done } con el id del paquete al momento.
+   * La librería solo resuelve con el primer acuse, que en una malla con repetidores suele ser el «implícito»
+   * de tu propio receptor al oír que otro nodo la repite; el acuse o el error del nodo destino llegan después
+   * y la librería ya no los atiende. Con el id, la app los casa ella misma (ver onPacket en app.js).
+   */
+  _sendTracked(payload, port, dest, channel) {
+    const mesh = this.mesh;
+    if (!mesh || this.state !== "ready") return { id: null, done: Promise.reject({ error: "send" }) };
+    let id = null;
+    const own = Object.prototype.hasOwnProperty.call(mesh, "generateRandId");
+    const gen = mesh.generateRandId;
+    // sendPacket genera el id antes de su primer await: se captura y se deja la función como estaba.
+    mesh.generateRandId = function () { id = gen.call(this); return id; };
+    let done;
+    try {
+      done = mesh.sendPacket(payload, port, dest, channel, true, true, false);
+    } finally {
+      if (own) mesh.generateRandId = gen;
+      else delete mesh.generateRandId;
+    }
+    return { id, done };
   }
 
   /**
@@ -243,9 +265,7 @@ export class Receptor {
    * el nodo aprende la clave de nuestro receptor. userBytes: nuestro User ya codificado.
    */
   requestNodeInfo(dest, userBytes, channel = 0) {
-    const mesh = this.mesh;
-    if (!mesh || this.state !== "ready") return Promise.reject({ error: "send" });
-    return mesh.sendPacket(userBytes, Protobuf.Portnums.PortNum.NODEINFO_APP, dest, channel, true, true, false);
+    return this._sendTracked(userBytes, Protobuf.Portnums.PortNum.NODEINFO_APP, dest, channel);
   }
 
   /**
@@ -253,9 +273,7 @@ export class Receptor {
    * Las posiciones no van cifradas con clave, así que no da el error 39.
    */
   requestPosition(dest, channel = 0) {
-    const mesh = this.mesh;
-    if (!mesh || this.state !== "ready") return Promise.reject({ error: "send" });
-    return mesh.sendPacket(new Uint8Array(), Protobuf.Portnums.PortNum.POSITION_APP, dest, channel, true, true, false);
+    return this._sendTracked(new Uint8Array(), Protobuf.Portnums.PortNum.POSITION_APP, dest, channel);
   }
 
   /**
