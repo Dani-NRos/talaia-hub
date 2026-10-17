@@ -109,6 +109,8 @@ export class Receptor {
   /** Abre el selector de puertos de Chrome. all=true enseña todos, no solo los de conversores USB conocidos. */
   async pickSerial(all = false) {
     const port = await navigator.serial.requestPort(all ? {} : { filters: USB_FILTERS });
+    // Mientras el selector estaba abierto puede haberse conectado solo al enchufarlo: si es el mismo, nada que hacer.
+    if (port === this.port && this.kind === "serial" && !this.userClosed && this.state !== "idle") return "ok";
     this._adoptSerial(port);
     if (!(await this.acquireLock())) { this.userClosed = true; this._status("idle"); this.h.onOtherWindow?.(); return "locked"; }
     this.connect();
@@ -194,6 +196,8 @@ export class Receptor {
     };
     let link;
     if (serial) {
+      if (this.serialClosing) await Promise.race([this.serialClosing, new Promise((r) => setTimeout(r, 2000))]);
+      this.serialClosing = null;
       const port = await this._serialPort();
       if (this.userClosed) return;
       // Desenchufado: no se intenta abrir; al volver a enchufarlo, el aviso «connect» de Chrome reconecta.
@@ -284,7 +288,10 @@ export class Receptor {
   _closeLink() {
     const l = this.link;
     this.link = null;
-    if (l) l.disconnect();
+    if (!l) return;
+    const p = l.disconnect();
+    // Por cable, el puerto tarda un momento en cerrarse: la siguiente apertura lo espera (ver connect).
+    if (l instanceof SerialLink) this.serialClosing = Promise.resolve(p).catch(() => {});
   }
 
   _fail(err) {

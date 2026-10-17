@@ -53,6 +53,7 @@ function fakePort({ failOpen = null } = {}) {
     getInfo: () => ({ usbVendorId: 0x10c4, usbProductId: 0xea60 }),
     async open(opts) {
       if (failOpen) throw Object.assign(new Error(failOpen), { name: "NetworkError" });
+      if (this.readable) throw Object.assign(new Error("The port is already open."), { name: "InvalidStateError" });
       this.opened++;
       this.baud = opts.baudRate;
       this.readable = new ReadableStream({ start: (c) => { rctrl = c; } });
@@ -107,4 +108,24 @@ test("cable fuera: avisa una sola vez con «lost» y cierra el puerto", async ()
   assert.equal(fails.length, 1);
   assert.equal(classifySerial(fails[0]), "lost");
   assert.equal(port.closed, 1);
+});
+
+test("volver a abrir el mismo puerto: se espera a que el cierre anterior termine", async () => {
+  const port = fakePort();
+  const a = new SerialLink(port, {});
+  await a.open();
+  const closing = a.disconnect(); // como hace el receptor al reconectar: no espera…
+  const b = new SerialLink(port, {});
+  await closing; // …pero connect() espera esta promesa antes de abrir
+  await b.open();
+  assert.equal(port.opened, 2);
+  // Un enlace caído también deja su cierre a mano para esperarlo.
+  const fails = [];
+  const c = new SerialLink(port, { onFail: (e) => fails.push(e) });
+  await b.disconnect();
+  await c.open();
+  port.unplug();
+  await c.disconnect();
+  assert.equal(fails.length, 1);
+  assert.equal(port.readable, null);
 });

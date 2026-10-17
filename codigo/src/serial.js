@@ -226,31 +226,38 @@ export class SerialLink {
     this.h.onFail?.(err);
   }
 
-  /** Suelta lectores y escritores y cierra el puerto (en segundo plano: nunca se queda colgado). */
+  /**
+   * Suelta lectores y escritores y cierra el puerto. Devuelve (y guarda en closedP) la promesa del cierre:
+   * quien vuelva a abrir el mismo puerto tiene que esperarla, o Chrome dice que sigue abierto.
+   */
   cleanup() {
+    if (this.closedP) return this.closedP;
     clearInterval(this.hbId);
     this.hbId = null;
     this.port.removeEventListener?.("disconnect", this.onDisc);
     const reader = this.reader, writer = this.writer, port = this.port;
     this.reader = null;
     this.writer = null;
-    (async () => {
-      try { await reader?.cancel(); } catch { /* nada */ }
+    const wait = (ms) => new Promise((r) => setTimeout(r, ms));
+    this.closedP = (async () => {
+      try { await Promise.race([reader?.cancel(), wait(500)]); } catch { /* nada */ }
       try { reader?.releaseLock(); } catch { /* nada */ }
+      try { await Promise.race([writer?.close(), wait(500)]); } catch { /* desenchufado */ }
       try { writer?.releaseLock(); } catch { /* nada */ }
       try { await port.close(); } catch { /* ya cerrado o desenchufado */ }
     })();
+    return this.closedP;
   }
 
   async disconnect() {
-    if (this.closing) return;
+    if (this.closing || this.failed) { this.closing = true; return this.cleanup(); }
     // Avisa al nodo de que el cliente se va (vuelve a sacar su registro por el puerto). Sin esperar mucho.
     if (!this.failed && this.writer) {
       await Promise.race([this.writeRaw(frame(DISCONNECT)).catch(() => {}), new Promise((r) => setTimeout(r, 300))]);
     }
     this.closing = true;
     try { this.ctrl?.enqueue({ type: "status", data: { status: ST.DeviceDisconnected, reason: "user" } }); } catch { /* cerrado */ }
-    this.cleanup();
+    await this.cleanup();
   }
 }
 
