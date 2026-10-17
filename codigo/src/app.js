@@ -13,7 +13,7 @@ const $$ = (s, r = document) => [...r.querySelectorAll(s)];
 const esc = (s) => String(s ?? "").replace(/[&<>"']/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[c]));
 const isNum = (x) => typeof x === "number" && Number.isFinite(x);
 const MIN = 60000, HOUR = 60 * MIN, DAY = 24 * HOUR;
-const APP_VERSION = "1.8.0";
+const APP_VERSION = "1.8.1";
 const REPO_URL = "https://github.com/Dani-NRos/vigia-mesh";
 const ISSUES_URL = `${REPO_URL}/issues`;
 const validT = (t) => isNum(t) && t > 1.6e12 && t < Date.now() + 5 * MIN;
@@ -388,7 +388,7 @@ function askFailText(code, r) {
       if (r?.acked && r.type === "info") return "el nodo la recibió y ya tiene la clave de tu receptor, pero no contestó: no repite su ficha a quien se la pidió en las últimas 12 h, ni si acaba de anunciarla";
       if (r?.acked && r.type === "pos") return "el nodo la recibió pero no contestó; como mucho repite su posición cada 3 min";
       if (r?.acked) return "el nodo la recibió pero no mandó datos";
-      if (r?.type === "info") return `sin respuesta en ${ASK_TIMEOUT / 1000} s; si se la pediste en las últimas 12 h, no contesta`;
+      if (r?.type === "info") return `sin respuesta en ${ASK_TIMEOUT / 1000} s. Aunque no conteste, si le llegó ya tiene la clave de tu receptor: vuelve a pedirle los datos`;
       return `sin respuesta en ${ASK_TIMEOUT / 1000} s`;
     case "send": return "no se pudo enviar al receptor";
     default: return `error ${RE[code] ?? code}`;
@@ -399,8 +399,12 @@ function askFailText(code, r) {
 const receptorUsesPki = () => S.demo || (S.myUser?.publicKey?.length === 32 && !S.myUser.isLicensed);
 // Un fallo de clave deja de contar en cuanto llega la ficha del nodo.
 function keyFixedAt(num) {
-  const info = S.req.get(askKey(num, "info"));
-  return info?.state === "ok" ? info.tDone : 0;
+  let t = 0;
+  for (const type of Object.keys(ASK_ALL)) {
+    const r = S.req.get(askKey(num, type));
+    if (r?.state === "ok" && r.tDone > t) t = r.tDone;
+  }
+  return t;
 }
 const staleKeyFail = (r) => r.state === "fail" && KEY_ERRORS.has(r.why) && r.tDone <= keyFixedAt(r.num);
 function keyNeeded(num) {
@@ -527,7 +531,9 @@ function keyRow(num, sheet) {
   const n = S.nodes.get(num);
   const r = S.req.get(askKey(num, "info"));
   const waiting = r?.state === "wait";
-  const txt = need ? "Tu receptor no tiene la clave de este nodo y no le puede pedir datos."
+  const theyLack = Object.keys(ASK).some((t) => { const q = S.req.get(askKey(num, t)); return askVisible(q) && q.state === "fail" && q.why === RE.PKI_UNKNOWN_PUBKEY && !staleKeyFail(q); });
+  const txt = need && theyLack ? "Este nodo no tiene la clave de tu receptor y no puede leer tus peticiones. Pedir su ficha se la envía, aunque no conteste."
+    : need ? "Tu receptor no tiene la clave de este nodo y no le puede pedir datos."
     : n?.key ? "Tu receptor tiene la clave de este nodo."
     : "La ficha trae el nombre y la clave del nodo.";
   return `<div class="key-row${need ? " need" : ""}"><span>${txt}</span><button type="button" class="btn ghost sm" data-ask="info" data-num="${num}"${!canAsk() || waiting ? " disabled" : ""}>${waiting ? "Pidiendo ficha…" : "Pedir ficha del nodo"}</button></div>`;
