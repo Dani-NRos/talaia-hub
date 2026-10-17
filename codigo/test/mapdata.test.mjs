@@ -105,3 +105,17 @@ test("tinta de la píldora: oscura sobre claro, blanca sobre oscuro", () => {
   assert.equal(inkFor("#0d366b"), "#ffffff");
   assert.equal(inkFor("#641819"), "#ffffff");
 });
+
+test("nodo pedido desde su ficha: sale aunque el periodo lo deje fuera", () => {
+  // El 3 tiene temperatura de hace 3 días: con «24 h» no sale…
+  let r = mapPoints(nodes, "temperature", ageMs("24h"), NOW);
+  assert.ok(![...r.points, ...r.others].some((q) => q.num === 3));
+  // …pero si se pide verlo, sale con su última lectura.
+  r = mapPoints(nodes, "temperature", ageMs("24h"), NOW, 3);
+  assert.equal(r.points.find((p) => p.num === 3)?.v, 9);
+  // Sin esa métrica, sale como punto gris; y sin ubicación no puede salir.
+  r = mapPoints(nodes, "relativeHumidity", ageMs("3h"), NOW, 2);
+  assert.ok(r.others.some((o) => o.num === 2));
+  r = mapPoints(nodes, "temperature", ageMs("24h"), NOW, 5);
+  assert.ok(![...r.points, ...r.others].some((q) => q.num === 5));
+});

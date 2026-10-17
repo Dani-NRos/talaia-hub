@@ -46,20 +46,22 @@ export function defaultMetric(counts, wanted = null) {
 }
 
 /**
- * Puntos del mapa para la métrica elegida.
+ * Puntos del mapa para la métrica elegida. focus: nodo que se ha pedido ver desde su ficha; sale siempre,
+ * con su última lectura aunque sea más vieja que el periodo, o como punto gris si no tiene esa métrica.
  * Cada punto: { num, lat, lon, v, t, far, acc } — far: la lectura se midió antes de que el nodo llegara a donde está;
  * acc: radio en metros de la zona donde puede estar el nodo (posición recortada por el canal), o null si es exacta o no se sabe.
  * Los nodos con ubicación oídos en el periodo pero sin esa métrica van aparte, en «others».
  */
-export function mapPoints(nodes, metric, maxAge, now = Date.now()) {
+export function mapPoints(nodes, metric, maxAge, now = Date.now(), focus = null) {
   const points = [], others = [];
   for (const n of nodes) {
     if (!n.pos) continue;
-    const r = metric ? readingOf(n, metric, maxAge, now) : null;
+    const isFocus = n.num === focus;
+    const r = metric ? readingOf(n, metric, isFocus ? Infinity : maxAge, now) : null;
     if (r) {
       const place = n.place || placeFromPos(n.pos);
       points.push({ num: n.num, lat: n.pos.lat, lon: n.pos.lon, v: r.v, t: r.t, far: readingPlace(place, r.t) === "elsewhere", acc: precisionM(n.pos.bits) });
-    } else if (now - (n.lastHeard || n.pos.t || 0) <= maxAge) {
+    } else if (isFocus || now - (n.lastHeard || n.pos.t || 0) <= maxAge) {
       others.push({ num: n.num, lat: n.pos.lat, lon: n.pos.lon, acc: precisionM(n.pos.bits) });
     }
   }

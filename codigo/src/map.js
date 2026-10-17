@@ -1,6 +1,6 @@
 // Mapa a pantalla completa: la última lectura de cada nodo con ubicación, filtrada por sensor y antigüedad.
 // Leaflet va dentro de la app (sin CDN) para que abra sin internet; el fondo son teselas de OpenStreetMap.
-import { map as lmap, tileLayer, marker, divIcon, latLngBounds, control, Control, DomUtil, DomEvent, layerGroup, circleMarker, circle, polyline, point } from "leaflet/dist/leaflet-src.esm.js";
+import { map as lmap, tileLayer, marker, divIcon, latLng, latLngBounds, control, Control, DomUtil, DomEvent, layerGroup, circleMarker, circle, polyline, point } from "leaflet/dist/leaflet-src.esm.js";
 import leafletCss from "leaflet/dist/leaflet.css";
 import { metricMeta, fmtWithUnit, fmtNum } from "./metrics.js";
 import { precisionM, fmtDist } from "./geo.js";
@@ -19,12 +19,16 @@ export function createMapView(ctx) {
   const countEl = document.getElementById("mapCount");
   const st = { metric: null, age: "24h", ...(ctx.load() || {}) };
   const markers = new Map(); // clave → { mk, html, lat, lon }
+  let focusNum = null; // nodo pedido desde su ficha: se ve siempre y resaltado hasta cerrar el mapa
+  let zoomedIn = false; // la vista actual es la de un nodo concreto: al abrir desde la cabecera se vuelve a ver todo
   let m = null, rings = null, guides = null, legendEl = null, emptyEl = null, offEl = null, fitted = false;
   let shown = { metric: null, points: [], others: [] };
 
   selA.innerHTML = AGES.map((a) => `<option value="${a.key}">${a.label}</option>`).join("");
   selA.value = st.age;
   const save = () => ctx.save({ metric: st.metric, age: st.age });
+  // Al cerrar se olvida el nodo buscado y se cierra su globo, que si no seguiría tapando el mapa al volver.
+  dlg.addEventListener("close", () => { focusNum = null; m?.closePopup(); });
   selM.addEventListener("change", () => { st.metric = selM.value || null; save(); update(); });
   selA.addEventListener("change", () => { st.age = selA.value; save(); update(); });
 
@@ -175,7 +179,7 @@ export function createMapView(ctx) {
     if (selM.dataset.h !== optHTML) { selM.innerHTML = optHTML; selM.dataset.h = optHTML; }
     selM.disabled = !opts.length;
 
-    const { points, others } = mapPoints(nodes, metric, maxAge, now);
+    const { points, others } = mapPoints(nodes, metric, maxAge, now, focusNum);
     shown = { metric, points, others };
     const sc = scaleFor(metric, points.map((p) => p.v));
     const me = ctx.myNode();
@@ -183,9 +187,9 @@ export function createMapView(ctx) {
     const byAge = [...points].sort((a, b) => a.t - b.t); // lo más reciente, encima
     byAge.forEach((p, i) => {
       const bg = sc.color(p.v);
-      const html = `<div class="mp${p.far ? " far" : ""}" style="--c:${bg};--i:${inkFor(bg)};opacity:${ageOpacity(now - p.t)}">${esc(pillText(metric, p.v))}</div>`;
+      const html = `<div class="mp${p.far ? " far" : ""}${p.num === focusNum ? " focus" : ""}" style="--c:${bg};--i:${inkFor(bg)};opacity:${ageOpacity(now - p.t)}">${esc(pillText(metric, p.v))}</div>`;
       const n = nodeOf(p.num);
-      place(`p:${p.num}`, p.lat, p.lon, html, 1000 + i, `${n?.long || ""}: ${pillText(metric, p.v)}`);
+      place(`p:${p.num}`, p.lat, p.lon, html, p.num === focusNum ? 5000 : 1000 + i, `${n?.long || ""}: ${pillText(metric, p.v)}`);
       keep.add(`p:${p.num}`);
     });
     // Zona donde puede estar cada nodo cuyo canal recorta la posición (≈730 m en el canal público).
@@ -198,8 +202,8 @@ export function createMapView(ctx) {
     for (const p of points) ring(p, sc.color(p.v));
     for (const o of others) ring(o, "#66726e");
     for (const o of others) {
-      const html = `<div class="md${o.num === me ? " me" : ""}"></div>`;
-      place(`o:${o.num}`, o.lat, o.lon, html, 0, nodeOf(o.num)?.long || "");
+      const html = `<div class="md${o.num === me ? " me" : ""}${o.num === focusNum ? " focus" : ""}"></div>`;
+      place(`o:${o.num}`, o.lat, o.lon, html, o.num === focusNum ? 5000 : 0, nodeOf(o.num)?.long || "");
       keep.add(`o:${o.num}`);
     }
     for (const [k, it] of markers) if (!keep.has(k)) { it.mk.remove(); markers.delete(k); }
@@ -258,12 +262,28 @@ export function createMapView(ctx) {
     else m.setView(SPAIN.center, SPAIN.zoom, { animate });
   }
 
-  function open() {
+  /** Centra el mapa en un nodo (si su posición es aproximada, que quepa su círculo) y abre su globo. */
+  function centerOn(num) {
+    const n = nodeOf(num);
+    if (!n?.pos) return false;
+    const at = latLng(n.pos.lat, n.pos.lon);
+    const acc = precisionM(n.pos.bits);
+    if (acc) m.fitBounds(at.toBounds(acc * 2.4), { maxZoom: 15, animate: false });
+    else m.setView(at, Math.max(fitted ? m.getZoom() : 0, 15), { animate: false });
+    const it = markers.get(`p:${num}`) || markers.get(`o:${num}`);
+    it?.mk.openPopup();
+    return true;
+  }
+
+  /** focus: número de nodo para abrir el mapa centrado en él. */
+  function open(focus = null) {
     if (!dlg.open) dlg.showModal();
     ensure();
     m.invalidateSize();
+    focusNum = focus;
     update();
-    if (!fitted) { fit(false); fitted = true; }
+    if (focus != null && centerOn(focus)) { fitted = true; zoomedIn = true; }
+    else if (!fitted || zoomedIn) { fit(false); fitted = true; zoomedIn = false; }
     spread(); // los marcadores no existen hasta que el mapa tiene vista: se colocan ya encuadrado
     requestAnimationFrame(() => { m.invalidateSize(); spread(); });
   }

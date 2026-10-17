@@ -516,7 +516,7 @@ function posBlock(num, sheet = false) {
   let h = `<div class="pos-top"><span class="pos-l">Ubicación</span>${p ? `<span class="pos-m">${esc(posMeta(p))}</span>` : ""}</div>`;
   if (p) {
     const c = coordText(p);
-    h += `<code class="pos-c">${c}</code><div class="pos-row"><button type="button" class="mini" data-copy="${c}">Copiar</button><a class="mini" href="${mapsUrl(p)}" target="_blank" rel="noopener">Abrir en mapa</a>${sheet ? askBtn : ""}</div>`;
+    h += `<code class="pos-c">${c}</code><div class="pos-row"><button type="button" class="mini" data-copy="${c}">Copiar</button><button type="button" class="mini" data-map-focus="${num}">Ver en el mapa</button><a class="mini" href="${mapsUrl(p)}" target="_blank" rel="noopener" title="Abre Google Maps; necesita internet">Google Maps</a>${sheet ? askBtn : ""}</div>`;
   } else {
     h += `<div class="pos-row"><span class="hint">Este nodo aún no ha compartido su ubicación.</span>${askBtn}</div>`;
   }
@@ -1248,7 +1248,8 @@ function renderFoot() {
 /* ───────────── mapa ───────────── */
 const TILE_CACHE = "teselas-osm"; // el mismo nombre que en sw.js
 let persistAsked = false;
-function openMap() {
+/** focus: nodo en el que centrar el mapa (desde su tarjeta o su ficha). */
+function openMap(focus = null) {
   // Que el navegador no vacíe el fondo guardado cuando el móvil vaya justo de espacio.
   if (!persistAsked && window.__VIGIA_PWA) { persistAsked = true; navigator.storage?.persist?.().catch(() => {}); }
   if (!mapView) {
@@ -1260,7 +1261,11 @@ function openMap() {
       save: (v) => LS.set("vigia.map", v),
     });
   }
-  mapView.open();
+  const detail = $("#detail");
+  // Desde la ficha: si el mapa ya estaba abierto debajo, se cierra la ficha para verlo;
+  // si no, el mapa se abre encima y al cerrarlo se vuelve a la ficha.
+  if (focus != null && detail.open && $("#map").open) detail.close();
+  mapView.open(focus);
 }
 
 /* ───────────── detalle de nodo ───────────── */
@@ -1268,6 +1273,8 @@ function openDetail(num) {
   S.detail = { num, range: S.detail?.num === num ? S.detail.range : "24h" };
   renderDetail();
   const d = $("#detail");
+  // Con el mapa abierto, la ficha puede estar debajo (se abrió antes): se reabre para que quede encima.
+  if (d.open && $("#map").open) d.close();
   if (!d.open) d.showModal();
   drawCharts();
 }
@@ -1760,7 +1767,7 @@ function toast(msg) {
 let wipeArmed = 0, unwatchArmed = 0, forgetArmed = 0;
 document.addEventListener("click", async (ev) => {
   const t = ev.target.closest("a, button, [data-open], [data-close]");
-  if (t?.tagName === "A") return; // enlaces (Abrir en mapa) van a lo suyo
+  if (t?.tagName === "A") return; // enlaces (Google Maps, GitHub) van a lo suyo
   if (!t) {
     const dlg = ev.target.closest("dialog");
     if (dlg && ev.target === dlg) dlg.close();
@@ -1768,6 +1775,7 @@ document.addEventListener("click", async (ev) => {
   }
   const ds = t.dataset;
   if ("ask" in ds) return ask(Number(ds.num), ds.ask);
+  if ("mapFocus" in ds) return openMap(Number(ds.mapFocus));
   if ("copy" in ds) return copyText(ds.copy, t);
   if ("fenceSet" in ds) return setFence(Number(ds.fenceSet));
   if ("fenceDel" in ds) return delFence(Number(ds.fenceDel));
@@ -1894,7 +1902,7 @@ document.addEventListener("change", (ev) => {
   }
 });
 
-$("#detail").addEventListener("close", () => { S.detail = null; unwatchArmed = 0; });
+$("#detail").addEventListener("close", () => { if ($("#detail").open) return; S.detail = null; unwatchArmed = 0; });
 window.addEventListener("resize", () => { clearTimeout(liveT); liveT = setTimeout(drawCharts, 200); });
 
 /* ───────────── arranque ───────────── */
