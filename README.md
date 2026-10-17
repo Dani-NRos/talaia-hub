@@ -10,7 +10,8 @@ Panel de telemetría y alarmas para nodos [Meshtastic](https://meshtastic.org) q
 
 ## Qué hace
 
-- **Panel de sensores.** Muestra las últimas lecturas de cada nodo vigilado y una mini gráfica de 24 h.
+- **Panel de sensores.** Muestra las últimas lecturas de cada nodo vigilado y una mini gráfica de 24 h. Cada tarjeta se contrae a una línea (nombre, cuándo se le oyó, batería y estado) y se pueden ordenar a tu gusto con «Ordenar», arrastrándolas o con flechas; la app lo recuerda.
+- **Un nodo a pantalla completa.** Sus lecturas en grande, sus alarmas y la gráfica de cada sensor (24 h, 7 o 30 días), en vivo y con la pantalla encendida mientras lo miras. Pensado para una tableta o un monitor fijo.
 - **Alarmas en la propia app, con sonido, vibración y notificación:**
   - un valor sale del mínimo o máximo que fijas por métrica;
   - un valor cambia rápido, aunque no llegue a ningún límite: por ejemplo, la presión baja 3 hPa en 3 h (suele anunciar tormenta), la batería cae un 15 % en 6 h o la temperatura sube 5 °C en una hora. Tú eliges métrica, si baja o sube, cuánto y en cuántas horas (hasta 24). Cuenta desde el valor más alto (o más bajo) de ese intervalo, necesita lecturas de al menos la mitad del intervalo para decidir y se cierra cuando el cambio baja del 70 % del límite;

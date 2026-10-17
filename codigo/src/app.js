@@ -17,7 +17,7 @@ const $$ = (s, r = document) => [...r.querySelectorAll(s)];
 const esc = (s) => String(s ?? "").replace(/[&<>"']/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[c]));
 const isNum = (x) => typeof x === "number" && Number.isFinite(x);
 const MIN = 60000, HOUR = 60 * MIN, DAY = 24 * HOUR;
-const APP_VERSION = "1.12.1";
+const APP_VERSION = "1.13.0";
 const REPO_URL = "https://github.com/Dani-NRos/vigia-mesh";
 const ISSUES_URL = `${REPO_URL}/issues`;
 const validT = (t) => isNum(t) && t > 1.6e12 && t < Date.now() + 5 * MIN;
@@ -82,6 +82,9 @@ const S = {
   recent: new Map(),
   seen: new Set(),
   meshExpanded: false,
+  ui: { collapsed: {}, order: [] }, // tarjetas vigiladas: contraídas y orden elegido (se guardan aparte de las alarmas)
+  ordering: false, // modo «Ordenar» de las tarjetas
+  full: null, // nodo abierto a pantalla completa: { num, range }
   meshQ: "", // texto del buscador de «Resto de la malla» (no se guarda)
   meshView: { filters: [], sort: "auto" }, // filtros y orden del buscador (se guardan)
   logExpanded: false,
@@ -122,6 +125,7 @@ function loadReal() {
   S.channels = LS.get("vigia.channels", []) || [];
   S.infoAsked = LS.get("vigia.infoAsk", {}) || {};
   S.meshView = { filters: [], sort: "auto", ...(LS.get("vigia.meshView", {}) || {}) };
+  S.ui = { collapsed: {}, order: [], ...(LS.get("vigia.cards", {}) || {}) };
   S.traces = LS.get("vigia.traces", {}) || {};
   S.lora = LS.get("vigia.lora", null);
   S.recent = new Map();
@@ -174,6 +178,7 @@ function ingest(num, metrics, t, opts = {}) {
   touch(num, t);
   saveNodes();
   if (S.detail && S.detail.num === num) refreshDetailLive();
+  refreshFull(num);
   render();
 }
 
@@ -1178,8 +1183,8 @@ function yDomain(series, metric, rule) {
 }
 
 /** Gráfica completa con ejes, en píxeles reales. */
-function chartSVG(series, metric, rule, from, to, W) {
-  const H = 132, pl = 42, pr = 12, pt = 10, pb = 22;
+function chartSVG(series, metric, rule, from, to, W, H = 132) {
+  const pl = 42, pr = 12, pt = 10, pb = 22;
   const ser = series.filter((p) => !(metric === "batteryLevel" && p.v > 100));
   const dom = yDomain(ser, metric, rule);
   if (!dom) return `<p class="empty-chart">Sin lecturas en este periodo.</p>`;
@@ -1188,21 +1193,21 @@ function chartSVG(series, metric, rule, from, to, W) {
   const y = (v) => pt + ((hi - v) / (hi - lo)) * (H - pt - pb);
   const m = metricMeta(metric);
   let g = "";
-  const st = niceStep(hi - lo, 3);
+  const st = niceStep(hi - lo, H > 180 ? 5 : 3);
   for (let v = Math.ceil(lo / st) * st; v <= hi; v += st) {
     const yy = y(v).toFixed(1);
     g += `<line class="grid" x1="${pl}" x2="${W - pr}" y1="${yy}" y2="${yy}"/><text class="tick" x="${pl - 6}" y="${yy}" text-anchor="end" dominant-baseline="middle">${fmtNum(v, st < 1 ? 1 : 0)}</text>`;
   }
   const span = to - from;
-  const xs = span <= 2 * DAY ? 6 * HOUR : DAY;
+  const xs = span <= 2 * DAY ? (W > 700 ? 3 * HOUR : 6 * HOUR) : span <= 8 * DAY ? DAY : 7 * DAY;
   const first = new Date(from);
   first.setMinutes(0, 0, 0);
-  if (xs === DAY) first.setHours(0);
+  if (xs >= DAY) first.setHours(0);
   else first.setHours(Math.ceil(first.getHours() / 6) * 6);
   for (let t = first.getTime(); t <= to; t += xs) {
     if (t < from) continue;
     const xx = x(t).toFixed(1);
-    const lab = xs === DAY ? wday.format(new Date(t)) : hhmm.format(new Date(t));
+    const lab = xs === 7 * DAY ? dShort.format(new Date(t)) : xs === DAY ? wday.format(new Date(t)) : hhmm.format(new Date(t));
     g += `<line class="grid v" x1="${xx}" x2="${xx}" y1="${pt}" y2="${H - pb}"/><text class="tick" x="${xx}" y="${H - 6}" text-anchor="middle">${lab}</text>`;
   }
   let thr = "";
@@ -1263,6 +1268,7 @@ function render() {
     renderLog();
     renderFoot();
     mapView?.update();
+    if (S.full) refreshFull(null);
     const n = unacked().length;
     document.title = n ? `(${n}) Alarma · Vigía Mesh` : "Vigía Mesh";
   });
@@ -1273,6 +1279,11 @@ const ICON = {
   usb: `<svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 3v14M12 3l-2.5 3h5L12 3ZM12 17a2 2 0 1 0 0 4 2 2 0 0 0 0-4ZM12 14l-5-3V8M12 12l5-3V7" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"/><rect x="5.5" y="6.5" width="3" height="2" rx=".5" fill="currentColor"/><circle cx="17" cy="6" r="1.4" fill="currentColor"/></svg>`,
   gear: `<svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 15.2a3.2 3.2 0 1 0 0-6.4 3.2 3.2 0 0 0 0 6.4Z" fill="none" stroke="currentColor" stroke-width="1.8"/><path d="M19.4 13.5a7.6 7.6 0 0 0 0-3l2-1.6-2-3.4-2.4.9a7.5 7.5 0 0 0-2.6-1.5L14 2.4h-4l-.4 2.5A7.5 7.5 0 0 0 7 6.4l-2.4-.9-2 3.4 2 1.6a7.6 7.6 0 0 0 0 3l-2 1.6 2 3.4 2.4-.9a7.5 7.5 0 0 0 2.6 1.5l.4 2.5h4l.4-2.5a7.5 7.5 0 0 0 2.6-1.5l2.4.9 2-3.4-2-1.6Z" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linejoin="round"/></svg>`,
   close: `<svg viewBox="0 0 24 24" aria-hidden="true"><path d="M6 6l12 12M18 6L6 18" stroke="currentColor" stroke-width="2" stroke-linecap="round"/></svg>`,
+  chevron: `<svg viewBox="0 0 24 24" aria-hidden="true"><path d="M6 9l6 6 6-6" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/></svg>`,
+  expand: `<svg viewBox="0 0 24 24" aria-hidden="true"><path d="M4 9V4h5M20 9V4h-5M4 15v5h5M20 15v5h-5" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/></svg>`,
+  grip: `<svg viewBox="0 0 24 24" aria-hidden="true"><g fill="currentColor"><circle cx="9" cy="6" r="1.6"/><circle cx="15" cy="6" r="1.6"/><circle cx="9" cy="12" r="1.6"/><circle cx="15" cy="12" r="1.6"/><circle cx="9" cy="18" r="1.6"/><circle cx="15" cy="18" r="1.6"/></g></svg>`,
+  up: `<svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 19V5M6 11l6-6 6 6" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/></svg>`,
+  down: `<svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 5v14M6 13l6 6 6-6" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/></svg>`,
 };
 
 const STAGE_TEXT = { gatt: "Buscando el nodo…", service: "Abriendo canal…", notify: "Abriendo canal…", open: "Abriendo el puerto…" };
@@ -1482,19 +1493,60 @@ function metaLine(n) {
   return bits.join(" · ");
 }
 
+/* ───────────── tarjetas de los nodos vigilados ───────────── */
+function saveUi() { if (!S.demo) LS.set("vigia.cards", S.ui); }
+/** Nodos vigilados en el orden elegido; los que aún no tienen sitio van al final, por nombre. */
+function watchedOrder() {
+  const pos = new Map(S.ui.order.map((n, i) => [n, i]));
+  const at = (n) => (pos.has(n) ? pos.get(n) : Infinity);
+  return Object.keys(S.cfg.watched).map(Number)
+    .sort((a, b) => at(a) - at(b) || (S.nodes.get(a)?.long || "").localeCompare(S.nodes.get(b)?.long || "", "es"));
+}
+/** Batería para la tarjeta contraída: «88 %», «USB» o nada. */
+function batteryHTML(num) {
+  const b = S.nodes.get(num)?.metrics?.batteryLevel;
+  if (!b || !isNum(b.v)) return "";
+  const usb = b.v > 100;
+  const r = S.cfg.watched[num]?.rules?.batteryLevel || {};
+  const low = !usb && ((isNum(r.min) && b.v < r.min) || b.v <= 15);
+  const lvl = usb ? 1 : Math.max(0, Math.min(1, b.v / 100));
+  const icon = `<svg viewBox="0 0 26 14" aria-hidden="true"><rect x=".75" y=".75" width="21.5" height="12.5" rx="2.5" fill="none" stroke="currentColor" stroke-width="1.5"/><rect x="23" y="4.5" width="2.2" height="5" rx="1" fill="currentColor"/><rect x="2.75" y="2.75" width="${(17.5 * lvl).toFixed(1)}" height="8.5" rx="1" fill="currentColor"/></svg>`;
+  return `<span class="bat${low ? " low" : ""}" title="Batería">${icon}${usb ? "USB" : `${fmtNum(b.v, 0)} %`}</span>`;
+}
+function cardHead(num, n, st, stLabel, min) {
+  const meta = min ? [n.lastHeard ? `visto ${ago(n.lastHeard)}` : "sin señal registrada"].join("") : metaLine(n);
+  return `<header class="card-h"><span class="tag">${esc(n.short)}</span><h3><button type="button" class="name-btn" data-open="${num}" aria-label="Abrir ficha de ${esc(n.long)}, estado ${stLabel}">${esc(n.long)}</button></h3><p class="meta">${esc(meta)}${min ? batteryHTML(num) : ""}</p><span class="pill p-${st}">${stLabel}</span><button type="button" class="icon-btn tg" data-card-toggle="${num}" aria-expanded="${!min}" aria-label="${min ? "Expandir" : "Contraer"} ${esc(n.long)}">${ICON.chevron}</button></header>`;
+}
+
 function renderCards() {
   const el = $("#cards");
-  const nums = Object.keys(S.cfg.watched).map(Number)
-    .sort((a, b) => (S.nodes.get(a)?.long || "").localeCompare(S.nodes.get(b)?.long || "", "es"));
+  const nums = watchedOrder();
   $("#watchCount").textContent = nums.length ? String(nums.length) : "";
+  const tools = $("#cardTools");
+  tools.hidden = nums.length < 1;
+  const allMin = nums.length > 0 && nums.every((n) => S.ui.collapsed[n]);
+  setHTML(tools, S.ordering
+    ? `<button type="button" class="btn primary sm" data-order-done>Listo</button>`
+    : `<button type="button" class="btn ghost sm" data-cards-all>${allMin ? "Expandir todas" : "Contraer todas"}</button>${nums.length > 1 ? `<button type="button" class="btn ghost sm" data-order>Ordenar</button>` : ""}`);
+  el.classList.toggle("ordering", S.ordering);
   if (!nums.length) {
-    el.innerHTML = `<div class="empty"><p><strong>Aquí aparecerán tus sensores.</strong> En “Resto de la malla” toca <em>Vigilar</em> en un nodo para fijarlo aquí y ponerle alarmas de umbral y de nodo sin señal.</p></div>`;
+    setHTML(el, `<div class="empty"><p><strong>Aquí aparecerán tus sensores.</strong> En “Resto de la malla” toca <em>Vigilar</em> en un nodo para fijarlo aquí y ponerle alarmas de umbral y de nodo sin señal.</p></div>`);
     return;
   }
-  el.innerHTML = nums.map((num) => {
+  if (S.ordering) {
+    if (drag) return; // no se repinta mientras se arrastra
+    setHTML(el, `<ol class="ord-list" aria-label="Orden de las tarjetas">${nums.map((num, i) => {
+      const n = node(num);
+      return `<li class="ord-row" data-num="${num}"><span class="ord-pos">${i + 1}</span><span class="tag sm">${esc(n.short)}</span><span class="ord-n">${esc(n.long)}</span>
+        <button type="button" class="icon-btn sm" data-move="${num}" data-dir="-1" aria-label="Subir ${esc(n.long)}"${i === 0 ? " disabled" : ""}>${ICON.up}</button><button type="button" class="icon-btn sm" data-move="${num}" data-dir="1" aria-label="Bajar ${esc(n.long)}"${i === nums.length - 1 ? " disabled" : ""}>${ICON.down}</button><span class="ord-grip" data-drag title="Arrastra para mover" aria-hidden="true">${ICON.grip}</span></li>`;
+    }).join("")}</ol><p class="hint">Arrastra cada nodo por el asa o usa las flechas. El orden se guarda solo.</p>`);
+    return;
+  }
+  setHTML(el, nums.map((num) => {
     const n = node(num);
     const w = S.cfg.watched[num];
     const [st, stLabel] = nodeState(num);
+    if (S.ui.collapsed[num]) return `<article class="card min st-${st}" data-open="${num}">${cardHead(num, n, st, stLabel, true)}</article>`;
     const keys = sortMetrics(Object.keys(n.metrics).filter((k) => !metricMeta(k).minor));
     const readings = keys.map((k) => {
       const m = metricMeta(k), r = (w.rules || {})[k] || {};
@@ -1505,17 +1557,181 @@ function renderCards() {
       return `<div class="rd${bad ? " bad" : ""}"><span class="rd-l">${esc(m.label)}</span><span class="rd-v">${fmtValue(k, v)}${unit ? `<small>${esc(unit)}</small>` : ""}</span><span class="rd-lim">${lim || "&nbsp;"}</span></div>`;
     }).join("");
     const sparkMetric = ["temperature", "batteryLevel", "relativeHumidity"].find((k) => n.metrics[k]) || keys[0];
+    const fullBtn = `<button type="button" class="mini full-btn" data-full="${num}" title="Ver este nodo a pantalla completa">${ICON.expand}Pantalla completa</button>`;
     const spark = sparkMetric
-      ? `<div class="spark-wrap"><span class="spark-cap">${esc(metricMeta(sparkMetric).label)} · últimas 24 h</span>${sparkHTML(S.recent.get(seriesKey(num, sparkMetric)) || [], sparkMetric, (w.rules || {})[sparkMetric])}</div>`
-      : "";
+      ? `<div class="spark-wrap"><div class="spark-top"><span class="spark-cap">${esc(metricMeta(sparkMetric).label)} · 24 h</span>${fullBtn}</div>${sparkHTML(S.recent.get(seriesKey(num, sparkMetric)) || [], sparkMetric, (w.rules || {})[sparkMetric])}</div>`
+      : `<div class="spark-top">${fullBtn}</div>`;
     return `<article class="card st-${st}" data-open="${num}">
-      <header class="card-h"><span class="tag">${esc(n.short)}</span><div class="card-t"><h3><button type="button" class="name-btn" data-open="${num}" aria-label="Abrir ficha de ${esc(n.long)}, estado ${stLabel}">${esc(n.long)}</button></h3><p class="meta">${esc(metaLine(n))}</p></div><span class="pill p-${st}">${stLabel}</span></header>
+      ${cardHead(num, n, st, stLabel, false)}
       ${readings ? `<div class="rds">${readings}</div>` : `<p class="no-rd">Este nodo aún no ha mandado telemetría.</p>`}
       ${n.pos ? `<div class="pos" data-pos-box="${num}">${posBlock(num)}</div>` : ""}
       ${spark}
       <div class="ask" data-ask-box="${num}">${askBlock(num)}</div>
     </article>`;
+  }).join(""));
+}
+
+function toggleCard(num) {
+  if (S.ui.collapsed[num]) delete S.ui.collapsed[num]; else S.ui.collapsed[num] = true;
+  saveUi();
+  renderCards();
+  $(`[data-card-toggle="${num}"]`)?.focus();
+}
+function toggleAllCards() {
+  const nums = watchedOrder();
+  const allMin = nums.every((n) => S.ui.collapsed[n]);
+  S.ui.collapsed = allMin ? {} : Object.fromEntries(nums.map((n) => [n, true]));
+  saveUi();
+  renderCards();
+}
+
+/* ── ordenar: flechas y arrastre (ratón y dedo) ── */
+let drag = null;
+function setOrder(nums) {
+  S.ui.order = nums;
+  saveUi();
+}
+function moveCard(num, dir) {
+  const nums = watchedOrder();
+  const i = nums.indexOf(num), j = i + dir;
+  if (i < 0 || j < 0 || j >= nums.length) return;
+  [nums[i], nums[j]] = [nums[j], nums[i]];
+  setOrder(nums);
+  renderCards();
+  const b = $(`[data-move="${num}"][data-dir="${dir}"]`);
+  if (b && !b.disabled) b.focus(); else $(`[data-move="${num}"][data-dir="${-dir}"]`)?.focus();
+}
+function renumber(list) {
+  [...list.children].forEach((row, i, all) => {
+    row.querySelector(".ord-pos").textContent = String(i + 1);
+    row.querySelector('[data-dir="-1"]').disabled = i === 0;
+    row.querySelector('[data-dir="1"]').disabled = i === all.length - 1;
+  });
+}
+document.addEventListener("pointerdown", (ev) => {
+  const h = ev.target.closest?.("[data-drag]");
+  if (!h || !S.ordering) return;
+  const row = h.closest(".ord-row");
+  ev.preventDefault();
+  h.setPointerCapture(ev.pointerId);
+  drag = { row, list: row.parentElement, y0: ev.clientY, h: h };
+  row.classList.add("dragging");
+});
+document.addEventListener("pointermove", (ev) => {
+  if (!drag) return;
+  const { row, list } = drag;
+  let dy = ev.clientY - drag.y0;
+  // Al pasar la mitad de la fila vecina, se cambian de sitio.
+  const next = row.nextElementSibling, prev = row.previousElementSibling;
+  if (dy > 0 && next && dy > next.offsetHeight / 2) { list.insertBefore(next, row); drag.y0 += next.offsetHeight; dy = ev.clientY - drag.y0; renumber(list); }
+  else if (dy < 0 && prev && -dy > prev.offsetHeight / 2) { list.insertBefore(row, prev); drag.y0 -= prev.offsetHeight; dy = ev.clientY - drag.y0; renumber(list); }
+  row.style.transform = `translateY(${dy}px)`;
+});
+function endDrag() {
+  if (!drag) return;
+  const { row, list } = drag;
+  row.style.transform = "";
+  row.classList.remove("dragging");
+  drag = null;
+  setOrder([...list.children].map((r) => Number(r.dataset.num)));
+  renderCards();
+}
+document.addEventListener("pointerup", endDrag);
+document.addEventListener("pointercancel", endDrag);
+
+/* ───────────── un nodo a pantalla completa ───────────── */
+const FULL_RANGES = { "24h": DAY, "7d": 7 * DAY, "30d": 30 * DAY };
+let fullWake = null, fullT = null;
+async function openFull(num) {
+  S.full = { num, range: S.full?.num === num ? S.full.range : "24h" };
+  const dlg = $("#nodeview");
+  // Pantalla completa de verdad (sin barras del sistema). Se pide antes de abrir la vista: lo último que entra
+  // en la capa superior queda encima, y si fuera al revés la página taparía la vista.
+  if (!document.fullscreenElement && document.documentElement.requestFullscreen) {
+    try { await document.documentElement.requestFullscreen({ navigationUI: "hide" }); } catch { /* no permitido: se ve igual, con las barras */ }
+  }
+  if (!S.full) return; // se cerró mientras se pedía la pantalla completa
+  renderFull();
+  if (!dlg.open) dlg.showModal();
+  // Pantalla encendida mientras se mira.
+  try { if (!fullWake && "wakeLock" in navigator) { fullWake = await navigator.wakeLock.request("screen"); fullWake.addEventListener("release", () => { fullWake = null; }); } } catch { /* sin permiso */ }
+  drawFullCharts();
+}
+function closeFull() {
+  S.full = null;
+  if (document.fullscreenElement) document.exitFullscreen?.().catch(() => {});
+  fullWake?.release?.().catch(() => {});
+  fullWake = null;
+}
+function fullTiles(num) {
+  const n = node(num), w = S.cfg.watched[num] || {};
+  const keys = sortMetrics(Object.keys(n.metrics).filter((k) => !metricMeta(k).minor));
+  if (!keys.length) return `<p class="hint">Este nodo aún no ha mandado telemetría.</p>`;
+  return keys.map((k) => {
+    const m = metricMeta(k), r = (w.rules || {})[k] || {}, cur = n.metrics[k];
+    const bad = (isNum(r.max) && cur.v > r.max) || (isNum(r.min) && cur.v < r.min) || S.active.has(trendKey(num, k));
+    const lim = [isNum(r.min) ? `mín ${fmtLimit(k, r.min)}` : "", isNum(r.max) ? `máx ${fmtLimit(k, r.max)}` : "", r.trend ? trendShort(k, r.trend) : ""].filter(Boolean).join(" · ");
+    const unit = k === "batteryLevel" && cur.v > 100 ? "" : m.unit;
+    return `<div class="nv-tile${bad ? " bad" : ""}"><span class="nv-l">${esc(m.label)}</span><span class="nv-v">${fmtValue(k, cur.v)}${unit ? `<small>${esc(unit)}</small>` : ""}</span><span class="nv-s">${lim ? `<span class="nv-lim">${esc(lim)}</span>` : ""}<span data-fmm="${k}"></span><span>${esc(ago(cur.t))}</span></span></div>`;
   }).join("");
+}
+function renderFull() {
+  if (!S.full) return;
+  const { num, range } = S.full;
+  const n = node(num);
+  const [st, stLabel] = nodeState(num);
+  const alarms = fullAlarms(num);
+  const keys = sortMetrics(Object.keys(n.metrics).filter((k) => !metricMeta(k).minor));
+  const seg = Object.keys(FULL_RANGES).map((r) => `<button type="button" data-full-range="${r}" aria-pressed="${r === range}">${r === "24h" ? "24 h" : r === "7d" ? "7 días" : "30 días"}</button>`).join("");
+  const charts = keys.map((k) => `<figure class="nv-chart" data-m="${k}"><figcaption><span>${esc(metricMeta(k).label)}</span><span class="mm" data-fmm2="${k}"></span></figcaption><div class="chart-box"></div></figure>`).join("");
+  $("#nodeview").innerHTML = `<div class="nv-h">
+      <button class="icon-btn" data-close aria-label="Cerrar pantalla completa">${ICON.close}</button>
+      <span class="tag">${esc(n.short)}</span>
+      <div class="nv-t"><h2>${esc(n.long)}</h2><p class="meta" data-full-meta>${esc(metaLine(n))}</p></div>
+      <span class="pill p-${st}" data-full-pill>${stLabel}</span>
+      <div class="seg" role="group" aria-label="Periodo de las gráficas">${seg}</div>
+    </div>
+    <div class="nv-b"><div data-full-al>${alarms}</div><div class="nv-tiles" data-full-tiles>${fullTiles(num)}</div><div class="nv-charts">${charts}</div></div>`;
+}
+function fullAlarms(num) {
+  const al = [...S.active.values()].filter((a) => a.num === num).sort((a, b) => (a.acked - b.acked) || (b.since - a.since));
+  if (!al.length) return "";
+  return `<ul class="nv-al">${al.map((a) => `<li class="${a.acked ? "acked" : ""}"><div><strong>${esc(alarmTitle(a))}</strong><span>${esc(alarmDetail(a))}</span></div>${a.acked ? `<span class="al-ok">Visto</span>` : `<button class="btn on-dark sm" data-ack="${esc(a.key)}">Enterado</button>`}</li>`).join("")}</ul>`;
+}
+/** Lecturas en vivo sin redibujar todo (las gráficas, como mucho cada 2 s). */
+function refreshFull(num) {
+  if (!S.full || (num != null && S.full.num !== num) || !$("#nodeview").open) return;
+  const n = node(S.full.num);
+  const [st, stLabel] = nodeState(S.full.num);
+  const pill = $("[data-full-pill]");
+  if (pill) { pill.className = `pill p-${st}`; pill.textContent = stLabel; }
+  const meta = $("[data-full-meta]");
+  if (meta) meta.textContent = metaLine(n);
+  const tiles = $("[data-full-tiles]");
+  if (tiles) setHTML(tiles, fullTiles(S.full.num));
+  const al = $("[data-full-al]");
+  if (al) setHTML(al, fullAlarms(S.full.num));
+  if (num != null) { clearTimeout(fullT); fullT = setTimeout(drawFullCharts, 2000); }
+}
+async function drawFullCharts() {
+  if (!S.full) return;
+  const { num, range } = S.full;
+  const to = Date.now(), from = to - FULL_RANGES[range];
+  const rules = S.cfg.watched[num]?.rules || {};
+  const figs = $$("#nodeview .nv-chart");
+  // Alto según la pantalla: que quepan dos filas de gráficas sin desplazarse en un monitor o una tableta.
+  const H = Math.round(Math.max(150, Math.min(300, (innerHeight - 330) / Math.max(1, Math.ceil(figs.length / (innerWidth >= 900 ? 2 : 1))))));
+  for (const fig of figs) {
+    const k = fig.dataset.m;
+    const ser = await S.store.series(num, k, from, to);
+    if (!S.full || S.full.num !== num) return;
+    const box = $(".chart-box", fig);
+    const W = Math.max(260, Math.floor(box.clientWidth || 600));
+    box.innerHTML = chartSVG(ser, k, rules[k], from, to, W, H);
+    const vals = ser.map((p) => p.v).filter((v) => !(k === "batteryLevel" && v > 100));
+    const mm = vals.length ? `mín ${fmtNum(Math.min(...vals), metricMeta(k).dec)} · máx ${fmtNum(Math.max(...vals), metricMeta(k).dec)}` : "";
+    $(`[data-fmm2="${k}"]`, fig).textContent = mm;
+  }
 }
 
 /* ───────────── resto de la malla y buscador ───────────── */
@@ -1684,7 +1900,7 @@ function renderDetail() {
       <div id="chartList" class="chart-list">${keys.length ? keys.map((k) => `<figure class="chart" data-m="${k}"><figcaption><span>${esc(metricMeta(k).label)}</span><b data-cur="${k}">${n.metrics[k] ? esc(fmtWithUnit(k, n.metrics[k].v)) : "—"}</b><span class="mm" data-mm="${k}"></span></figcaption><div class="chart-box"></div></figure>`).join("") : `<p class="hint">Sin telemetría de este nodo.</p>`}</div></section>`;
   if (w) body += `<section class="blk end"><button class="btn danger-ghost" id="unwatchBtn" data-unwatch="${num}">Dejar de vigilar</button></section>`;
 
-  $("#detail").innerHTML = `<div class="sheet-h"><span class="tag">${esc(n.short)}</span><div class="sheet-t"><h2>${esc(n.long)}</h2><p class="meta">${esc(tags)}<br>${esc(metaLine(n))}</p></div><button class="icon-btn" data-close aria-label="Cerrar">${ICON.close}</button></div><div class="sheet-b">${body}</div>`;
+  $("#detail").innerHTML = `<div class="sheet-h"><span class="tag">${esc(n.short)}</span><div class="sheet-t"><h2>${esc(n.long)}</h2><p class="meta">${esc(tags)}<br>${esc(metaLine(n))}</p></div><button class="icon-btn" data-full="${num}" aria-label="Ver a pantalla completa" title="Pantalla completa">${ICON.expand}</button><button class="icon-btn" data-close aria-label="Cerrar">${ICON.close}</button></div><div class="sheet-b">${body}</div>`;
 }
 
 async function drawCharts() {
@@ -1852,6 +2068,9 @@ function watch(num) {
 function unwatch(num) {
   delete S.cfg.watched[num];
   saveCfg();
+  delete S.ui.collapsed[num];
+  S.ui.order = S.ui.order.filter((n) => n !== num);
+  saveUi();
   for (const k of [...S.active.keys()]) if (S.active.get(k).num === num) clearAlarm(k, { silent: true });
   addLog("info", `Ya no se vigila ${nodeName(num)}`, num);
   render();
@@ -2239,6 +2458,8 @@ function startDemo() {
   S.lora = { usePreset: true, modemPreset: 0, hopLimit: 3 };
   S.meshLast = null;
   S.cfg = { watched: JSON.parse(JSON.stringify(d.watched)) };
+  S.ui = { collapsed: {}, order: [] };
+  S.ordering = false;
   S.active = new Map();
   S.log = [{ t: Date.now(), type: "info", text: "Demo cargada con nodos inventados" }];
   S.recent = new Map();
@@ -2314,6 +2535,17 @@ document.addEventListener("click", async (ev) => {
   const ds = t.dataset;
   if ("ask" in ds) return ask(Number(ds.num), ds.ask);
   if ("mapFocus" in ds) return openMap(Number(ds.mapFocus));
+  if ("cardToggle" in ds) return toggleCard(Number(ds.cardToggle));
+  if ("cardsAll" in ds) return toggleAllCards();
+  if ("order" in ds) { S.ordering = true; renderCards(); return $("#cards .ord-row [data-move]")?.focus(); }
+  if ("orderDone" in ds) { S.ordering = false; renderCards(); return toast("Orden guardado"); }
+  if ("move" in ds) return moveCard(Number(ds.move), Number(ds.dir));
+  if ("full" in ds) return openFull(Number(ds.full));
+  if ("fullRange" in ds) {
+    S.full.range = ds.fullRange;
+    $$("#nodeview [data-full-range]").forEach((b) => b.setAttribute("aria-pressed", String(b.dataset.fullRange === ds.fullRange)));
+    return drawFullCharts();
+  }
   if ("routeMap" in ds) { const num = Number(ds.routeMap); return S.traces[num] && openMap(num, { to: num, ...S.traces[num] }); }
   if ("copy" in ds) return copyText(ds.copy, t);
   if ("fenceSet" in ds) return setFence(Number(ds.fenceSet));
@@ -2489,6 +2721,9 @@ document.addEventListener("change", (ev) => {
   }
 });
 
+$("#nodeview").addEventListener("close", closeFull);
+// Al girar el móvil o cambiar el tamaño, las gráficas se rehacen a la medida nueva.
+window.addEventListener("resize", () => { if (S.full) { clearTimeout(fullT); fullT = setTimeout(drawFullCharts, 250); } });
 $("#detail").addEventListener("close", () => { if ($("#detail").open) return; S.detail = null; unwatchArmed = 0; });
 window.addEventListener("resize", () => { clearTimeout(liveT); liveT = setTimeout(drawCharts, 200); });
 

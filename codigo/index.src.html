@@ -134,9 +134,13 @@ button { font: inherit; color: inherit; }
 .card:hover { border-color: color-mix(in oklab, var(--accent) 45%, var(--line)); }
 .card.st-crit { border-color: var(--crit); box-shadow: 0 0 0 1px var(--crit), var(--shadow); }
 .card.st-off .rds, .card.st-off .spark-wrap { opacity: .55; }
-.card-h { display: flex; align-items: flex-start; gap: 10px; }
-.card-t { flex: 1; min-width: 0; }
-.card-t h3 { font: 600 17px/1.2 var(--f-body); overflow-wrap: anywhere; }
+/* Cabecera: nombre, estado y botón en una fila; debajo, a todo lo ancho, cuándo se le oyó. */
+.card-h { display: grid; grid-template-columns: auto minmax(0, 1fr) auto auto; grid-template-areas: "tag title pill tg" "tag meta meta meta"; column-gap: 10px; row-gap: 3px; align-items: center; }
+.card-h > .tag { grid-area: tag; align-self: start; }
+.card-h > h3 { grid-area: title; min-width: 0; font: 600 17px/1.2 var(--f-body); overflow-wrap: anywhere; }
+.card-h > .meta { grid-area: meta; min-width: 0; }
+.card-h > .pill { grid-area: pill; }
+.card-h > .tg { grid-area: tg; }
 .meta { font: 400 12px/1.4 var(--f-mono); color: var(--ink-2); }
 .tag { font: 500 12px/1 var(--f-mono); letter-spacing: .06em; padding: 5px 6px; border-radius: 6px; background: var(--surface-2); border: 1px solid var(--line); flex: none; text-transform: uppercase; }
 .tag.sm { font-size: 11px; padding: 4px 5px; min-width: 42px; text-align: center; }
@@ -164,6 +168,60 @@ button { font: inherit; color: inherit; }
 .spark-dot { position: absolute; width: 9px; height: 9px; margin: -4.5px 0 0 -4.5px; border-radius: 50%; background: var(--accent); box-shadow: 0 0 0 3px color-mix(in oklab, var(--accent) 25%, transparent); }
 .spark-dot.bad { background: var(--crit); box-shadow: 0 0 0 3px color-mix(in oklab, var(--crit) 28%, transparent); }
 .spark-empty { display: grid; place-items: center; border-radius: 8px; background: var(--surface-2); font: 400 12px/1 var(--f-mono); color: var(--ink-2); }
+/* contraer, ordenar y pantalla completa */
+.sec-h.has-tools { align-items: center; flex-wrap: wrap; }
+.sec-tools { margin-left: auto; display: flex; gap: 6px; }
+.sec-tools[hidden] { display: none; }
+.icon-btn.sm, .card-h .tg { width: 32px; height: 32px; border-radius: 9px; }
+.icon-btn.sm svg, .card-h .tg svg { width: 18px; height: 18px; }
+.icon-btn:disabled { opacity: .35; cursor: default; }
+.card-h .tg svg { transition: transform .15s; }
+.card.min .card-h .tg svg { transform: rotate(-90deg); }
+.card.min { padding: 10px 12px 10px 14px; }
+.card.min .card-h > .tag { align-self: center; }
+.card.min .card-h > h3 { font-size: 16px; }
+.card.min .meta { display: flex; flex-wrap: wrap; align-items: center; gap: 3px 12px; }
+.bat { display: inline-flex; align-items: center; gap: 5px; font: 600 12.5px/1 var(--f-body); color: var(--ink); }
+.bat svg { width: 22px; height: 12px; flex: none; }
+.bat.low { color: var(--crit); }
+.spark-top { display: flex; align-items: center; justify-content: space-between; gap: 8px; }
+.full-btn svg { width: 14px; height: 14px; margin-right: 6px; }
+.cards.ordering { display: block; }
+.ord-list { list-style: none; margin: 0 0 8px; padding: 0; background: var(--surface); border: 1px solid var(--line); border-radius: var(--r); }
+.ord-row { display: flex; align-items: center; gap: 10px; padding: 8px 8px 8px 12px; background: var(--surface); border-radius: 10px; }
+.ord-row + .ord-row { border-top: 1px solid var(--line); border-radius: 0; }
+.ord-pos { font: 600 22px/1 var(--f-display); min-width: 22px; text-align: center; color: var(--accent); font-variant-numeric: tabular-nums; }
+.ord-n { flex: 1; min-width: 0; font-weight: 600; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.ord-grip { display: grid; place-items: center; width: 36px; height: 40px; color: var(--ink-2); cursor: grab; touch-action: none; user-select: none; }
+.ord-grip svg { width: 20px; height: 20px; }
+.ord-row.dragging { position: relative; z-index: 2; border-radius: 10px; box-shadow: 0 0 0 2px var(--accent), 0 10px 26px rgb(0 0 0 / .22); cursor: grabbing; }
+.ord-row.dragging .ord-grip { cursor: grabbing; }
+/* un nodo a pantalla completa */
+dialog.nv[open] { display: grid; grid-template-rows: auto minmax(0, 1fr); }
+.nv-h { display: flex; flex-wrap: wrap; align-items: center; gap: 10px 14px; padding: max(12px, env(safe-area-inset-top, 0px)) max(16px, env(safe-area-inset-right, 0px)) 12px max(16px, env(safe-area-inset-left, 0px)); border-bottom: 1px solid var(--line); background: var(--surface); }
+.nv-t { flex: 1 1 200px; min-width: 0; }
+.nv-t h2 { font: 700 clamp(22px, 3vw, 34px)/1.05 var(--f-display); overflow-wrap: anywhere; }
+.nv-h .seg { margin-left: auto; }
+.nv-b { overflow-y: auto; display: grid; gap: 14px; align-content: start; padding: 16px max(16px, env(safe-area-inset-right, 0px)) calc(20px + env(safe-area-inset-bottom, 0px)) max(16px, env(safe-area-inset-left, 0px)); }
+.nv-b > [data-full-al]:empty { display: none; }
+.nv-tiles { display: grid; gap: 12px; grid-template-columns: repeat(auto-fit, minmax(min(100%, 170px), 1fr)); }
+.nv-tile { display: grid; gap: 6px; align-content: start; padding: 12px 16px 14px; background: var(--surface); border: 1px solid var(--line); border-radius: var(--r); }
+.nv-tile.bad { border-color: var(--crit); box-shadow: 0 0 0 1px var(--crit); }
+.nv-l { font: 600 12px/1.2 var(--f-body); text-transform: uppercase; letter-spacing: .07em; color: var(--ink-2); }
+.nv-v { font: 600 clamp(44px, 7vw, 84px)/.95 var(--f-display); font-variant-numeric: tabular-nums; letter-spacing: -.01em; }
+.nv-v small { font: 500 .36em/1 var(--f-display); color: var(--ink-2); margin-left: 5px; }
+.nv-tile.bad .nv-v, .nv-tile.bad .nv-lim { color: var(--crit); }
+.nv-s { display: flex; flex-wrap: wrap; gap: 4px 12px; font: 400 12px/1.3 var(--f-mono); color: var(--ink-2); }
+.nv-charts { display: grid; gap: 12px; grid-template-columns: 1fr; }
+@media (min-width: 900px) { .nv-charts { grid-template-columns: 1fr 1fr; } }
+.nv-chart { margin: 0; min-width: 0; padding: 10px 12px 8px; background: var(--surface); border: 1px solid var(--line); border-radius: var(--r); }
+.nv-chart figcaption { display: flex; flex-wrap: wrap; justify-content: space-between; gap: 4px 10px; margin-bottom: 6px; font: 600 14px/1.2 var(--f-body); }
+.nv-chart .mm { font: 400 12px/1.2 var(--f-mono); color: var(--ink-2); }
+.nv-al { list-style: none; margin: 0; padding: 0; display: grid; gap: 8px; }
+.nv-al li { display: flex; align-items: center; justify-content: space-between; gap: 12px; padding: 12px 14px; border-radius: var(--r); background: var(--crit); color: var(--on-crit); }
+.nv-al li.acked { background: color-mix(in oklab, var(--crit) 14%, var(--surface)); color: var(--ink); border: 1px solid color-mix(in oklab, var(--crit) 60%, var(--line)); }
+.nv-al li > div { display: grid; gap: 3px; min-width: 0; }
+.nv-al li span { font-size: 14px; }
 .name-btn { all: unset; cursor: pointer; overflow-wrap: anywhere; }
 .name-btn:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; border-radius: 4px; }
 
@@ -474,7 +532,7 @@ dialog.full[open] { display: grid; grid-template-rows: auto minmax(0, 1fr); }
   <section id="board" aria-live="polite"></section>
 
   <section class="sec" aria-labelledby="h-watch">
-    <div class="sec-h"><h2 id="h-watch">Sensores vigilados</h2><span id="watchCount" class="count"></span></div>
+    <div class="sec-h has-tools"><h2 id="h-watch">Sensores vigilados</h2><span id="watchCount" class="count"></span><div class="sec-tools" id="cardTools" hidden></div></div>
     <div id="cards" class="cards"></div>
   </section>
 
@@ -502,6 +560,7 @@ dialog.full[open] { display: grid; grid-template-rows: auto minmax(0, 1fr); }
 
 <dialog id="detail" class="sheet" aria-label="Ficha del nodo"></dialog>
 <dialog id="settings" class="sheet" aria-label="Ajustes"></dialog>
+<dialog id="nodeview" class="full nv" aria-label="Nodo a pantalla completa"></dialog>
 <dialog id="map" class="full" aria-label="Mapa de sensores">
   <div class="map-h">
     <button class="icon-btn" type="button" data-close aria-label="Cerrar mapa"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M6 6l12 12M18 6L6 18" stroke="currentColor" stroke-width="2" stroke-linecap="round"/></svg></button>
