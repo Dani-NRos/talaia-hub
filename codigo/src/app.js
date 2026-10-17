@@ -4,7 +4,8 @@ import { createMapView } from "./map.js";
 import { Receptor } from "./receptor.js";
 import { buildDemo, DEMO_IDS } from "./demo.js";
 import { Protobuf } from "@meshtastic/core";
-import { encodeUser, routingErrorReason } from "./pb.js";
+import { encodeUser, routingErrorReason, decodeRouteDiscovery } from "./pb.js";
+import { readTrace, relays, snrQuality, loraSf, weakest, traceTimeout, UNKNOWN_NODE, PRESET_NAME } from "./route.js";
 import { distM, compass, precisionM, fmtDist, coordText, mapsUrl, SOURCE, nextPlace, placeFromPos } from "./geo.js";
 import { trendCheck, trendDefault, parseTrendRule } from "./trend.js";
 
@@ -14,7 +15,7 @@ const $$ = (s, r = document) => [...r.querySelectorAll(s)];
 const esc = (s) => String(s ?? "").replace(/[&<>"']/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[c]));
 const isNum = (x) => typeof x === "number" && Number.isFinite(x);
 const MIN = 60000, HOUR = 60 * MIN, DAY = 24 * HOUR;
-const APP_VERSION = "1.9.0";
+const APP_VERSION = "1.10.0";
 const REPO_URL = "https://github.com/Dani-NRos/vigia-mesh";
 const ISSUES_URL = `${REPO_URL}/issues`;
 const validT = (t) => isNum(t) && t > 1.6e12 && t < Date.now() + 5 * MIN;
@@ -84,6 +85,9 @@ const S = {
   req: new Map(), // peticiones a nodos en curso o recientes, por nodo|tipo
   myUser: null, // ficha de nuestro receptor, se manda al pedir la de otro nodo
   infoAsked: {}, // última vez que se pidió la ficha a cada nodo: los nodos no contestan otra vez en 12 h
+  traces: {}, // última ruta trazada a cada nodo: { t, ms, fwd, back }
+  traceAt: 0, // último traceroute enviado, a cualquier nodo (el firmware solo deja uno cada 30 s)
+  lora: null, // preset y límite de saltos del receptor: { usePreset, modemPreset, spreadFactor, hopLimit }
   demoData: null,
   demoToken: 0,
 };
@@ -113,6 +117,8 @@ function loadReal() {
   S.store = createIdbStore();
   S.channels = LS.get("vigia.channels", []) || [];
   S.infoAsked = LS.get("vigia.infoAsk", {}) || {};
+  S.traces = LS.get("vigia.traces", {}) || {};
+  S.lora = LS.get("vigia.lora", null);
   S.recent = new Map();
 }
 
@@ -394,9 +400,9 @@ const ASK = {
   power:  { label: "Energía",  what: "Tensión y corriente de los canales INA", field: 5, variant: "powerMetrics" },
 };
 // Ficha del nodo (NodeInfo): nombre y clave pública. Sin la clave, el receptor no le manda peticiones.
-const ASK_ALL = { ...ASK, info: { label: "Ficha" }, pos: { label: "Posición" } };
+const ASK_ALL = { ...ASK, info: { label: "Ficha" }, pos: { label: "Posición" }, route: { label: "Ruta" } };
 const ASK_BY_VARIANT = Object.fromEntries(Object.entries(ASK).map(([k, a]) => [a.variant, k]));
-const ASK_TIMEOUT = 60000, ASK_COOLDOWN = 30000, INFO_COOLDOWN = 60000, ASK_SHOW = 10 * MIN;
+const ASK_TIMEOUT = 60000, ASK_COOLDOWN = 30000, INFO_COOLDOWN = 60000, ASK_SHOW = 10 * MIN, TRACE_GAP = 30000;
 const RE = Protobuf.Mesh.Routing_Error;
 // Códigos que la librería incluida aún no nombra (firmware 2.7+).
 const E_RATE_LIMIT = 38, E_NO_PUBKEY = 39;
@@ -453,7 +459,10 @@ function askFailText(code, r) {
       if (r?.acked && r.type === "pos") return "el nodo la recibió pero no contestó; como mucho repite su posición cada 3 min";
       if (r?.acked) return "el nodo la recibió pero no mandó datos";
       if (r?.type === "info") return `sin respuesta en ${ASK_TIMEOUT / 1000} s. Aunque no conteste, si le llegó ya tiene la clave de tu receptor: vuelve a pedirle los datos`;
+      if (r?.type === "route") return `sin respuesta en ${Math.round(r.limit / 1000)} s: el nodo está fuera de alcance, apagado, más lejos que el límite de saltos de tu receptor${S.lora?.hopLimit ? ` (${S.lora.hopLimit})` : ""} o en otro canal; o la respuesta se perdió por el camino`;
       return `sin respuesta en ${ASK_TIMEOUT / 1000} s`;
+    case "throttled": return "tu receptor solo lanza un traceroute cada 30 s; espera un poco y repite";
+    case "notice": return `el receptor no la envió: ${r?.notice || "sin motivo"}`;
     case "send": return "no se pudo enviar al receptor";
     default: return `error ${RE[code] ?? code}`;
   }
@@ -465,6 +474,7 @@ const receptorUsesPki = () => S.demo || (S.myUser?.publicKey?.length === 32 && !
 function keyFixedAt(num) {
   let t = 0;
   for (const type of Object.keys(ASK_ALL)) {
+    if (type === "route") continue; // el traceroute no usa claves: que conteste no dice nada de ellas
     const r = S.req.get(askKey(num, type));
     if (r?.state === "ok" && r.tDone > t) t = r.tDone;
   }
@@ -481,14 +491,19 @@ function keyNeeded(num) {
 }
 
 async function ask(num, type) {
-  const isInfo = type === "info", isPos = type === "pos";
+  const isInfo = type === "info", isPos = type === "pos", isRoute = type === "route";
   const k = askKey(num, type);
   const prev = S.req.get(k);
   if (prev?.state === "wait") return;
+  if (isRoute && num === S.myNode) return toast("Es tu receptor: las rutas se trazan desde él.");
   const cool = isInfo || isPos ? INFO_COOLDOWN : ASK_COOLDOWN;
   const since = prev ? Date.now() - prev.t0 : Infinity;
-  if (since < cool) return toast(`Espera ${Math.ceil((cool - since) / 1000)} s antes de repetir, para no saturar la malla.`);
-  if (!canAsk()) return toast("Conecta el receptor para pedir datos.");
+  if (!isRoute && since < cool) return toast(`Espera ${Math.ceil((cool - since) / 1000)} s antes de repetir, para no saturar la malla.`);
+  if (!canAsk()) return toast(isRoute ? "Conecta el receptor para trazar la ruta." : "Conecta el receptor para pedir datos.");
+  if (isRoute) {
+    const gap = Date.now() - S.traceAt;
+    if (gap < TRACE_GAP) return toast(`Tu receptor solo lanza un traceroute cada 30 s, a cualquier nodo. Espera ${Math.ceil((TRACE_GAP - gap) / 1000)} s.`);
+  }
   if (isInfo && !S.demo && !S.myUser) return toast("Espera a que el receptor termine de cargar sus datos.");
   if (isInfo) {
     // El firmware no contesta a la misma petición de ficha en 12 h, y cada petición nueva reinicia esa cuenta.
@@ -503,8 +518,10 @@ async function ask(num, type) {
     if (!S.demo) LS.set("vigia.infoAsk", Object.fromEntries(Object.entries(S.infoAsked).filter(([, t]) => Date.now() - t < INFO_SUPPRESS)));
   }
   const r = { num, type, state: "wait", t0: Date.now(), tDone: 0, why: null, timer: null, acked: false };
+  r.limit = isRoute ? traceTimeout(S.nodes.get(num)?.hops) : ASK_TIMEOUT;
+  if (isRoute) S.traceAt = Date.now();
   S.req.set(k, r);
-  r.timer = setTimeout(() => finishAsk(r, "fail", "timeout"), ASK_TIMEOUT);
+  r.timer = setTimeout(() => finishAsk(r, "fail", "timeout"), r.limit);
   refreshAsk(num);
   refreshPos(num);
   if (S.demo) return demoAsk(r);
@@ -512,6 +529,7 @@ async function ask(num, type) {
     const ch = S.nodes.get(num)?.channel || 0;
     const sent = isInfo ? receptor.requestNodeInfo(num, encodeUser(S.myUser), ch)
       : isPos ? receptor.requestPosition(num, ch)
+      : isRoute ? receptor.requestTraceroute(num, ch)
       : receptor.requestTelemetry(num, ASK[type].field, ch);
     if (sent.id != null) {
       r.id = sent.id;
@@ -540,6 +558,7 @@ function finishAsk(r, state, why = null) {
   if (state !== "ok") msg = `${what}: ${askFailText(why, r)}`;
   else if (r.type === "info") msg = `${what}: recibida${r.gotKey ? ", clave guardada" : ", el nodo no tiene clave"}`;
   else if (r.type === "pos") msg = `${what}: ${r.noLoc ? "el nodo no comparte su ubicación en ese canal" : "recibida a petición"}`;
+  else if (r.type === "route") msg = `${what}: ida ${r.trace ? legText(r.trace.fwd) : "?"}; vuelta ${r.trace?.back ? legText(r.trace.back) : "sin datos"}${lateOk ? " (tarde)" : ""}`;
   else msg = `${what}: datos recibidos a petición${lateOk ? " (tarde)" : ""}`;
   addLog("info", msg, r.num);
   refreshAsk(r.num);
@@ -558,6 +577,7 @@ function demoAsk(r) {
       r.gotKey = true;
       return finishAsk(r, "ok");
     }
+    if (r.type === "route") return gotTrace(r, res.route, S.myNode, r.num, true);
     if (r.type === "pos") {
       r.noLoc = !res.pos;
       finishAsk(r, "ok");
@@ -577,11 +597,13 @@ function askChips(num) {
     return `<button type="button" class="ask-b${st ? ` is-${st}` : ""}" data-ask="${type}" data-num="${num}" title="${esc(a.what)}"${!ok || st === "wait" ? " disabled" : ""}>${a.label}</button>`;
   }).join("");
 }
-function askStatus(num, types = Object.keys(ASK_ALL).filter((t) => t !== "pos")) {
+function askStatus(num, types = Object.keys(ASK_ALL).filter((t) => t !== "pos" && t !== "route")) {
   return types.map((type) => S.req.get(askKey(num, type))).filter((r) => askVisible(r) && !staleKeyFail(r)).sort((a, b) => b.t0 - a.t0).map((r) => {
     const l = ASK_ALL[r.type].label;
     const secs = Math.round((Date.now() - r.t0) / 1000);
+    if (r.state === "wait" && r.type === "route") return `<span class="s-wait">Trazando la ruta… ${secs} s</span>`;
     if (r.state === "wait") return `<span class="s-wait">${l}: ${r.acked ? "la petición llegó, esperando respuesta" : "esperando respuesta"}… ${secs} s</span>`;
+    if (r.state === "ok" && r.type === "route") return "";
     if (r.state === "ok" && r.type === "pos") return `<span class="s-ok">${l}: ${r.noLoc ? "el nodo no comparte su ubicación en este canal" : `recibida a las ${hhmm.format(new Date(r.tDone))}`}</span>`;
     if (r.state === "ok" && r.type === "info") return `<span class="s-ok">${l}: recibida a las ${hhmm.format(new Date(r.tDone))}${r.gotKey ? ", clave guardada" : ", pero ese nodo no tiene clave (firmware anterior a 2.5)"}</span>`;
     if (r.state === "ok") return `<span class="s-ok">${l}: recibido a las ${hhmm.format(new Date(r.tDone))}, tardó ${Math.max(1, Math.round((r.tDone - r.t0) / 1000))} s</span>`;
@@ -607,10 +629,80 @@ function askBlock(num, sheet = false) {
 }
 function refreshAsk(num) {
   for (const el of $$(`[data-ask-box="${num}"]`)) el.innerHTML = askBlock(num, el.dataset.sheet === "1");
+  for (const el of $$(`[data-route-box="${num}"]`)) el.innerHTML = routeBlock(num);
 }
 function patchAskStatus(num) {
   for (const el of $$(`[data-ask-st="${num}"]`)) el.innerHTML = askStatus(num);
   for (const el of $$(`[data-pos-st="${num}"]`)) el.innerHTML = askStatus(num, ["pos"]);
+  for (const el of $$(`[data-route-st="${num}"]`)) el.innerHTML = askStatus(num, ["route"]);
+}
+
+/* ───────────── ruta por la malla (traceroute) ───────────── */
+function saveTraces() {
+  if (S.demo) return;
+  // La última de cada nodo; como mucho 60 nodos, los más recientes.
+  S.traces = Object.fromEntries(Object.entries(S.traces).sort((a, b) => b[1].t - a[1].t).slice(0, 60));
+  LS.set("vigia.traces", S.traces);
+}
+/** Respuesta a un traceroute nuestro: rd = RouteDiscovery leído; origin = nuestro receptor; dest = el nodo. */
+function gotTrace(r, rd, origin, dest, hasHopStart) {
+  const trace = readTrace(rd, origin, dest, hasHopStart);
+  r.trace = trace;
+  S.traces[r.num] = { t: Date.now(), ms: Date.now() - r.t0, ...trace };
+  saveTraces();
+  finishAsk(r, "ok");
+  if (mapView && $("#map").open) mapView.update();
+}
+function hopName(num) {
+  if (num === UNKNOWN_NODE) return "Nodo sin la clave del canal";
+  if (num === S.myNode) return "Tu receptor";
+  return S.nodes.get(num)?.long || hexId(num);
+}
+/** «directa» o «por R3 → DNN4». */
+function legText(leg) {
+  const mid = relays(leg);
+  return mid.length ? `por ${mid.map(hopName).join(" → ")}` : "directa";
+}
+function legHops(leg) {
+  const k = relays(leg).length;
+  return k === 0 ? "directa" : `por ${k} ${k === 1 ? "nodo" : "nodos"}`;
+}
+const fmtSnr = (s) => `${fmtNum(s, Number.isInteger(s) ? 0 : Number.isInteger(s * 2) ? 1 : 2)} dB`;
+function legHTML(title, leg, sf) {
+  let h = `<div class="rt"><h4>${title} <span>${legHops(leg)}</span></h4><ol class="rt-l">`;
+  leg.nodes.forEach((num, i) => {
+    if (i > 0) {
+      const s = leg.snr[i - 1], q = snrQuality(s, sf);
+      h += `<li class="rt-s${q ? ` q-${q}` : ""}" aria-label="Salto: ${s == null ? "SNR desconocido" : `SNR ${fmtSnr(s)}`}"><span>${s == null ? "SNR ?" : fmtSnr(s)}</span></li>`;
+    }
+    const n = S.nodes.get(num);
+    const unk = num === UNKNOWN_NODE;
+    const tag = unk ? "?" : n?.short || "";
+    const name = esc(hopName(num));
+    const canOpen = !unk && n && num !== S.detail?.num;
+    h += `<li class="rt-n${unk ? " unk" : ""}">${tag ? `<span class="tag sm">${esc(tag)}</span>` : ""}${canOpen ? `<button type="button" class="link-btn" data-open="${num}">${name}</button>` : `<span>${name}</span>`}</li>`;
+  });
+  return h + `</ol></div>`;
+}
+function routeBlock(num) {
+  if (num === S.myNode) return `<h3>Ruta por la malla</h3><p class="hint">Es tu receptor: las rutas se trazan desde él hasta los demás nodos.</p>`;
+  const r = S.req.get(askKey(num, "route"));
+  const waiting = r?.state === "wait";
+  const tr = S.traces[num];
+  const sf = loraSf(S.lora);
+  let h = `<div class="blk-h"><h3>Ruta por la malla</h3><button type="button" class="mini" data-ask="route" data-num="${num}"${!canAsk() || waiting ? " disabled" : ""}>${waiting ? "Trazando…" : tr ? "Volver a trazar" : "Trazar ruta"}</button></div>`;
+  h += `<p class="ask-st" data-route-st="${num}">${askStatus(num, ["route"])}</p>`;
+  if (tr) {
+    h += `<p class="meta">Trazada ${esc(ago(tr.t))} (${esc(stamp(tr.t))}) · contestó en ${Math.max(1, Math.round(tr.ms / 1000))} s</p>`;
+    h += `<div class="rt-cols">${legHTML("Ida", tr.fwd, sf)}${tr.back ? legHTML("Vuelta", tr.back, sf) : `<div class="rt"><h4>Vuelta</h4><p class="hint">Sin datos: algún nodo del camino tiene un firmware anterior a 2.5.</p></div>`}</div>`;
+    const w = weakest(tr);
+    if (w && snrQuality(w.snr, sf) !== "ok") h += `<p class="hint">Salto más flojo: ${esc(hopName(w.from))} → ${esc(hopName(w.to))}, ${fmtSnr(w.snr)}.</p>`;
+    const located = new Set([...tr.fwd.nodes, ...(tr.back?.nodes || [])].filter((x) => S.nodes.get(x)?.pos));
+    if (located.size >= 2) h += `<div class="pos-row"><button type="button" class="mini" data-route-map="${num}">Ver la ruta en el mapa</button></div>`;
+  }
+  const preset = S.lora && (S.lora.usePreset !== false ? PRESET_NAME[S.lora.modemPreset ?? 0] : `SF${S.lora.spreadFactor}`);
+  h += `<p class="hint">Por qué nodos pasa una petición tuya hasta este nodo y por cuáles vuelve su respuesta. Cada número es el SNR con que un nodo oye al anterior: <b class="q-ok">sobrado</b>, <b class="q-warn">justo</b> o <b class="q-bad">al límite</b>${preset ? ` con ${esc(preset)}` : ""}. Los que repiten sin la clave del canal salen sin nombre. Tu receptor solo lanza un traceroute cada 30 s.</p>`;
+  return h;
 }
 
 /* ───────────── bloque de ubicación ───────────── */
@@ -1374,7 +1466,8 @@ function renderFoot() {
 const TILE_CACHE = "teselas-osm"; // el mismo nombre que en sw.js
 let persistAsked = false;
 /** focus: nodo en el que centrar el mapa (desde su tarjeta o su ficha). */
-function openMap(focus = null) {
+/** route: { to, fwd, back } para dibujar la ruta de un traceroute. */
+function openMap(focus = null, route = null) {
   // Que el navegador no vacíe el fondo guardado cuando el móvil vaya justo de espacio.
   if (!persistAsked && window.__VIGIA_PWA) { persistAsked = true; navigator.storage?.persist?.().catch(() => {}); }
   if (!mapView) {
@@ -1382,6 +1475,8 @@ function openMap(focus = null) {
       nodes: () => [...S.nodes.values()],
       myNode: () => S.myNode,
       esc, ago, stamp,
+      sf: () => loraSf(S.lora),
+      hopName, legHops,
       load: () => LS.get("vigia.map", {}),
       save: (v) => LS.set("vigia.map", v),
     });
@@ -1390,7 +1485,7 @@ function openMap(focus = null) {
   // Desde la ficha: si el mapa ya estaba abierto debajo, se cierra la ficha para verlo;
   // si no, el mapa se abre encima y al cerrarlo se vuelve a la ficha.
   if (focus != null && detail.open && $("#map").open) detail.close();
-  mapView.open(focus);
+  mapView.open(focus, route);
 }
 
 /* ───────────── detalle de nodo ───────────── */
@@ -1412,6 +1507,7 @@ function renderDetail() {
   const tags = [hexId(num), n.hw ? n.hw.replaceAll("_", " ") : "", n.num === S.myNode ? "tu receptor" : ""].filter(Boolean).join(" · ");
   let body = `<section class="blk"><h3>Pedir datos ahora</h3><div class="ask in-sheet" data-ask-box="${num}" data-sheet="1">${askBlock(num, true)}</div>
     <p class="hint">La petición sale por LoRa desde tu receptor y el nodo contesta con una lectura recién tomada. Si está dormido para ahorrar batería o fuera de alcance, no contesta.</p></section>`;
+  body += `<section class="blk"><div class="route-box" data-route-box="${num}">${routeBlock(num)}</div></section>`;
   body += `<section class="blk"><div class="pos in-sheet" data-pos-box="${num}" data-sheet="1">${posBlock(num, true)}</div></section>`;
   if (w) {
     const off = isNum(w.offlineMin) ? w.offlineMin : S.settings.defaultOfflineMin;
@@ -1760,6 +1856,20 @@ function makeReceptor() {
     },
     onDiag(e) { pushDiag(e); },
     onChannel(c) { setChannel(c); },
+    onLora(l) {
+      S.lora = { usePreset: l.usePreset, modemPreset: l.modemPreset, spreadFactor: l.spreadFactor, hopLimit: l.hopLimit };
+      LS.set("vigia.lora", S.lora);
+    },
+    onNotice(n) {
+      const msg = String(n?.message || "").trim();
+      if (msg) pushDiag({ t: Date.now(), msg: `Aviso del receptor: ${msg}` });
+      // El firmware avisa así cuando no manda una petición (p. ej. un traceroute antes de 30 s).
+      const r = n?.replyId ? askById.get(n.replyId) : null;
+      if (!r || r.state !== "wait") return;
+      if (r.type === "route" && /trace ?route/i.test(msg)) { S.traceAt = Date.now(); return finishAsk(r, "fail", "throttled"); }
+      r.notice = msg;
+      finishAsk(r, "fail", "notice");
+    },
     onOtherWindow() { S.otherWindow = "busy"; render(); },
     onLockLost() { S.otherWindow = "lost"; addLog("info", "La conexión con el receptor ha pasado a otra ventana"); render(); },
     onMyNode(num) {
@@ -1811,6 +1921,12 @@ function makeReceptor() {
         ackFrom.set(dec.requestId, p.from);
         if (ackFrom.size > 200) ackFrom.delete(ackFrom.keys().next().value);
         askRouting(dec.requestId, p.from, routingErrorReason(dec.payload));
+      }
+      // Respuesta a un traceroute nuestro: lleva el id de la petición.
+      if (dec && dec.portnum === Protobuf.Portnums.PortNum.TRACEROUTE_APP && dec.requestId) {
+        const r = askById.get(dec.requestId);
+        const rd = r?.type === "route" ? decodeRouteDiscovery(dec.payload) : null;
+        if (rd) gotTrace(r, rd, p.to, p.from, p.hopStart > 0);
       }
       if (validT(rx) && S.link.state === "ready") checkClock(rx);
       // Canal por el que emite el nodo, para pedirle datos por el mismo.
@@ -1914,6 +2030,9 @@ function startDemo() {
   ];
   S.demoMesh = MESH_DEFAULT();
   S.infoAsked = {};
+  S.traces = {};
+  S.traceAt = 0;
+  S.lora = { usePreset: true, modemPreset: 0, hopLimit: 3 };
   S.meshLast = null;
   S.cfg = { watched: JSON.parse(JSON.stringify(d.watched)) };
   S.active = new Map();
@@ -1991,6 +2110,7 @@ document.addEventListener("click", async (ev) => {
   const ds = t.dataset;
   if ("ask" in ds) return ask(Number(ds.num), ds.ask);
   if ("mapFocus" in ds) return openMap(Number(ds.mapFocus));
+  if ("routeMap" in ds) { const num = Number(ds.routeMap); return S.traces[num] && openMap(num, { to: num, ...S.traces[num] }); }
   if ("copy" in ds) return copyText(ds.copy, t);
   if ("fenceSet" in ds) return setFence(Number(ds.fenceSet));
   if ("fenceDel" in ds) return delFence(Number(ds.fenceDel));

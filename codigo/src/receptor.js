@@ -12,7 +12,8 @@ const CFG_MAX_MS = 180000; // lectura inicial completa, aunque lleguen paquetes
 export class Receptor {
   /**
    * h: { onStatus(state, extra), onDevice, onReady, onLost(reason, wasReady), onTrouble({kind,count,err,name}),
-   *      onDiag(entry), onOtherWindow(), onLockLost(), onMyNode, onNodeInfo, onUser, onTelemetry, onPosition, onPacket }
+   *      onDiag(entry), onOtherWindow(), onLockLost(), onMyNode, onNodeInfo, onUser, onTelemetry, onPosition, onPacket,
+   *      onLora(loraConfig), onNotice(clientNotification) }
    */
   constructor(h) {
     this.h = h;
@@ -186,6 +187,9 @@ export class Receptor {
     ev.onPositionPacket.subscribe((p) => mine() && this.h.onPosition?.(p));
     ev.onMeshPacket.subscribe((p) => mine() && this.h.onPacket?.(p));
     ev.onChannelPacket.subscribe((c) => mine() && this.h.onChannel?.(c));
+    // Configuración LoRa (preset y límite de saltos) y avisos del firmware (p. ej. traceroute limitado).
+    ev.onConfigPacket.subscribe((c) => mine() && c?.payloadVariant?.case === "lora" && this.h.onLora?.(c.payloadVariant.value));
+    ev.onClientNotificationPacket?.subscribe((n) => mine() && this.h.onNotice?.(n));
   }
 
   _closeLink() {
@@ -274,6 +278,15 @@ export class Receptor {
    */
   requestPosition(dest, channel = 0) {
     return this._sendTracked(new Uint8Array(), Protobuf.Portnums.PortNum.POSITION_APP, dest, channel);
+  }
+
+  /**
+   * Traceroute: un RouteDiscovery vacío (0 bytes) con want_ack y want_response. Cada nodo que lo repite y tiene
+   * la clave del canal se apunta en la ruta con el SNR con que lo oyó; el destino contesta por el mismo canal y
+   * la vuelta se apunta igual. Nunca va cifrado con PKI. El firmware solo deja uno cada 30 s (a cualquier nodo).
+   */
+  requestTraceroute(dest, channel = 0) {
+    return this._sendTracked(new Uint8Array(), Protobuf.Portnums.PortNum.TRACEROUTE_APP, dest, channel);
   }
 
   /**

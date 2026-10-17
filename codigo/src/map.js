@@ -5,11 +5,13 @@ import leafletCss from "leaflet/dist/leaflet.css";
 import { metricMeta, fmtWithUnit, fmtNum } from "./metrics.js";
 import { precisionM, fmtDist } from "./geo.js";
 import { AGES, ageMs, metricCounts, defaultMetric, mapPoints, declutter, ageOpacity, pillText, scaleFor, inkFor } from "./mapdata.js";
+import { snrQuality } from "./route.js";
 
 const SPAIN = { center: [40.0, -3.7], zoom: 6 };
 
 /**
- * ctx: { nodes(): nodo[], myNode(): num|null, esc, ago(t), stamp(t), load(): {}, save(obj) }
+ * ctx: { nodes(): nodo[], myNode(): num|null, esc, ago(t), stamp(t), load(): {}, save(obj),
+ *        sf(): factor de dispersión del receptor, hopName(num), legHops(leg) }
  */
 export function createMapView(ctx) {
   const dlg = document.getElementById("map");
@@ -17,18 +19,20 @@ export function createMapView(ctx) {
   const selM = document.getElementById("mapMetric");
   const selA = document.getElementById("mapAge");
   const countEl = document.getElementById("mapCount");
+  const filtersEl = selM.closest(".map-f");
   const st = { metric: null, age: "24h", ...(ctx.load() || {}) };
   const markers = new Map(); // clave → { mk, html, lat, lon }
   let focusNum = null; // nodo pedido desde su ficha: se ve siempre y resaltado hasta cerrar el mapa
   let zoomedIn = false; // la vista actual es la de un nodo concreto: al abrir desde la cabecera se vuelve a ver todo
   let m = null, rings = null, guides = null, legendEl = null, emptyEl = null, offEl = null, fitted = false;
   let shown = { metric: null, points: [], others: [] };
+  let route = null, routeLayer = null, routeEl = null; // ruta de un traceroute: { to, fwd, back }
 
   selA.innerHTML = AGES.map((a) => `<option value="${a.key}">${a.label}</option>`).join("");
   selA.value = st.age;
   const save = () => ctx.save({ metric: st.metric, age: st.age });
   // Al cerrar se olvida el nodo buscado y se cierra su globo, que si no seguiría tapando el mapa al volver.
-  dlg.addEventListener("close", () => { focusNum = null; m?.closePopup(); });
+  dlg.addEventListener("close", () => { focusNum = null; route = null; drawRoute(); m?.closePopup(); });
   selM.addEventListener("change", () => { st.metric = selM.value || null; save(); update(); });
   selA.addEventListener("change", () => { st.age = selA.value; save(); update(); });
 
@@ -85,6 +89,24 @@ export function createMapView(ctx) {
       },
     });
     new Offline({ position: "topleft" }).addTo(m);
+    // Ruta de un traceroute: por encima del fondo y los círculos, por debajo de las píldoras.
+    m.createPane("route").style.zIndex = 450;
+    routeLayer = layerGroup().addTo(m);
+    const RouteInfo = Control.extend({
+      onAdd() {
+        routeEl = DomUtil.create("div", "map-route");
+        routeEl.hidden = true;
+        DomEvent.disableClickPropagation(routeEl);
+        DomEvent.on(routeEl, "click", (e) => {
+          if (!e.target.closest("[data-route-off]")) return;
+          route = null;
+          drawRoute();
+          update();
+        });
+        return routeEl;
+      },
+    });
+    new RouteInfo({ position: "topleft" }).addTo(m);
     const onNet = () => { if (offEl) offEl.hidden = navigator.onLine; };
     window.addEventListener("online", onNet);
     window.addEventListener("offline", onNet);
@@ -163,6 +185,8 @@ export function createMapView(ctx) {
   /* ── pintar ── */
   function update() {
     if (!m || !dlg.open) return;
+    if (route) return updateRoute();
+    routeMode(false);
     const { esc } = ctx;
     const now = Date.now();
     const nodes = ctx.nodes();
@@ -179,7 +203,7 @@ export function createMapView(ctx) {
     if (selM.dataset.h !== optHTML) { selM.innerHTML = optHTML; selM.dataset.h = optHTML; }
     selM.disabled = !opts.length;
 
-    const { points, others } = mapPoints(nodes, metric, maxAge, now, focusNum);
+    const { points, others } = mapPoints(nodes, metric, maxAge, now, focusNum, route ? routeNodes() : null);
     shown = { metric, points, others };
     const sc = scaleFor(metric, points.map((p) => p.v));
     const me = ctx.myNode();
@@ -221,7 +245,106 @@ export function createMapView(ctx) {
     else if (!metric) msg = `Ningún nodo con ubicación ha mandado telemetría (${period}).`;
     else if (!points.length) msg = `Ningún nodo con ubicación ha mandado ${metricMeta(metric).label.toLowerCase()} (${period}).`;
     emptyEl.textContent = msg;
-    emptyEl.hidden = !msg;
+    emptyEl.hidden = !msg || !!route;
+    drawRoute();
+  }
+
+  /* ── ruta de un traceroute ── */
+  /** Con la ruta en pantalla no hay sensor que elegir: se ocultan los filtros y el mapa recoge el hueco. */
+  function routeMode(on) {
+    if (!filtersEl || filtersEl.hidden === on) return;
+    filtersEl.hidden = on;
+    m.invalidateSize();
+  }
+  /**
+   * Con una ruta en pantalla solo salen sus nodos, como etiquetas con su nombre corto: las lecturas del sensor
+   * taparían las líneas. Al quitar la ruta (×) vuelve el mapa de sensores.
+   */
+  function updateRoute() {
+    const { esc } = ctx;
+    const me = ctx.myNode();
+    const stops = [], seen = new Set();
+    for (const num of [...route.fwd.nodes, ...(route.back?.nodes || [])]) {
+      if (seen.has(num)) continue;
+      seen.add(num);
+      const n = nodeOf(num);
+      if (!n?.pos) continue;
+      stops.push({ num, lat: n.pos.lat, lon: n.pos.lon, t: -stops.length, acc: precisionM(n.pos.bits) });
+    }
+    shown = { metric: null, points: stops, others: [] };
+    const keep = new Set();
+    stops.forEach((q, i) => {
+      const n = nodeOf(q.num);
+      const cls = q.num === route.to ? " dest" : q.num === me ? " me" : "";
+      place(`p:${q.num}`, q.lat, q.lon, `<div class="mp stop${cls}">${esc(n.short)}</div>`, q.num === route.to ? 5000 : 2000 - i, n.long);
+      keep.add(`p:${q.num}`);
+    });
+    rings.clearLayers();
+    for (const q of stops) {
+      if (q.acc) circle([q.lat, q.lon], { radius: q.acc, pane: "precision", interactive: false, color: "#152320", weight: 1.5, opacity: 0.45, dashArray: "5 5", fillColor: "#66726e", fillOpacity: 0.12 }).addTo(rings);
+    }
+    for (const [k, it] of markers) if (!keep.has(k)) { it.mk.remove(); markers.delete(k); }
+    countEl.textContent = "Ruta";
+    routeMode(true);
+    if (legendEl) legendEl.hidden = true;
+    emptyEl.hidden = true;
+    drawRoute();
+    spread();
+  }
+  const routeNodes = () => new Set([...route.fwd.nodes, ...(route.back?.nodes || [])]);
+  function posOf(num) {
+    const p = nodeOf(num)?.pos;
+    return p ? latLng(p.lat, p.lon) : null;
+  }
+  /** La vuelta solo se dibuja si va por otro camino que la ida. */
+  const sameWay = (r) => !r.back || r.back.nodes.join() === [...r.fwd.nodes].reverse().join();
+  /**
+   * Une los nodos del tramo que tienen ubicación. Si entre dos hay nodos sin ubicación (o que repitieron sin
+   * la clave del canal), la línea va punteada: por ahí pasó, pero no se sabe por dónde.
+   */
+  function drawLeg(leg, style, labels) {
+    let prev = null, prevI = -1, missing = 0;
+    leg.nodes.forEach((num, i) => {
+      const at = posOf(num);
+      if (!at) { missing++; return; }
+      if (prev) {
+        const gap = i - prevI > 1;
+        polyline([prev, at], { pane: "route", interactive: false, ...style, ...(gap ? { dashArray: "1 9", lineCap: "round" } : {}) }).addTo(routeLayer);
+        const s = leg.snr[i - 1];
+        if (labels && !gap && s != null) {
+          const mid = latLng((prev.lat + at.lat) / 2, (prev.lng + at.lng) / 2);
+          const q = snrQuality(s, ctx.sf()) || "unk";
+          const txt = `${fmtNum(s, Number.isInteger(s) ? 0 : Number.isInteger(s * 2) ? 1 : 2)} dB`;
+          marker(mid, { pane: "route", interactive: false, keyboard: false, icon: divIcon({ className: "rt-lbl-w", html: `<span class="rt-lbl q-${q}">${txt}</span>`, iconSize: [0, 0] }) }).addTo(routeLayer);
+        }
+      }
+      prev = at;
+      prevI = i;
+    });
+    return missing;
+  }
+  function drawRoute() {
+    if (!routeLayer) return;
+    routeLayer.clearLayers();
+    if (!route) { if (routeEl) routeEl.hidden = true; return; }
+    const { esc } = ctx;
+    const both = !sameWay(route);
+    if (both) drawLeg(route.back, { color: "#7b3fa0", weight: 3, opacity: 0.85, dashArray: "9 7" }, false);
+    drawLeg(route.fwd, { color: "#0d366b", weight: 4, opacity: 0.9 }, true);
+    const noPos = [...routeNodes()].filter((num) => !posOf(num)).length;
+    let h = `<div class="mr-h"><strong>Ruta a ${esc(ctx.hopName(route.to))}</strong><button type="button" class="mr-x" data-route-off aria-label="Quitar la ruta del mapa">×</button></div>`;
+    h += `<p><i class="mr-fwd"></i>Ida ${esc(ctx.legHops(route.fwd))}${both ? "" : route.back ? ", y vuelve igual" : ""}</p>`;
+    if (both) h += `<p><i class="mr-back"></i>Vuelta ${esc(ctx.legHops(route.back))}, por otro camino</p>`;
+    if (noPos) h += `<p class="mr-miss"><i class="mr-gap"></i>${noPos} ${noPos === 1 ? "nodo del camino sin ubicación" : "nodos del camino sin ubicación"}</p>`;
+    if (routeEl.dataset.h !== h) { routeEl.innerHTML = h; routeEl.dataset.h = h; }
+    routeEl.hidden = false;
+  }
+  function fitRoute() {
+    const pts = [...routeNodes()].map(posOf).filter(Boolean);
+    if (!pts.length) return false;
+    if (pts.length === 1) m.setView(pts[0], 13, { animate: false });
+    else m.fitBounds(latLngBounds(pts), { padding: [56, 56], maxZoom: 15, animate: false });
+    return true;
   }
 
   /** Aparta las píldoras que se pisan a este zoom. La lectura más reciente se queda en su sitio. */
@@ -275,14 +398,17 @@ export function createMapView(ctx) {
     return true;
   }
 
-  /** focus: número de nodo para abrir el mapa centrado en él. */
-  function open(focus = null) {
+  /** focus: número de nodo para abrir el mapa centrado en él. r: ruta de un traceroute para dibujarla. */
+  function open(focus = null, r = null) {
     if (!dlg.open) dlg.showModal();
     ensure();
     m.invalidateSize();
     focusNum = focus;
+    route = r;
+    m.closePopup();
     update();
-    if (focus != null && centerOn(focus)) { fitted = true; zoomedIn = true; }
+    if (route && fitRoute()) { fitted = true; zoomedIn = true; }
+    else if (focus != null && centerOn(focus)) { fitted = true; zoomedIn = true; }
     else if (!fitted || zoomedIn) { fit(false); fitted = true; zoomedIn = false; }
     spread(); // los marcadores no existen hasta que el mapa tiene vista: se colocan ya encuadrado
     requestAnimationFrame(() => { m.invalidateSize(); spread(); });

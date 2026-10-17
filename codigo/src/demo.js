@@ -112,6 +112,19 @@ export function buildDemo(now = Date.now()) {
     const r = (x, d = 1) => Math.round(x * 10 ** d) / 10 ** d;
     const delay = 2500 + rnd() * 4500;
     if (num === monte || num === tracker) return { delay: 9000, error: "MAX_RETRANSMIT" };
+    if (type === "route") {
+      // Traceroute: SNR en cuartos de dB, como viajan en el paquete; -128 es «desconocido».
+      const q = (db) => Math.round(db * 4), murta = 0x2299aa10, pepe = 0x19f3d2c6, unk = 0xffffffff;
+      const route = {
+        [garaje]: { route: [], snrTowards: [q(10.25)], routeBack: [], snrBack: [q(11)] },
+        [caseta]: { route: [garaje], snrTowards: [q(10.5), q(6.25)], routeBack: [garaje], snrBack: [q(7), q(11.25)] },
+        // Uno de los saltos repite sin la clave del canal; la vuelta va por otro camino.
+        [murta]: { route: [caseta, unk], snrTowards: [q(7.25), -128, q(-6.5)], routeBack: [caseta], snrBack: [q(-9.75), q(8)] },
+        [cullera]: { route: [garaje, caseta, murta], snrTowards: [q(10.5), q(6.75), q(2.5), q(-12.25)], routeBack: [murta, caseta], snrBack: [q(-11.5), q(3), q(7.75)] },
+        [pepe]: { route: [garaje], snrTowards: [q(10), q(4.25)], routeBack: [garaje], snrBack: [q(5.5), q(10.75)] },
+      }[num];
+      return route ? { delay: 3000 + rnd() * 5000, route } : { delay: 1500, error: "NO_RESPONSE" };
+    }
     if (type === "info") { noKey.delete(num); return { delay: delay + 1500 }; }
     if (type === "pos") {
       const p = nodes.find((n) => n.num === num)?.pos;

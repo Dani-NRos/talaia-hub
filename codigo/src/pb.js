@@ -60,11 +60,61 @@ export function routingErrorReason(bytes) {
       const field = Math.floor(key / 8), wire = key & 7;
       if (field === 3 && wire === 0) return varint();
       if (wire === 0) varint();
-      else if (wire === 2) i += varint();
+      else if (wire === 2) { const len = varint(); i += len; } // «i += varint()» sumaría la i de antes de leer la longitud
       else if (wire === 1) i += 8;
       else if (wire === 5) i += 4;
       else return null;
     }
   } catch { return null; }
   return null;
+}
+
+/**
+ * Lee un meshtastic.RouteDiscovery (respuesta a un traceroute): route=1 (fixed32), snr_towards=2 (int32),
+ * route_back=3 (fixed32), snr_back=4 (int32). Acepta campos empaquetados (lo normal en proto3) y sueltos.
+ * Los SNR van en cuartos de dB; -128 es «desconocido». Devuelve null si el mensaje viene mal formado.
+ */
+export function decodeRouteDiscovery(bytes) {
+  const out = { route: [], snrTowards: [], routeBack: [], snrBack: [] };
+  if (!bytes) return out;
+  let i = 0;
+  // varint de 32 bits con signo: los int32 negativos llegan como varint de 10 bytes; solo cuentan los 32 bajos.
+  const varint32 = () => {
+    let lo = 0, shift = 0, b;
+    do {
+      if (i >= bytes.length) throw new Error("corto");
+      b = bytes[i++];
+      if (shift < 32) lo |= (b & 0x7f) << shift;
+      shift += 7;
+    } while (b & 0x80);
+    return lo | 0;
+  };
+  const fixed32 = () => {
+    if (i + 4 > bytes.length) throw new Error("corto");
+    const v = (bytes[i] | (bytes[i + 1] << 8) | (bytes[i + 2] << 16) | (bytes[i + 3] << 24)) >>> 0;
+    i += 4;
+    return v;
+  };
+  const LISTS = { 1: ["route", "f"], 2: ["snrTowards", "v"], 3: ["routeBack", "f"], 4: ["snrBack", "v"] };
+  try {
+    while (i < bytes.length) {
+      const key = varint32() >>> 0;
+      const field = key >>> 3, wire = key & 7;
+      const list = LISTS[field];
+      if (list && wire === 2) {
+        const len = varint32(); // primero la longitud: «i + varint32()» sumaría la i de antes de leerla
+        const end = i + len;
+        if (end > bytes.length) throw new Error("corto");
+        while (i < end) out[list[0]].push(list[1] === "f" ? fixed32() : varint32());
+      } else if (list && list[1] === "f" && wire === 5) out[list[0]].push(fixed32());
+      else if (list && list[1] === "v" && wire === 0) out[list[0]].push(varint32());
+      else if (wire === 0) varint32();
+      else if (wire === 2) { const len = varint32(); i += len; }
+      else if (wire === 1) i += 8;
+      else if (wire === 5) i += 4;
+      else return null;
+    }
+    if (i > bytes.length) return null;
+  } catch { return null; }
+  return out;
 }
