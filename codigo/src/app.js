@@ -15,7 +15,7 @@ const $$ = (s, r = document) => [...r.querySelectorAll(s)];
 const esc = (s) => String(s ?? "").replace(/[&<>"']/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[c]));
 const isNum = (x) => typeof x === "number" && Number.isFinite(x);
 const MIN = 60000, HOUR = 60 * MIN, DAY = 24 * HOUR;
-const APP_VERSION = "1.10.0";
+const APP_VERSION = "1.11.0";
 const REPO_URL = "https://github.com/Dani-NRos/vigia-mesh";
 const ISSUES_URL = `${REPO_URL}/issues`;
 const validT = (t) => isNum(t) && t > 1.6e12 && t < Date.now() + 5 * MIN;
@@ -360,7 +360,7 @@ function alarmTitle(al) {
   return `${name} · ${m.label} ${al.kind === "high" ? "por encima de" : "por debajo de"} ${fmtLimit(al.metric, al.limit, true)}`;
 }
 function alarmDetail(al) {
-  if (al.kind === "link") return "Reintentando la conexión Bluetooth. Las alarmas de nodo sin señal quedan en pausa.";
+  if (al.kind === "link") return `Reintentando la conexión${S.device?.kind === "serial" ? " por cable" : " Bluetooth"}. Las alarmas de nodo sin señal quedan en pausa.`;
   if (al.kind === "test") return "Así suena y se ve un aviso. Pulsa Enterado para callarlo.";
   if (al.kind === "offline") return `Último dato ${ago(al.value)} (${stamp(al.value)}).`;
   if (al.kind === "moved") {
@@ -1213,11 +1213,12 @@ function render() {
 
 const ICON = {
   bt: `<svg viewBox="0 0 24 24" aria-hidden="true"><path d="M7 7l10 10-5 4V3l5 4L7 17" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"/></svg>`,
+  usb: `<svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 3v14M12 3l-2.5 3h5L12 3ZM12 17a2 2 0 1 0 0 4 2 2 0 0 0 0-4ZM12 14l-5-3V8M12 12l5-3V7" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"/><rect x="5.5" y="6.5" width="3" height="2" rx=".5" fill="currentColor"/><circle cx="17" cy="6" r="1.4" fill="currentColor"/></svg>`,
   gear: `<svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 15.2a3.2 3.2 0 1 0 0-6.4 3.2 3.2 0 0 0 0 6.4Z" fill="none" stroke="currentColor" stroke-width="1.8"/><path d="M19.4 13.5a7.6 7.6 0 0 0 0-3l2-1.6-2-3.4-2.4.9a7.5 7.5 0 0 0-2.6-1.5L14 2.4h-4l-.4 2.5A7.5 7.5 0 0 0 7 6.4l-2.4-.9-2 3.4 2 1.6a7.6 7.6 0 0 0 0 3l-2 1.6 2 3.4 2.4-.9a7.5 7.5 0 0 0 2.6 1.5l.4 2.5h4l.4-2.5a7.5 7.5 0 0 0 2.6-1.5l2.4.9 2-3.4-2-1.6Z" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linejoin="round"/></svg>`,
   close: `<svg viewBox="0 0 24 24" aria-hidden="true"><path d="M6 6l12 12M18 6L6 18" stroke="currentColor" stroke-width="2" stroke-linecap="round"/></svg>`,
 };
 
-const STAGE_TEXT = { gatt: "Buscando el nodo…", service: "Abriendo canal…", notify: "Abriendo canal…" };
+const STAGE_TEXT = { gatt: "Buscando el nodo…", service: "Abriendo canal…", notify: "Abriendo canal…", open: "Abriendo el puerto…" };
 const LINK_TEXT = {
   idle: "Conectar receptor",
   connecting: "Conectando…",
@@ -1239,7 +1240,7 @@ function renderTop() {
     const s = Math.max(0, Math.round((ex.at - Date.now()) / 1000));
     label = s > 0 ? `Reintento en ${s} s` : "Reconectando…";
   }
-  b.innerHTML = `<span class="ld"></span>${ICON.bt}<span class="lt">${esc(label)}</span>`;
+  b.innerHTML = `<span class="ld"></span>${!S.demo && linkKind() === "serial" ? ICON.usb : ICON.bt}<span class="lt">${esc(label)}</span>`;
   $("#demoBar").hidden = !S.demo;
 }
 
@@ -1271,10 +1272,13 @@ function renderBoard() {
       ? `<div class="notice"><p>La conexión con el receptor ha pasado a otra ventana de Vigía.</p><button class="btn primary" data-takeover>Recuperarla aquí</button></div>`
       : `<div class="notice"><p>Vigía ya está conectada al receptor en otra ventana o pestaña. El nodo solo admite una conexión: usa esa, o tráete la conexión aquí.</p><button class="btn primary" data-takeover>Conectar aquí</button></div>`;
   } else if (!S.demo && !tHTML && S.link.state !== "ready" && !S.active.has("link")) {
-    const msg = S.link.state === "idle"
+    const unplugged = S.link.state === "idle" && S.device?.kind === "serial" && canSerial() && !S.userIdle;
+    const msg = unplugged
+      ? `Enchufa el cable de tu receptor (${S.device.name}) y se conectará solo. Mientras tanto ves los últimos datos guardados y no puedo saber si un nodo deja de emitir.`
+      : S.link.state === "idle"
       ? "Sin receptor conectado. Mientras tanto ves los últimos datos guardados y no puedo saber si un nodo deja de emitir."
       : "Esperando al receptor. Las alarmas de nodo sin señal están en pausa hasta que vuelva.";
-    html += `<div class="notice"><p>${esc(msg)}</p>${S.link.state === "idle" ? `<button class="btn primary" data-connect>Conectar receptor</button>` : ""}</div>`;
+    html += `<div class="notice"><p>${esc(msg)}</p>${S.link.state === "idle" ? `<div class="btns">${connectButtons()}</div>` : ""}</div>`;
   }
   el.innerHTML = html;
 }
@@ -1320,16 +1324,49 @@ const TROUBLE = {
   },
 };
 TROUBLE.other = TROUBLE.lost;
+// Por cable USB, otros fallos y otros remedios.
+const TROUBLE_USB = {
+  busy: {
+    title: "No se puede abrir el puerto",
+    lead: "Otro programa tiene abierto el puerto del nodo, o el nodo ya no está enchufado.",
+    steps: [
+      "Cierra la web o la app de Meshtastic, el flasheador, un monitor serie (Arduino, PlatformIO) o la línea de órdenes de Meshtastic si alguno lo está usando: el puerto solo admite un programa.",
+      "Cierra otras pestañas o ventanas de Vigía conectadas por cable.",
+      "Desenchufa el cable y vuelve a enchufarlo.",
+    ],
+  },
+  noapi: {
+    title: "El nodo no contesta por el cable",
+    lead: "El puerto se abre, pero lo que hay al otro lado no contesta como un nodo Meshtastic.",
+    steps: [
+      "Comprueba que has elegido el puerto del nodo (en Windows, el COM que aparece al enchufarlo).",
+      "Si el nodo se acaba de reiniciar al enchufarlo, espera unos segundos: se reintenta solo.",
+      "Prueba con otro cable: algunos solo cargan y no llevan datos.",
+      "Reinicia el nodo.",
+    ],
+  },
+  lost: {
+    title: "Se ha cortado la conexión por cable",
+    lead: "El cable se ha soltado, el nodo se ha reiniciado o el ordenador ha apagado el puerto USB.",
+    steps: [
+      "Revisa el cable y el puerto USB del ordenador; mejor directo al ordenador que por un concentrador.",
+      "Al volver a enchufarlo, Vigía se reconecta sola.",
+      "En Windows, si pasa a menudo, quita el ahorro de energía del USB (Administrador de dispositivos → Concentrador raíz USB → Administración de energía).",
+    ],
+  },
+};
+TROUBLE_USB.other = TROUBLE_USB.lost;
 
 function troubleHTML() {
   const tr = S.trouble;
   if (S.demo || !tr || S.otherWindow || S.link.state === "ready") return "";
   const urgent = tr.kind === "pairing" || tr.kind === "service";
   if (!urgent && tr.count < 2) return "";
-  const g = TROUBLE[tr.kind] || TROUBLE.other;
+  const set = tr.link === "serial" ? TROUBLE_USB : TROUBLE;
+  const g = set[tr.kind] || set.other;
   const name = tr.name || S.device?.name || "el nodo";
   const steps = g.steps.map((x) => `<li>${esc(x.replace("{name}", name))}</li>`).join("");
-  const retry = S.link.state === "idle" ? `<button class="btn primary" data-connect>Conectar receptor</button>` : `<button class="btn primary" data-retry>Reintentar ahora</button>`;
+  const retry = S.link.state === "idle" ? connectButtons() : `<button class="btn primary" data-retry>Reintentar ahora</button>`;
   return `<div class="trouble" role="status"><h2>${esc(g.title)}</h2><p>${esc(g.lead)} <span class="tr-n">${tr.count === 1 ? "1 intento" : `${tr.count} intentos seguidos`}.</span></p><ol>${steps}</ol><div class="btns">${retry}<button class="btn ghost" data-diag>Ver diagnóstico</button></div></div>`;
 }
 
@@ -1350,7 +1387,7 @@ function diagText() {
     `Vigía Mesh ${APP_VERSION}`,
     navigator.userAgent,
     `Receptor: ${S.device?.name || "—"} · estado: ${S.link.state}${S.trouble ? ` · último fallo: ${S.trouble.kind} (${S.trouble.count})` : ""}`,
-    `Bluetooth web: ${navigator.bluetooth ? "sí" : "no"} · getDevices: ${navigator.bluetooth?.getDevices ? "sí" : "no"} · forget: ${typeof BluetoothDevice !== "undefined" && BluetoothDevice.prototype?.forget ? "sí" : "no"} · locks: ${navigator.locks ? "sí" : "no"}`,
+    `Bluetooth web: ${navigator.bluetooth ? "sí" : "no"} · getDevices: ${navigator.bluetooth?.getDevices ? "sí" : "no"} · forget: ${typeof BluetoothDevice !== "undefined" && BluetoothDevice.prototype?.forget ? "sí" : "no"} · locks: ${navigator.locks ? "sí" : "no"} · serie web: ${navigator.serial ? "sí" : "no"} · enlace: ${linkKind() === "serial" ? "cable" : "Bluetooth"}`,
     "",
   ];
   return head.join("\n") + S.diag.map(diagLine).join("\n");
@@ -1716,31 +1753,61 @@ function btSupportMsg() {
   return "";
 }
 
+function serialSupportMsg() {
+  if (PREVIEW) return "Esta es la vista previa: aquí el navegador no deja usar el cable. Instala la app desde tu dirección https para conectar el nodo.";
+  const s = Receptor.serialSupport();
+  if (s === "insecure") return "El cable USB solo funciona en páginas seguras (https). Abre la app desde su dirección https.";
+  if (s === "none") return "Este navegador no puede usar el cable USB. Hace falta Chrome o Edge en el ordenador.";
+  return "";
+}
+const canSerial = () => !serialSupportMsg();
+/** Cómo se conectó el receptor la última vez: "ble" o "serial". Sin Bluetooth web pero con cable, el cable. */
+function linkKind() {
+  const k = (S.device || LS.get("vigia.device", null))?.kind;
+  if (k === "serial" || k === "ble") return k;
+  return btSupportMsg() && canSerial() ? "serial" : "ble";
+}
+/** Botones para conectar: el último modo usado delante; el cable solo donde el navegador lo permite. */
+function connectButtons() {
+  if (!canSerial()) return `<button class="btn primary" data-connect>Conectar receptor</button>`;
+  const usb = `<button class="btn ${linkKind() === "serial" ? "primary" : "ghost"}" data-connect-usb>${ICON.usb}Por cable USB</button>`;
+  const bt = btSupportMsg() ? "" : `<button class="btn ${linkKind() === "ble" ? "primary" : "ghost"}" data-connect-bt>${ICON.bt}Por Bluetooth</button>`;
+  return linkKind() === "serial" ? usb + bt : bt + usb;
+}
+
 function renderSettings() {
   const st = S.link.state;
   const dev = S.device || LS.get("vigia.device", null);
-  const sup = btSupportMsg();
+  const sup = btSupportMsg() && serialSupportMsg();
+  const viaUsb = linkKind() === "serial";
   let rec = "";
-  if (sup) rec = `<p class="warn-t">${esc(sup)}</p>`;
+  if (sup) rec = `<p class="warn-t">${esc(btSupportMsg())}</p>`;
   else if (S.demo) rec = `<p>Estás en la demo. Sal de ella para conectar tu nodo.</p><div class="btns"><button class="btn primary" data-demo-off>Salir de la demo y conectar</button></div>`;
   else {
     const my = S.myNode != null ? S.nodes.get(S.myNode) : null;
+    const via = dev ? (dev.kind === "serial" ? " por cable USB" : " por Bluetooth") : "";
     const statusTxt = {
-      idle: dev?.name ? `Desconectado. Último receptor: ${dev.name}.` : "Ningún receptor emparejado todavía.",
-      connecting: `Conectando con ${dev?.name || "el nodo"}…`,
-      configuring: "Conectado. Leyendo la base de datos de nodos…",
-      ready: `Conectado a ${my ? `${my.short} · ${my.long}` : dev?.name || "tu nodo"}.`,
-      reconnecting: `Se ha perdido la conexión con ${dev?.name || "el receptor"}. Reintentando sola.`,
+      idle: dev?.name ? `Desconectado. Último receptor: ${dev.name}${via}.` : "Ningún receptor emparejado todavía.",
+      connecting: `Conectando${via} con ${dev?.name || "el nodo"}…`,
+      configuring: `Conectado${via}. Leyendo la base de datos de nodos…`,
+      ready: `Conectado${via} a ${my ? `${my.short} · ${my.long}` : dev?.name || "tu nodo"}.`,
+      reconnecting: `Se ha perdido la conexión${via} con ${dev?.name || "el receptor"}. ${viaUsb ? "Se reconecta sola al volver a enchufarlo." : "Reintentando sola."}`,
     }[st];
     rec = `<p>${esc(statusTxt)}</p><div class="btns">`;
-    if (st === "idle") rec += `<button class="btn primary" data-connect>Conectar receptor</button><button class="btn ghost" data-connect-all>Mi nodo no aparece</button>`;
+    if (st === "idle") rec += connectButtons();
     else rec += `${st === "reconnecting" ? `<button class="btn primary" data-retry>Reintentar ahora</button>` : ""}<button class="btn ghost" data-disconnect>Desconectar</button>`;
-    rec += `${dev && st === "idle" ? `<button class="btn danger-ghost" data-forget>Olvidar este receptor</button>` : ""}</div><p class="hint">El receptor es el nodo que tienes al lado del móvil; los sensores le llegan por LoRa. El móvil se conecta a él por Bluetooth, sin internet.</p>
+    rec += `${dev && st === "idle" ? `<button class="btn danger-ghost" data-forget>Olvidar este receptor</button>` : ""}</div>`;
+    if (st === "idle") {
+      const more = [btSupportMsg() ? "" : `<button type="button" class="link-btn" data-connect-all>todos los aparatos Bluetooth</button>`, canSerial() ? `<button type="button" class="link-btn" data-connect-usb-all>todos los puertos serie</button>` : ""].filter(Boolean);
+      rec += `<p class="hint">¿Tu nodo no aparece en la lista? Busca entre ${more.join(" o entre ")}.</p>`;
+    }
+    rec += `<p class="hint">El receptor es el nodo que tienes al lado; los sensores le llegan por LoRa. ${canSerial() ? "Se conecta por Bluetooth o, en el ordenador, por cable USB: con cable no hay emparejamientos ni cortes, y si lo desenchufas y lo vuelves a enchufar se reconecta sola." : "El móvil se conecta a él por Bluetooth, sin internet."}</p>
       <details class="tips"><summary>Si no conecta</summary><ul>
         <li><strong>La app de Meshtastic lo tiene ocupado.</strong> En Android sigue conectada en segundo plano aunque no la abras. Ciérrala del todo o desconecta el nodo desde ella: el nodo solo admite un móvil.</li>
         <li><strong>Emparejamiento roto.</strong> Si se conecta y se corta enseguida, olvida el nodo en los ajustes de Bluetooth del móvil y vuelve a conectar; te pedirá el PIN que sale en su pantalla.</li>
         <li><strong>Otra ventana de Vigía.</strong> Si la tienes abierta en Chrome y también instalada, solo una puede conectarse.</li>
         <li><strong>Bluetooth del móvil atascado.</strong> Apagarlo y encenderlo arregla muchos fallos raros de Android.</li>
+        ${canSerial() ? `<li><strong>Por cable: el puerto está ocupado.</strong> Solo un programa puede abrirlo: cierra la web de Meshtastic, el flasheador o cualquier monitor serie. Usa un cable de datos (algunos solo cargan).</li>` : ""}
       </ul></details>`;
   }
   const notifState = !("Notification" in window) ? "none" : Notification.permission;
@@ -1831,7 +1898,12 @@ function makeReceptor() {
       render();
     },
     onDevice(dev) {
-      S.device = { id: dev.id, name: dev.name || "Nodo Meshtastic" };
+      if (dev.kind === "serial") {
+        const same = S.device?.kind === "serial" && S.device.vid === dev.vid && S.device.pid === dev.pid;
+        S.device = { kind: "serial", vid: dev.vid, pid: dev.pid, name: same && S.device.name ? S.device.name : "nodo por cable USB" };
+      } else {
+        S.device = { kind: "ble", id: dev.id, name: dev.name || "Nodo Meshtastic" };
+      }
       LS.set("vigia.device", S.device);
     },
     onReady() {
@@ -1841,7 +1913,9 @@ function makeReceptor() {
       S.otherWindow = null;
       LS.set("vigia.ever", true);
       clearAlarm("link", {});
-      addLog("info", `Receptor listo: ${S.myNode != null ? nodeName(S.myNode) : S.device?.name || "nodo"}`);
+      // Por cable el puerto no tiene nombre: se usa el del nodo.
+      if (S.device?.kind === "serial" && S.myNode != null) { S.device.name = nodeName(S.myNode); LS.set("vigia.device", S.device); }
+      addLog("info", `Receptor listo${S.device?.kind === "serial" ? " por cable" : ""}: ${S.myNode != null ? nodeName(S.myNode) : S.device?.name || "nodo"}`);
       evalOffline();
       render();
     },
@@ -1990,15 +2064,29 @@ function btErrorText(e) {
   return `No se pudo conectar: ${msg || name || "error desconocido"}`;
 }
 
-async function connectFlow(all = false) {
-  const sup = btSupportMsg();
+function serialErrorText(e) {
+  const name = e?.name || "";
+  const msg = String(e?.message || "");
+  if (name === "NotFoundError") return ""; // cerró el selector sin elegir
+  if (name === "SecurityError" || /permissions policy|disallowed/i.test(msg)) return "Esta página no tiene permiso para usar el cable. Abre la app instalada desde tu dirección https.";
+  return `No se pudo abrir el puerto: ${msg || name || "error desconocido"}`;
+}
+
+/** kind: "ble" o "serial" (por defecto, el último usado). all: selector sin filtro. */
+async function connectFlow(all = false, kind = linkKind()) {
+  const serial = kind === "serial";
+  const sup = serial ? serialSupportMsg() : btSupportMsg();
   if (sup) { toast(sup); openSettings(); return; }
   if (S.demo) stopDemo();
   if (!receptor) receptor = makeReceptor();
+  // Un solo receptor a la vez: cambiar de Bluetooth a cable (o al revés) suelta el anterior.
+  if (receptor.state !== "idle" && receptor.kind !== kind) await receptor.disconnect();
+  S.userIdle = false;
   try {
-    await receptor.pick(all);
+    if (serial) await receptor.pickSerial(all);
+    else await receptor.pick(all);
   } catch (e) {
-    const t = btErrorText(e);
+    const t = serial ? serialErrorText(e) : btErrorText(e);
     if (t) toast(t);
     if (receptor.state !== "reconnecting") { S.link = { state: "idle", extra: null }; render(); }
   }
@@ -2121,11 +2209,14 @@ document.addEventListener("click", async (ev) => {
   if ("watch" in ds) return watch(Number(ds.watch));
   if ("close" in ds) return t.closest("dialog")?.close();
   if ("connect" in ds) { $("#settings").open && $("#settings").close(); return connectFlow(false); }
-  if ("connectAll" in ds) { $("#settings").close(); return connectFlow(true); }
+  if ("connectAll" in ds) { $("#settings").close(); return connectFlow(true, "ble"); }
+  if ("connectBt" in ds) { $("#settings").open && $("#settings").close(); return connectFlow(false, "ble"); }
+  if ("connectUsb" in ds) { $("#settings").open && $("#settings").close(); return connectFlow(false, "serial"); }
+  if ("connectUsbAll" in ds) { $("#settings").open && $("#settings").close(); return connectFlow(true, "serial"); }
   if ("retry" in ds) return receptor?.retryNow();
   if ("takeover" in ds) {
     if (!receptor) receptor = makeReceptor();
-    if (!receptor.device) { S.otherWindow = null; render(); return connectFlow(false); }
+    if (!receptor.hasTarget) { S.otherWindow = null; render(); return connectFlow(false); }
     if (!(await receptor.takeOver())) return toast("No se pudo tomar la conexión. Cierra la otra ventana de Vigía.");
     S.otherWindow = null;
     return render();
@@ -2159,7 +2250,7 @@ document.addEventListener("click", async (ev) => {
     render();
     return toast("Receptor olvidado. Al conectar podrás elegir otro.");
   }
-  if ("disconnect" in ds) { await receptor?.disconnect(); S.trouble = null; addLog("info", "Receptor desconectado a mano"); clearAlarm("link", { silent: true }); render(); return; }
+  if ("disconnect" in ds) { await receptor?.disconnect(); S.userIdle = true; S.trouble = null; addLog("info", "Receptor desconectado a mano"); clearAlarm("link", { silent: true }); render(); return; }
   if ("demoOn" in ds) { $("#settings").close(); startDemo(); return toast("Demo activada: datos inventados"); }
   if ("demoOff" in ds) { $("#settings").open && $("#settings").close(); if (PREVIEW) return toast(btSupportMsg()); stopDemo(); return connectFlow(false); }
   if ("notif" in ds) { try { await Notification.requestPermission(); } catch { /* nada */ } renderSettings(); return; }
@@ -2188,7 +2279,7 @@ document.addEventListener("click", async (ev) => {
     return;
   }
   if ("range" in ds) { S.detail.range = ds.range; $$("#detail [data-range]").forEach((b) => b.setAttribute("aria-pressed", String(b.dataset.range === ds.range))); return drawCharts(); }
-  if (t.id === "linkBtn") { if (!S.demo && S.link.state === "idle" && !btSupportMsg()) return connectFlow(false); return openSettings(); }
+  if (t.id === "linkBtn") { if (!S.demo && S.link.state === "idle" && !(linkKind() === "serial" ? serialSupportMsg() : btSupportMsg())) return connectFlow(false); return openSettings(); }
   if (t.id === "setBtn") return openSettings();
   if (t.id === "mapBtn") return openMap();
   if (t.id === "meshMore") { S.meshExpanded = !S.meshExpanded; return renderMesh(); }
@@ -2258,12 +2349,24 @@ async function boot() {
     S.store.prune(Date.now() - S.settings.retentionDays * DAY);
     render();
     const dev = LS.get("vigia.device", null);
-    if (dev && !btSupportMsg()) {
+    if (dev?.kind === "serial" && canSerial()) {
+      receptor = makeReceptor();
+      S.device = dev;
+      receptor.restoreSerial(dev).catch(() => {});
+    } else if (dev && dev.kind !== "serial" && !btSupportMsg()) {
       receptor = makeReceptor();
       S.device = dev;
       receptor.restore(dev.id).catch(() => {});
     }
   }
+  // Cable: al enchufar el nodo (con permiso ya dado) se conecta solo, salvo que se desconectara a mano.
+  navigator.serial?.addEventListener?.("connect", () => {
+    if (S.demo || S.userIdle || S.device?.kind !== "serial") return;
+    if (receptor?.kind === "serial" && receptor.state === "reconnecting") return receptor.retryNow();
+    if (receptor && receptor.state !== "idle") return;
+    if (!receptor) receptor = makeReceptor();
+    receptor.restoreSerial(S.device).catch(() => {});
+  });
   applyWake();
   if (window.__VIGIA_PWA && "serviceWorker" in navigator) {
     navigator.serviceWorker.register("./sw.js").then((r) => { swReg = r; }).catch(() => {});

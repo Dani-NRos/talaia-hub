@@ -1,6 +1,6 @@
 # Vigía Mesh
 
-Panel de telemetría y alarmas para nodos [Meshtastic](https://meshtastic.org) que funciona **sin internet**. El móvil se conecta por Bluetooth a un nodo receptor, y los sensores le llegan por LoRa.
+Panel de telemetría y alarmas para nodos [Meshtastic](https://meshtastic.org) que funciona **sin internet**. El móvil se conecta por Bluetooth a un nodo receptor (en el ordenador, también por cable USB), y los sensores le llegan por LoRa.
 
 **Abrir la app:** https://dani-nros.github.io/vigia-mesh/
 
@@ -30,8 +30,8 @@ Todos los datos se quedan en el dispositivo. La app no envía nada a ningún ser
 ## Requisitos
 
 - **Navegador.** Chrome en Android, o Chrome/Edge en el ordenador. En iPhone no funciona porque Safari no tiene Bluetooth web.
-- **Receptor.** Un nodo Meshtastic con Bluetooth activado y en el mismo canal que los sensores.
-- **Un solo cliente.** Ningún otro móvil puede estar conectado al receptor a la vez: el nodo acepta un único cliente Bluetooth.
+- **Receptor.** Un nodo Meshtastic en el mismo canal que los sensores, con Bluetooth activado o, en el ordenador, enchufado por USB con un cable de datos.
+- **Un solo cliente por vía.** Por Bluetooth, ningún otro móvil puede estar conectado al receptor a la vez. Por cable, ningún otro programa puede tener abierto su puerto (la web de Meshtastic, un monitor serie…).
 
 ## Instalación
 
@@ -41,7 +41,7 @@ Todos los datos se quedan en el dispositivo. La app no envía nada a ningún ser
 
 ## Uso
 
-1. **Conecta el receptor.** Pulsa **Conectar receptor** y elige tu nodo. Si no aparece, ve a Ajustes → *Mi nodo no aparece*.
+1. **Conecta el receptor.** Pulsa **Conectar receptor** y elige tu nodo. En el ordenador puedes elegir **Por cable USB**: Chrome muestra los puertos de los nodos enchufados. Con cable no hay emparejamientos ni cortes, se reconecta sola al abrir la app y al volver a enchufarlo, y el nodo puede seguir conectado por Bluetooth a otro móvil. Si tu nodo no sale en la lista, Ajustes te deja ver todos los aparatos Bluetooth o todos los puertos serie.
 2. **Elige qué vigilar.** En *Resto de la malla*, pulsa **Vigilar** en un nodo para fijarlo arriba.
 3. **Pon los límites.** Toca la tarjeta para fijar mínimo y máximo por métrica, los avisos de cambio rápido y los minutos sin señal que disparan la alarma.
 4. **Para usarlo como panel fijo,** activa Ajustes → *Mantener la pantalla encendida* y deja el móvil enchufado.
@@ -53,6 +53,7 @@ La app reconoce el tipo de fallo y te dice qué hacer. Lo más habitual:
 - **La app de Meshtastic tiene el nodo ocupado.** En Android sigue conectada en segundo plano aunque no la abras, y el nodo solo admite un cliente Bluetooth. Ciérrala del todo o desconecta el nodo desde ella.
 - **Emparejamiento roto.** Si conecta y se corta enseguida, olvida el nodo en los ajustes de Bluetooth del móvil y vuelve a conectar; Android pedirá el PIN que sale en la pantalla del nodo (sin pantalla suele ser 123456). Pasa al actualizar el firmware o al emparejar el nodo con varios aparatos. Para un receptor fijo en casa, el modo «Sin PIN» lo evita del todo, a cambio de que cualquiera a pocos metros pueda conectarse a él.
 - **Otra ventana de Vigía.** Solo una ventana puede tener el receptor; la otra ofrece «Conectar aquí».
+- **Por cable: el puerto está ocupado o no contesta.** Cierra cualquier otro programa que use el puerto (web de Meshtastic, flasheador, monitor serie de Arduino o PlatformIO). Si el nodo se reinicia al enchufarlo, la app vuelve a pedirle los datos sola. Algunos cables solo cargan: usa uno de datos.
 
 En Ajustes → *Diagnóstico de conexión* queda apuntado cada paso. Si falla, cópialo: dice en qué paso se corta.
 

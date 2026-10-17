@@ -1,6 +1,7 @@
-// Conexión Bluetooth con el nodo receptor Meshtastic, reconexión automática y diagnóstico.
+// Conexión con el nodo receptor Meshtastic, por Bluetooth o por cable USB; reconexión automática y diagnóstico.
 import { MeshDevice, Types, Protobuf } from "@meshtastic/core";
 import { BleLink, BleError, SERVICE, classify } from "./ble.js";
+import { SerialLink, LinkError, USB_FILTERS, classifySerial } from "./serial.js";
 
 const ST = Types.DeviceStatusEnum;
 const BACKOFF_S = [2, 5, 10, 20, 30, 60];
@@ -17,7 +18,9 @@ export class Receptor {
    */
   constructor(h) {
     this.h = h;
-    this.device = null;
+    this.device = null; // BluetoothDevice
+    this.port = null; // SerialPort (cable USB)
+    this.kind = "ble"; // "ble" | "serial"
     this.mesh = null;
     this.link = null;
     this.state = "idle";
@@ -37,6 +40,16 @@ export class Receptor {
     if (!navigator.bluetooth || !navigator.bluetooth.requestDevice) return "none";
     return "ok";
   }
+
+  /** Estado del puerto serie web (cable USB): Chrome y Edge de ordenador. */
+  static serialSupport() {
+    if (!window.isSecureContext) return "insecure";
+    if (!navigator.serial || !navigator.serial.requestPort) return "none";
+    return "ok";
+  }
+
+  /** Hay un receptor elegido (por Bluetooth o por cable) al que volver a conectar. */
+  get hasTarget() { return !!(this.kind === "serial" ? this.port : this.device); }
 
   diag(msg, extra = {}) { this.h.onDiag?.({ t: Date.now(), msg, ...extra }); }
 
@@ -93,9 +106,35 @@ export class Receptor {
     return true;
   }
 
+  /** Abre el selector de puertos de Chrome. all=true enseña todos, no solo los de conversores USB conocidos. */
+  async pickSerial(all = false) {
+    const port = await navigator.serial.requestPort(all ? {} : { filters: USB_FILTERS });
+    this._adoptSerial(port);
+    if (!(await this.acquireLock())) { this.userClosed = true; this._status("idle"); this.h.onOtherWindow?.(); return "locked"; }
+    this.connect();
+    return "ok";
+  }
+
+  /**
+   * Reconecta sin selector a un puerto ya autorizado (Chrome recuerda el permiso).
+   * info: { vid, pid } del último cable usado. Si no está enchufado, devuelve false.
+   */
+  async restoreSerial(info) {
+    if (!navigator.serial?.getPorts) return false;
+    let list = [];
+    try { list = await navigator.serial.getPorts(); } catch { return false; }
+    const port = list.find((p) => { const i = p.getInfo?.() || {}; return i.usbVendorId === info?.vid && i.usbProductId === info?.pid; }) || (list.length === 1 ? list[0] : null);
+    if (!port) return false;
+    this._adoptSerial(port);
+    if (!(await this.acquireLock())) { this.userClosed = true; this._status("idle"); this.h.onOtherWindow?.(); return false; }
+    this.diag("Reconectando al receptor por cable");
+    this.connect();
+    return true;
+  }
+
   /** Quita el receptor a otra ventana de Vigía y conecta aquí. */
   async takeOver() {
-    if (!this.device) return false;
+    if (!this.hasTarget) return false;
     if (!(await this.acquireLock(true))) return false;
     this.userClosed = false;
     this.retry = 0;
@@ -104,7 +143,9 @@ export class Receptor {
   }
 
   _adopt(dev) {
+    this.kind = "ble";
     this.device = dev;
+    this.port = null;
     this.userClosed = false;
     this.retry = 0;
     this.fails = 0;
@@ -112,18 +153,56 @@ export class Receptor {
     this.h.onDevice?.(dev);
   }
 
+  _adoptSerial(port) {
+    this.kind = "serial";
+    this.port = port;
+    this.device = null;
+    this.userClosed = false;
+    this.retry = 0;
+    this.fails = 0;
+    this.lastKind = null;
+    const i = port.getInfo?.() || {};
+    this.h.onDevice?.({ kind: "serial", vid: i.usbVendorId ?? null, pid: i.usbProductId ?? null });
+  }
+
+  /**
+   * El puerto puede cambiar de objeto al desenchufar y volver a enchufar: se busca otra vez entre los autorizados.
+   * null si no está enchufado (Chrome solo lista los puertos presentes).
+   */
+  async _serialPort() {
+    try {
+      const list = await navigator.serial.getPorts();
+      if (list.includes(this.port)) return this.port;
+      const i = this.port?.getInfo?.() || {};
+      if (i.usbVendorId == null) return this.port; // puerto sin datos USB: no se puede buscar otro
+      return list.find((p) => { const j = p.getInfo?.() || {}; return j.usbVendorId === i.usbVendorId && j.usbProductId === i.usbProductId; }) || null;
+    } catch { return this.port; }
+  }
+
   async connect() {
-    if (!this.device || this.userClosed) return;
+    if (!this.hasTarget || this.userClosed) return;
     clearTimeout(this.timer);
     this.timer = null;
     this._closeLink(); // restos del intento anterior, siempre antes de reintentar
-    this._status(this.everReady ? "reconnecting" : "connecting", { stage: "gatt" });
-    const link = new BleLink(this.device, {
+    const serial = this.kind === "serial";
+    this._status(this.everReady ? "reconnecting" : "connecting", { stage: serial ? "open" : "gatt" });
+    const hooks = {
       log: (m) => this.diag(m),
       onStage: (stage) => { if (link === this.link) this._status(this.state, { stage }); },
       onFail: (err) => { if (link === this.link) this._fail(err); },
       onPacket: () => { if (link === this.link && this.state === "configuring") this._cfgProgress(); },
-    });
+    };
+    let link;
+    if (serial) {
+      const port = await this._serialPort();
+      if (this.userClosed) return;
+      // Desenchufado: no se intenta abrir; al volver a enchufarlo, el aviso «connect» de Chrome reconecta.
+      if (!port) { this._fail(new LinkError("unplugged", null, "el nodo no está enchufado")); return; }
+      this.port = port;
+      link = new SerialLink(port, hooks);
+    } else {
+      link = new BleLink(this.device, hooks);
+    }
     this.link = link;
     try {
       await link.open();
@@ -144,6 +223,16 @@ export class Receptor {
     // Solo ahora, con los avisos ya activos, se pide la configuración (antes chocaban en Android).
     mesh.configure().catch(() => {});
     this._armCfgWatchdog();
+    // Por cable, algunas placas se reinician al abrir el puerto y no oyen la primera petición: se repite.
+    if (serial) {
+      for (const ms of [6000, 14000]) {
+        setTimeout(() => {
+          if (mesh !== this.mesh || this.state !== "configuring" || this.cfgPackets > 0) return;
+          this.diag("El nodo aún no contesta por el cable; se le vuelve a pedir la configuración");
+          mesh.configure().catch(() => {});
+        }, ms);
+      }
+    }
   }
 
   _armCfgWatchdog() {
@@ -202,7 +291,7 @@ export class Receptor {
     if (this.userClosed || this.timer) return;
     clearTimeout(this.cfgTimer);
     const wasReady = this.state === "ready";
-    const kind = wasReady ? "lost" : classify(err);
+    const kind = wasReady ? "lost" : this.kind === "serial" ? classifySerial(err) : classify(err);
     this.mesh = null;
     this._closeLink();
     const detail = `${err.causeName || ""} ${err.message || ""}`.trim();
@@ -213,7 +302,7 @@ export class Receptor {
     } else {
       this.fails = this.lastKind === kind ? this.fails + 1 : 1;
       this.lastKind = kind;
-      this.h.onTrouble?.({ kind, count: this.fails, detail, name: this.device?.name || "" });
+      this.h.onTrouble?.({ kind, link: this.kind, count: this.fails, detail, name: this.device?.name || "" });
     }
     this._schedule(kind);
   }
@@ -301,7 +390,7 @@ export class Receptor {
 
   /** Reintenta ya, sin esperar al siguiente intervalo. */
   retryNow() {
-    if (!this.device || this.userClosed) return;
+    if (!this.hasTarget || this.userClosed) return;
     clearTimeout(this.timer);
     this.timer = null;
     this.retry = 0;
@@ -324,10 +413,12 @@ export class Receptor {
 
   /** Olvida el receptor en este navegador (no borra el emparejamiento del sistema). */
   async forget() {
-    const d = this.device;
+    const d = this.device, p = this.port;
     await this.disconnect();
     try { await d?.forget?.(); } catch { /* sin soporte */ }
+    try { await p?.forget?.(); } catch { /* sin soporte */ }
     this.device = null;
+    this.port = null;
   }
 
   _status(s, extra) {
