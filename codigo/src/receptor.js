@@ -341,7 +341,7 @@ export class Receptor {
    * de tu propio receptor al oír que otro nodo la repite; el acuse o el error del nodo destino llegan después
    * y la librería ya no los atiende. Con el id, la app los casa ella misma (ver onPacket en app.js).
    */
-  _sendTracked(payload, port, dest, channel) {
+  _sendTracked(payload, port, dest, channel, wantResponse = true) {
     const mesh = this.mesh;
     if (!mesh || this.state !== "ready") return { id: null, done: Promise.reject({ error: "send" }) };
     let id = null;
@@ -351,7 +351,7 @@ export class Receptor {
     mesh.generateRandId = function () { id = gen.call(this); return id; };
     let done;
     try {
-      done = mesh.sendPacket(payload, port, dest, channel, true, true, false);
+      done = mesh.sendPacket(payload, port, dest, channel, true, wantResponse, false);
     } finally {
       if (own) mesh.generateRandId = gen;
       else delete mesh.generateRandId;
@@ -387,12 +387,12 @@ export class Receptor {
 
   /**
    * Manda un mensaje de texto a la malla. dest: "broadcast" (a un canal) o el número de un nodo.
-   * Con want_ack: en directo confirma el destino; en un canal, que algún nodo lo ha repetido.
+   * Devuelve { id, done } como las peticiones: en directo, la librería resuelve con el primer acuse, que suele
+   * ser el implícito de tu receptor (un vecino lo repitió); el del destino llega después y lo casa la app por id.
+   * En un canal, el acuse solo dice que algún nodo lo ha repetido.
    */
   sendText(dest, channel, text) {
-    const mesh = this.mesh;
-    if (!mesh || this.state !== "ready") return Promise.reject({ error: "send" });
-    return mesh.sendPacket(new TextEncoder().encode(text), Protobuf.Portnums.PortNum.TEXT_MESSAGE_APP, dest, channel, true, false, false);
+    return this._sendTracked(new TextEncoder().encode(text), Protobuf.Portnums.PortNum.TEXT_MESSAGE_APP, dest, channel, false);
   }
 
   /** Reintenta ya, sin esperar al siguiente intervalo. */

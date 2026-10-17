@@ -9,6 +9,7 @@ import { readTrace, relays, snrQuality, loraSf, weakest, traceTimeout, UNKNOWN_N
 import { distM, compass, precisionM, fmtDist, coordText, mapsUrl, SOURCE, nextPlace, placeFromPos } from "./geo.js";
 import { trendCheck, trendDefault, parseTrendRule } from "./trend.js";
 import { searchNodes, highlight, tokens, FILTERS, SORTS } from "./meshsearch.js";
+import { newDelivery, deliveryStep } from "./delivery.js";
 
 /* ───────────── utilidades ───────────── */
 const $ = (s, r = document) => r.querySelector(s);
@@ -16,7 +17,7 @@ const $$ = (s, r = document) => [...r.querySelectorAll(s)];
 const esc = (s) => String(s ?? "").replace(/[&<>"']/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[c]));
 const isNum = (x) => typeof x === "number" && Number.isFinite(x);
 const MIN = 60000, HOUR = 60 * MIN, DAY = 24 * HOUR;
-const APP_VERSION = "1.12.0";
+const APP_VERSION = "1.12.1";
 const REPO_URL = "https://github.com/Dani-NRos/vigia-mesh";
 const ISSUES_URL = `${REPO_URL}/issues`;
 const validT = (t) => isNum(t) && t > 1.6e12 && t < Date.now() + 5 * MIN;
@@ -837,6 +838,9 @@ const DEFAULT_PSK = [0xd4, 0xf1, 0xbb, 0x3a, 0x20, 0x29, 0x07, 0x59, 0xf0, 0xbc,
 const EVENT_PSK = [0x38, 0x4b, 0xbc, 0xc0, 0x1d, 0xc0, 0x22, 0xd1, 0x81, 0xbf, 0x36, 0xb8, 0x61, 0x21, 0xe1, 0xfb,
   0x96, 0xb7, 0x2e, 0x55, 0xbf, 0x74, 0x22, 0x7e, 0x9d, 0x6a, 0xfb, 0x48, 0xd6, 0x4c, 0xb1, 0xa1];
 const MESH_GAP = 8000, MESH_HOURLY = 20, MESH_MAX_AGE = 30 * MIN;
+// Espera al acuse del nodo destino de un aviso directo; uno que llegue después aún cuenta como entregado (tarde).
+const MESH_CONFIRM = 90000;
+const meshById = new Map(); // id del paquete → aviso directo en curso o reciente
 
 /** ¿Lo puede leer cualquiera? Sin cifrar, clave por defecto (o su atajo de 1 byte), clave corta o canal de eventos. */
 function channelPrivacy(psk) {
@@ -950,37 +954,86 @@ async function pumpMesh() {
 }
 async function sendMeshOne(it) {
   const { tg, text } = it;
-  S.meshLast = { t: Date.now(), label: tg.label, result: "enviando…", text };
+  const rec = { tg, text, tq: it.t, t: Date.now(), result: "enviando…", ok: null, st: newDelivery(), timer: null };
+  S.meshLast = rec;
   patchMeshLast();
-  let result, ok = false;
   if (S.demo) {
     await new Promise((r) => setTimeout(r, 1200));
-    result = tg.type === "node" ? "entregado" : "repetido por la malla";
-    ok = true;
-  } else {
-    try {
-      const dest = tg.type === "node" ? tg.num : "broadcast";
-      const ch = tg.type === "node" ? S.nodes.get(tg.num)?.channel || 0 : tg.index;
-      const id = await receptor.sendText(dest, ch, text);
-      ok = true;
-      result = tg.type === "node" ? (ackFrom.get(id) === tg.num ? "entregado" : "salió a la malla") : "repetido por la malla";
-    } catch (e) {
-      const code = e && typeof e === "object" && "error" in e ? e.error : "send";
-      result = code === RE.TIMEOUT ? "sin confirmación"
-        : code === RE.MAX_RETRANSMIT ? (tg.type === "node" ? "no llegó tras varios intentos" : "nadie lo repitió (¿hay nodos al alcance?)")
-        : askFailText(code);
-    }
+    if (tg.type === "node") { meshDelivery(rec, { type: "ack", from: S.myNode, err: 0 }); await new Promise((r) => setTimeout(r, 1800)); meshDelivery(rec, { type: "ack", from: tg.num, err: 0 }); }
+    else meshDone(rec, "repetido por la malla", true);
+    return;
   }
-  const late = Date.now() - it.t > 2 * MIN ? " (con retraso)" : "";
-  S.meshLast = { t: Date.now(), label: tg.label, result: result + late, text, ok };
-  addLog("info", `Aviso por la malla a ${tg.label}: ${result}${late}`);
+  const dest = tg.type === "node" ? tg.num : "broadcast";
+  const ch = tg.type === "node" ? S.nodes.get(tg.num)?.channel || 0 : tg.index;
+  const sent = receptor.sendText(dest, ch, text);
+  if (tg.type === "node") {
+    if (sent.id != null) {
+      meshById.set(sent.id, rec);
+      if (meshById.size > 50) meshById.delete(meshById.keys().next().value);
+    }
+    rec.timer = setTimeout(() => meshDelivery(rec, { type: "timeout" }), MESH_CONFIRM);
+  }
+  try {
+    const id = await sent.done;
+    // Primer acuse, el que atiende la librería: si es del destino, entregado; si no, solo salió a la malla.
+    if (tg.type === "node") meshDelivery(rec, { type: "ack", from: ackFrom.get(id) ?? S.myNode, err: 0 });
+    else meshDone(rec, "repetido por la malla", true);
+  } catch (e) {
+    const code = e && typeof e === "object" && "error" in e ? e.error : "send";
+    if (tg.type === "node") {
+      if (code === RE.TIMEOUT) return; // la librería se rinde a los 60 s; manda nuestra espera
+      meshDelivery(rec, { type: "ack", from: null, err: code });
+      return;
+    }
+    meshDone(rec, code === RE.TIMEOUT ? "sin confirmación" : code === RE.MAX_RETRANSMIT ? "nadie lo repitió (¿hay nodos al alcance?)" : askFailText(code), false);
+  }
+}
+
+/** Acuse o error de la malla para un aviso directo (desde onPacket). err: 0 acuse, otro número error. */
+function meshRouting(reqId, from, err) {
+  const rec = meshById.get(reqId);
+  if (rec && err != null) meshDelivery(rec, { type: "ack", from, err });
+}
+
+/** Avanza la entrega de un aviso directo y cuenta el resultado cuando cambia. */
+function meshDelivery(rec, ev) {
+  const prev = rec.st;
+  const st = deliveryStep(prev, ev, { dest: rec.tg.num });
+  if (st === prev) return;
+  rec.st = st;
+  const name = nodeName(rec.tg.num);
+  const secs = `${Math.max(1, Math.round((Date.now() - rec.t) / 1000))} s`;
+  if (st.phase === "relayed") {
+    rec.result = `en camino: un vecino lo ha repetido; esperando a que ${name} confirme…`;
+    rec.ok = null;
+    return patchMeshLast();
+  }
+  clearTimeout(rec.timer);
+  if (st.phase === "delivered") return meshDone(rec, st.late ? `entregado, aunque la confirmación llegó tarde (${secs})` : `entregado (${secs})`, true);
+  if (st.phase === "unconfirmed") {
+    return meshDone(rec, st.relayed
+      ? `sin confirmar: salió a la malla (un vecino lo repitió), pero ${name} no ha confirmado que le llegara en ${MESH_CONFIRM / 1000} s`
+      : `sin confirmar: ni un vecino lo repitió ni ${name} contestó en ${MESH_CONFIRM / 1000} s`, false);
+  }
+  const why = st.code === RE.MAX_RETRANSMIT ? "no llegó tras varios intentos" : askFailText(st.code);
+  meshDone(rec, `no entregado: ${why}`, false);
+}
+
+function meshDone(rec, result, ok) {
+  const late = rec.t - rec.tq > 2 * MIN ? " (salió con retraso)" : "";
+  rec.result = result + late;
+  rec.ok = ok;
+  rec.tDone = Date.now();
+  addLog("info", `Aviso por la malla a ${rec.tg.label}: ${rec.result}`);
   patchMeshLast();
   renderLog();
 }
+
 function meshLastHTML() {
   const l = S.meshLast;
   if (!l) return "Todavía no se ha enviado ningún aviso.";
-  return `Último: «${esc(l.text)}» → ${esc(l.label)}: <strong class="${l.ok ? "okt" : l.result === "enviando…" ? "" : "warn-t"}">${esc(l.result)}</strong> · ${esc(stamp(l.t))}`;
+  const cls = l.ok === true ? "okt" : l.ok === false ? "warn-t" : "";
+  return `Último: «${esc(l.text)}» → ${esc(l.tg?.label || l.label)}: <strong class="${cls}">${esc(l.result)}</strong> · ${esc(stamp(l.tDone || l.t))}`;
 }
 function patchMeshLast() { const el = $("#meshLast"); if (el) el.innerHTML = meshLastHTML(); }
 
@@ -1012,7 +1065,7 @@ function meshSection() {
       <div class="set-row"><label class="sw" for="meshClear"><input type="checkbox" id="meshClear" ${cfg.onClear ? "checked" : ""}><span class="sw-ui"></span><span>Avisar también cuando se resuelve</span></label></div>
       <div class="btns"><button class="btn ghost" data-mesh-test>Enviar mensaje de prueba</button></div>
       <p class="hint" id="meshLast">${meshLastHTML()}</p>
-      <p class="hint">Sale un mensaje al saltar cada alarma de umbral, sin señal o fuera de su sitio: en un canal lo leen todos los que lo tengan; a un nodo, solo él, y confirma la entrega. Como mucho uno cada 8 s y ${MESH_HOURLY} por hora, para no saturar la malla. Solo con Vigía abierta y el receptor conectado. Los canales públicos están bloqueados porque lo leería cualquiera.</p>
+      <p class="hint">Sale un mensaje al saltar cada alarma de umbral, cambio rápido, sin señal o fuera de su sitio: en un canal lo leen todos los que lo tengan; a un nodo, solo él, y se da por entregado cuando ese nodo lo confirma (que un vecino lo repita no basta). Como mucho uno cada 8 s y ${MESH_HOURLY} por hora, para no saturar la malla. Solo con Vigía abierta y el receptor conectado. Los canales públicos están bloqueados porque lo leería cualquiera.</p>
     </section>`;
 }
 
@@ -2055,7 +2108,9 @@ function makeReceptor() {
       if (dec && dec.portnum === Protobuf.Portnums.PortNum.ROUTING_APP && dec.requestId) {
         ackFrom.set(dec.requestId, p.from);
         if (ackFrom.size > 200) ackFrom.delete(ackFrom.keys().next().value);
-        askRouting(dec.requestId, p.from, routingErrorReason(dec.payload));
+        const err = routingErrorReason(dec.payload);
+        askRouting(dec.requestId, p.from, err);
+        meshRouting(dec.requestId, p.from, err);
       }
       // Respuesta a un traceroute nuestro: lleva el id de la petición.
       if (dec && dec.portnum === Protobuf.Portnums.PortNum.TRACEROUTE_APP && dec.requestId) {
