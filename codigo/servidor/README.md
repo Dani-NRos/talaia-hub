@@ -3,9 +3,9 @@
 Vigía Mesh funcionando 24/7 en Linux: las mismas alarmas que la app (umbral, cambio rápido, valla antirrobo, sin
 señal) y el histórico de lecturas en SQLite, aunque no haya ningún móvil ni ordenador mirando.
 
-> **En pruebas.** De momento funciona sin pantalla: conecta con el nodo, vigila, guarda y lo cuenta en el diario del
-> sistema. La pantalla (la misma app de Vigía, servida por el servidor), Home Assistant y el acceso desde fuera
-> llegan en los siguientes pasos.
+> **En pruebas.** Vigila, guarda el histórico y lo cuenta en el diario del sistema; tiene la misma pantalla que la app
+> (ábrela desde el navegador en la red de casa) y manda los avisos por la malla si los activas. Home Assistant y el
+> acceso desde fuera con https (Tailscale) llegan en los siguientes pasos.
 
 ## Qué hace falta
 
@@ -61,7 +61,7 @@ cada hora.
   "receptor": { "tipo": "usb", "puerto": "auto" },
   "web": { "puerto": 4404 },
   "datos": "/var/lib/vigia",
-  "retencionDias": 90,
+  "retencionDias": 365,
   "registro": "info"
 }
 ```
@@ -69,8 +69,10 @@ cada hora.
 - `receptor.puerto` por USB: `"auto"` (el nodo que haya enchufado), un id USB como `"239a:8029"` (sigue valiendo si
   el puerto cambia de nombre) o una ruta fija, mejor de `/dev/serial/by-id/` (el nombre de `vigia-servidor --puertos`).
 - Por la red: `{ "tipo": "tcp", "host": "192.168.1.60", "puerto": 4403 }`.
-- `retencionDias`: cuánto histórico se guarda. Calcula unos 40 bytes por lectura: 50 nodos con 4 sensores cada media
-  hora son unos 15 MB al mes.
+- `retencionDias`: cuánto histórico se guarda (por defecto, un año). Guarda la telemetría de **todos** los nodos que
+  oye el receptor, y cada lectura ocupa unos 80 bytes: 50 nodos con 4 sensores cada media hora son unos 22 MB al mes
+  (unos 270 MB al año). Si tu receptor oye cientos de nodos (por ejemplo, llegados por MQTT), pueden ser varios GB al
+  año: en una Raspberry con tarjeta SD, baja los días. El diario dice cada 6 horas cuántas lecturas hay y cuánto ocupa.
 - `registro`: `"depurar"` cuenta también cada reintento de conexión.
 
 ## Si no conecta
@@ -92,7 +94,20 @@ curl -fsSL https://raw.githubusercontent.com/Dani-NRos/vigia-mesh/main/codigo/se
 
 Los datos se quedan en `/var/lib/vigia`; con `--desinstalar --borrar-datos` se borran también.
 
+## La pantalla
+
+Al terminar, el instalador dice en qué direcciones abrirla, como `http://192.168.1.50:4404`. Es la misma app de
+Vigía, pero los datos y el receptor son los del servidor: todos tus aparatos ven lo mismo, y si das «Enterado» en uno,
+queda visto en todos. El sonido y la pantalla encendida son de cada aparato.
+
+- **Sin contraseña**: la protege la red de casa. Cualquiera conectado a tu WiFi puede abrirla, ver las posiciones de
+  los nodos y mandar mensajes por la malla con tu receptor.
+- **Por http, el navegador no deja** instalarla como app ni mostrar notificaciones con la página cerrada. Eso llega
+  con https (Tailscale). Mientras tanto, la página suena y avisa mientras está abierta.
+- **No conectes también el móvil por Bluetooth** al nodo del servidor: el nodo repartiría lo que recibe entre los dos.
+
 ## Avisos por la malla
 
-Vienen **apagados**: el servidor no manda nada por la malla por su cuenta. Se podrán activar desde la pantalla, como
-en la app.
+Los activas en Ajustes → *Avisos por la malla*, como en la app (vienen apagados). Una vez activados, los manda el
+servidor 24/7, aunque no haya ninguna pantalla abierta: cada alarma (y, si quieres, cuando se resuelve) a un canal
+privado, a un nodo o a ambos. Como mucho 20 por hora; los canales públicos están bloqueados.

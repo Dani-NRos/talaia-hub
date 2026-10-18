@@ -5,7 +5,7 @@
 //   "receptor": { "tipo": "tcp", "host": "192.168.1.60", "puerto": 4403 },
 //   "web": { "puerto": 4404 },
 //   "datos": "/var/lib/vigia",
-//   "retencionDias": 90,
+//   "retencionDias": 365,
 //   "registro": "info"                                       // o "depurar"
 // }
 import fs from "node:fs";
@@ -16,7 +16,7 @@ export const DEFECTO = {
   receptor: { tipo: "usb", puerto: "auto" },
   web: { puerto: 4404, escuchar: "0.0.0.0" },
   datos: "/var/lib/vigia",
-  retencionDias: 90,
+  retencionDias: 365,
   registro: "info",
 };
 

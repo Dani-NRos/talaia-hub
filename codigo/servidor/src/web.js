@@ -24,6 +24,7 @@ const TIPOS = { ".html": "text/html; charset=utf-8", ".js": "text/javascript; ch
   ".json": "application/json", ".webmanifest": "application/manifest+json", ".png": "image/png", ".svg": "image/svg+xml", ".ico": "image/x-icon" };
 const DOMINIOS_CASA = /\.(local|lan|home|internal|home\.arpa|ts\.net)$/;
 const MAX_CUERPO = 16 * 1024;
+const CSV_BLOQUE = 5000; // filas por bloque al exportar el histórico
 
 export class ErrorOrden extends Error {}
 
@@ -178,16 +179,35 @@ export function crearWeb(vigia, config, registro, opts = {}) {
     json(res, 200, await S.store.series(num, k, desde, hasta));
   }
 
-  function csv(res) {
+  /**
+   * Todo el histórico en CSV. Con un año de todos los nodos pueden ser millones de filas: va por bloques (cada uno,
+   * una consulta cerrada que sigue donde acabó la anterior), esperando a que el navegador lea y dejando correr al
+   * resto del servidor entre bloque y bloque, para no parar las alarmas ni llenar la memoria.
+   */
+  async function csv(req, res) {
     // El mismo formato que la exportación de la app: punto y coma, coma decimal y BOM para Excel.
     const fecha = new Date().toISOString().slice(0, 10);
     res.writeHead(200, { "content-type": "text/csv; charset=utf-8", "content-disposition": `attachment; filename="vigia-servidor-${fecha}.csv"` });
-    res.write("﻿fecha;nodo;nombre;metrica;valor;unidad\n");
     const nombre = (n) => `"${vigia.motor.nodeName(n).replaceAll('"', "'")}"`;
-    for (const r of vigia.almacen.db.prepare("SELECT nodo, metrica, t, v FROM lecturas ORDER BY t").iterate()) {
-      res.write([new Date(r.t).toISOString(), `!${(r.nodo >>> 0).toString(16).padStart(8, "0")}`, nombre(r.nodo), r.metrica, String(r.v).replace(".", ","), metricMeta(r.metrica).unit].join(";") + "\n");
+    const bloque = vigia.almacen.db.prepare("SELECT nodo, metrica, t, v FROM lecturas WHERE (t, nodo, metrica) > (?, ?, ?) ORDER BY t, nodo, metrica LIMIT ?");
+    let cortado = false;
+    req.on("close", () => { cortado = true; });
+    let txt = "\ufefffecha;nodo;nombre;metrica;valor;unidad\n";
+    let ultimo = [-1, -1, ""];
+    for (;;) {
+      const filas = bloque.all(...ultimo, CSV_BLOQUE);
+      for (const r of filas) {
+        txt += [new Date(r.t).toISOString(), `!${(r.nodo >>> 0).toString(16).padStart(8, "0")}`, nombre(r.nodo), r.metrica, String(r.v).replace(".", ","), metricMeta(r.metrica).unit].join(";") + "\n";
+      }
+      if (filas.length < CSV_BLOQUE) break;
+      const u = filas[filas.length - 1];
+      ultimo = [u.t, u.nodo, u.metrica];
+      if (!res.write(txt)) await new Promise((r) => { res.once("drain", r); res.once("close", r); });
+      txt = "";
+      await new Promise((r) => setImmediate(r));
+      if (cortado || res.destroyed) return;
     }
-    res.end();
+    res.end(txt);
   }
 
   function estatico(url, res) {
@@ -223,8 +243,8 @@ export function crearWeb(vigia, config, registro, opts = {}) {
       if (p === "/api/eventos") return eventosSse(req, res);
       if (p === "/api/estado") return json(res, 200, instantanea(S));
       if (p === "/api/serie") return await serie(url, res);
-      if (p === "/api/lecturas.csv") return csv(res);
-      if (p === "/api/salud") return json(res, 200, { ok: true, receptor: S.link.state, nodos: S.nodes.size, alarmas: S.active.size });
+      if (p === "/api/lecturas.csv") return await csv(req, res);
+      if (p === "/api/salud") return json(res, 200, { ok: true, receptor: S.link.state, nodos: S.nodes.size, alarmas: S.active.size, lecturas: await S.store.count() });
       if (p.startsWith("/api/")) return json(res, 404, { error: "no existe" });
       return estatico(url, res);
     } catch (e) {

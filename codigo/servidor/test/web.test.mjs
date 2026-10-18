@@ -178,3 +178,21 @@ test("series y CSV del histórico", async (t) => {
   assert.equal(lineas[0], "fecha;nodo;nombre;metrica;valor;unidad");
   assert.ok(lineas.some((l) => l.endsWith(`;!${CASETA.toString(16)};"Caseta huerto";temperature;18,25;°C`)));
 });
+
+test("CSV de un histórico grande: por bloques, sin perder ni repetir filas, y sin parar el servidor", async (t) => {
+  const { base, vigia } = await montar(t);
+  // 12.000 lecturas, muchas con la misma hora (varios nodos y sensores a la vez): lo difícil al seguir entre bloques.
+  const filas = [];
+  for (let i = 0; i < 12000; i++) filas.push({ node: 1000 + (i % 7), metric: ["temperature", "voltage", "batteryLevel"][i % 3], t: 1.7e12 + Math.floor(i / 21) * 60000, v: i });
+  await vigia.S.store.add(filas);
+  let vueltas = 0;
+  const reloj = setInterval(() => vueltas++, 1); // si el servidor se parase durante la exportación, no contaría
+  const r = await pedir(base, "/api/lecturas.csv");
+  clearInterval(reloj);
+  const lineas = r.cuerpo.replace(/^﻿/, "").trim().split("\n").slice(1);
+  assert.equal(lineas.length, 12000);
+  assert.equal(new Set(lineas).size, 12000);
+  const valores = lineas.map((l) => Number(l.split(";")[4])).sort((a, b) => a - b);
+  assert.deepEqual(valores, filas.map((f) => f.v));
+  assert.ok(vueltas > 1, "el servidor siguió atendiendo mientras exportaba");
+});

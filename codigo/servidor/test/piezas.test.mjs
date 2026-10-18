@@ -69,6 +69,21 @@ test("almacén: lecturas sin duplicados, series ordenadas, poda y estado", async
   assert.equal(a.leer("nada", "d"), "d");
 });
 
+test("almacén: el total de lecturas se lleva en memoria y cuadra con SQLite", async () => {
+  const a = abrirAlmacen(":memory:");
+  const real = () => a.db.prepare("SELECT COUNT(*) AS n FROM lecturas").get().n;
+  assert.equal(await a.lecturas.count(), 0);
+  await a.lecturas.add([{ node: 1, metric: "temperature", t: 1000, v: 19 }, { node: 2, metric: "voltage", t: 1000, v: 4.1 }]);
+  await a.lecturas.add([{ node: 1, metric: "temperature", t: 1000, v: 19.5 }, { node: 1, metric: "temperature", t: 3000, v: 21 }]); // una repetida
+  assert.equal(await a.lecturas.count(), 3);
+  assert.equal(await a.lecturas.count(), real());
+  assert.deepEqual(await a.lecturas.series(1, "temperature", 0), [{ t: 1000, v: 19.5 }, { t: 3000, v: 21 }]);
+  await a.lecturas.prune(2000);
+  assert.equal(await a.lecturas.count(), real());
+  await a.lecturas.clear();
+  assert.equal(await a.lecturas.count(), 0);
+});
+
 test("almacén: en fichero, con WAL", () => {
   const ruta = path.join(fs.mkdtempSync(path.join(os.tmpdir(), "vigia-")), "datos/vigia.db");
   const a = abrirAlmacen(ruta);
@@ -83,7 +98,7 @@ test("configuración: valores por defecto y errores claros", () => {
   const c = comprobar({});
   assert.deepEqual(c.receptor, { tipo: "usb", puerto: "auto" });
   assert.equal(c.web.puerto, 4404);
-  assert.equal(c.retencionDias, 90);
+  assert.equal(c.retencionDias, 365); // todos los nodos, un año
   assert.deepEqual(comprobar({ receptor: { tipo: "tcp", host: "nodo.local" } }).receptor, { tipo: "tcp", puerto: 4403, host: "nodo.local" });
   assert.throws(() => comprobar({ receptor: { tipo: "tcp" } }), (e) => e instanceof ErrorConfig && /falta "host"/.test(e.message));
   assert.throws(() => comprobar({ receptor: { tipo: "bluetooth" } }), /"usb" o "tcp"/);

@@ -177,7 +177,7 @@ if [ ! -f "$ETC/servidor.json" ] || [ "$RECONFIGURAR" -eq 1 ]; then
   "receptor": $RECEPTOR,
   "web": { "puerto": 4404 },
   "datos": "$DATOS",
-  "retencionDias": 90,
+  "retencionDias": 365,
   "registro": "info"
 }
 EOF

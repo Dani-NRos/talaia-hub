@@ -26,7 +26,9 @@ export function abrirAlmacen(ruta) {
   if (!v) db.prepare("INSERT INTO esquema (version) VALUES (?)").run(VERSION);
 
   const q = {
-    poner: db.prepare("INSERT OR REPLACE INTO lecturas (nodo, metrica, t, v) VALUES (?, ?, ?, ?)"),
+    // Nueva lectura: si ya estaba (la misma hora del mismo sensor), se actualiza su valor sin contarla otra vez.
+    nueva: db.prepare("INSERT OR IGNORE INTO lecturas (nodo, metrica, t, v) VALUES (?, ?, ?, ?)"),
+    poner: db.prepare("UPDATE lecturas SET v = ?4 WHERE nodo = ?1 AND metrica = ?2 AND t = ?3"),
     serie: db.prepare("SELECT t, v FROM lecturas WHERE nodo = ? AND metrica = ? AND t >= ? AND t <= ? ORDER BY t"),
     todas: db.prepare("SELECT nodo AS node, metrica AS metric, t, v FROM lecturas ORDER BY t"),
     cuenta: db.prepare("SELECT COUNT(*) AS n FROM lecturas"),
@@ -37,27 +39,46 @@ export function abrirAlmacen(ruta) {
     guardarEstado: db.prepare("INSERT OR REPLACE INTO estado (clave, valor, t) VALUES (?, ?, ?)"),
   };
 
+  let total = null; // lecturas guardadas, sin volver a contarlas (ver count)
   /** Histórico con la misma interfaz que el de la app (store.js), para el motor. */
   const lecturas = {
     kind: "sqlite",
     async add(rows) {
       if (!rows.length) return;
       db.exec("BEGIN");
+      let nuevas = 0;
       try {
-        for (const r of rows) q.poner.run(r.node, r.metric, Math.round(r.t), r.v);
+        for (const r of rows) {
+          const t = Math.round(r.t);
+          if (Number(q.nueva.run(r.node, r.metric, t, r.v).changes)) nuevas++;
+          else q.poner.run(r.node, r.metric, t, r.v); // ya estaba: se queda el valor nuevo, como antes
+        }
         db.exec("COMMIT");
       } catch (e) {
         db.exec("ROLLBACK");
         throw e;
       }
+      if (total != null) total += nuevas;
     },
     async series(node, metric, from, to = Number.MAX_SAFE_INTEGER) {
       return q.serie.all(node, metric, Math.floor(from), Math.min(to, Number.MAX_SAFE_INTEGER)).map((r) => ({ t: r.t, v: r.v }));
     },
     async all() { return q.todas.all().map((r) => ({ ...r })); },
-    async count(desde = null) { return (desde == null ? q.cuenta.get() : q.cuentaDesde.get(Math.floor(desde))).n; },
-    async prune(before) { return Number(q.podar.run(Math.floor(before)).changes); },
-    async clear() { q.vaciar.run(); },
+    /**
+     * Cuántas lecturas hay (desde esa hora, si se da). El total sale de memoria: contarlas todas en SQLite recorre
+     * la tabla entera, y con un año de histórico eso para el servidor (alarmas incluidas) un par de segundos en una Pi.
+     */
+    async count(desde = null) {
+      if (desde != null) return q.cuentaDesde.get(Math.floor(desde)).n;
+      if (total == null) total = q.cuenta.get().n;
+      return total;
+    },
+    async prune(before) {
+      const n = Number(q.podar.run(Math.floor(before)).changes);
+      if (total != null) total -= n;
+      return n;
+    },
+    async clear() { q.vaciar.run(); total = 0; },
   };
 
   return {
