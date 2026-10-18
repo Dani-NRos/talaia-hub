@@ -1,8 +1,9 @@
 # Vigía Mesh
 
 App web (PWA) de telemetría y alarmas para nodos Meshtastic, sin internet. Publicada en GitHub Pages:
-https://dani-nros.github.io/vigia-mesh/ . En camino: **Vigía servidor**, la misma lógica funcionando 24/7 en Linux
-(BMAX con Ubuntu, Raspberry Pi 4/5, Pi Zero 2 W), con histórico en SQLite, Home Assistant por MQTT y MCP de lectura.
+https://dani-nros.github.io/vigia-mesh/ . En pruebas: **Vigía servidor**, la misma lógica funcionando 24/7 en Linux
+(BMAX con Ubuntu, Raspberry Pi 4/5, Pi Zero 2 W), con histórico en SQLite y Home Assistant por MQTT. Después: acceso
+desde fuera con https (Tailscale), notificaciones push y MCP de lectura; luego Docker y complemento de HA.
 
 ## Normas de trabajo (de Dani)
 
@@ -38,8 +39,13 @@ codigo/                 raíz de npm workspaces: npm install, npm test, npm run 
     src/receptor.js enlace.js puertos.js   nodo por USB (serialport, con binarios: no compila) o TCP 4403
     src/almacen.js      SQLite (node:sqlite): lecturas y el estado que la app guarda en localStorage
     src/web.js sincro.js  la app servida en la red de casa y su API (SSE + órdenes), sin contraseña (decisión de Dani)
+    src/mqtt.js         cliente MQTT general (MQTT.js): configuración desde Ajustes, guardada en SQLite, reconexión, LWT
+    src/homeassistant.js  salida a Home Assistant por MQTT con autodescubrimiento (los temas, arriba del fichero)
     instalar.sh sistema/  instalador (Node propio en /opt/vigia), servicio systemd y regla de udev
     test/nodo-falso.mjs nodo Meshtastic simulado (protobuf de verdad) por TCP o puerto virtual
+    test/mqtt.test.mjs  con un broker en memoria (aedes) y un «Home Assistant» espía
+  herramientas/         comprobaciones con Playwright (capturas antes/después, nodo por cable simulado, servidor de
+                        punta a punta con MQTT): ver herramientas/LEEME.md
   dist/app/             app compilada (no va al repo)
 ```
 
@@ -55,6 +61,18 @@ app instalada y lee y escribe los mismos datos.
 - Histórico de todos los nodos que oye el receptor, un año por defecto (`retencionDias`).
 - Con un año de todo, nada que recorra la tabla de lecturas entera en el camino normal: el total va en memoria y el
   CSV sale por bloques.
+
+### MQTT y Home Assistant (Dani, 18 oct. 2026)
+
+- Un **cliente MQTT general** en el servidor (Home Assistant primero; más adelante, quizá zigbee2mqtt o Shelly como
+  entradas, con un Mosquitto en la misma máquina: solo es la dirección, no está pedido).
+- **No quita nada de Vigía**: sonido, notificaciones y avisos por la malla siguen igual; HA es una salida más. Si Dani
+  no quiere que Vigía avise, lo silencia él en Vigía.
+- Se configura en **Ajustes → MQTT y Home Assistant** (solo en modo Servidor), viene apagado. Usuario y contraseña del
+  broker opcionales (el Mosquitto de HA los pide); la contraseña se guarda en SQLite y nunca sale por la API.
+- A HA van **solo los nodos vigilados**, como dispositivos «Vigía · nombre»; **sin posición**. Un sensor binario y un
+  botón «Enterado» por cada alarma puesta, «Enterado todas» y un evento por alarma/resuelta/vista para notificar.
+  Las alarmas y límites se cambian solo en Vigía.
 
 ## Publicar
 

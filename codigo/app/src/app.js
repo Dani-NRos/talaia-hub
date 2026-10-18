@@ -354,6 +354,69 @@ function meshLastHTML() {
 }
 function patchMeshLast() { const el = $("#meshLast"); if (el) el.innerHTML = meshLastHTML(); }
 
+/* ───────────── MQTT y Home Assistant (solo con servidor) ───────────── */
+// Lo escrito y aún sin guardar: si Ajustes se redibuja (cambia el receptor, llega diagnóstico…), no se pierde.
+let mqttBorrador = null;
+function mqttEstadoHTML() {
+  const m = S.mqtt;
+  if (!m) return "";
+  const e = m.estado || {};
+  const dir = esc(e.url || m.url || "");
+  if (!m.activado) return "Apagado.";
+  if (e.fase === "conectada") return `<span class="okt">Conectado</span> a ${dir} desde las ${esc(hhmm.format(new Date(e.desde)))}.${m.ha?.activado ? " Publicando en Home Assistant." : ""}`;
+  if (e.fase === "error") return `<span class="warn-t">No se puede conectar</span> con ${dir}: ${esc(e.error || "")}. Lo vuelve a intentar cada 5 s.`;
+  return `Conectando con ${dir}…`;
+}
+const mqttClaveTxt = (hay) => (hay ? "guardada; escribe otra para cambiarla" : "sin contraseña");
+// Lo que cambia sin tocar lo que se está escribiendo: el estado y si hay contraseña guardada.
+function patchMqttEstado() {
+  const el = $("#mqttEstado");
+  if (!el) return;
+  el.innerHTML = mqttEstadoHTML();
+  const hay = !!S.mqtt?.hayClave;
+  $("#mqttPass").placeholder = mqttClaveTxt(hay);
+  $("#mqttNoclave").hidden = !hay;
+}
+function mqttSection() {
+  const m = S.mqtt || { activado: false, url: "", usuario: "", hayClave: false, base: "vigia", ha: { activado: true, prefijo: "homeassistant" } };
+  const v = { activado: m.activado, url: m.url, usuario: m.usuario, haOn: m.ha?.activado, base: m.base, prefijo: m.ha?.prefijo, ...(mqttBorrador || {}) };
+  const sw = (id, on, txt) => `<div class="set-row"><label class="sw" for="${id}"><input type="checkbox" id="${id}" ${on ? "checked" : ""}><span class="sw-ui"></span><span>${txt}</span></label></div>`;
+  return `<section class="blk" id="mqttBox"><h3>MQTT y Home Assistant</h3>
+      ${sw("mqttOn", v.activado, "Conectar a un broker MQTT")}
+      <div class="mq-f">
+        <label for="mqttUrl">Dirección del broker</label><input id="mqttUrl" class="inp" autocomplete="off" spellcheck="false" placeholder="192.168.1.20 o 192.168.1.20:1883" value="${esc(v.url || "")}">
+        <label for="mqttUser">Usuario</label><input id="mqttUser" class="inp" autocomplete="off" spellcheck="false" placeholder="sin usuario" value="${esc(v.usuario || "")}">
+        <label for="mqttPass">Contraseña</label><input id="mqttPass" class="inp" type="password" autocomplete="new-password" placeholder="${mqttClaveTxt(m.hayClave)}">
+      </div>
+      <div class="btns" id="mqttNoclave" ${m.hayClave ? "" : "hidden"}><button type="button" class="mini" data-mqtt-noclave>Quitar la contraseña guardada</button></div>
+      ${sw("mqttHa", v.haOn, "Publicar en Home Assistant")}
+      <details class="mq-adv"><summary>Temas</summary><div class="mq-f">
+        <label for="mqttBase">Tema de Vigía</label><input id="mqttBase" class="inp" autocomplete="off" spellcheck="false" value="${esc(v.base || "vigia")}">
+        <label for="mqttPref">Prefijo de Home Assistant</label><input id="mqttPref" class="inp" autocomplete="off" spellcheck="false" value="${esc(v.prefijo || "homeassistant")}">
+      </div><p class="hint">Normalmente no hay que tocarlos. Vigía publica en «vigia/…» y Home Assistant busca lo que se le anuncia en «homeassistant/…».</p></details>
+      <p class="form-err" id="mqttErr" role="alert" hidden></p>
+      <div class="btns"><button type="button" class="btn primary" data-mqtt-save>Guardar</button></div>
+      <p class="hint" id="mqttEstado">${mqttEstadoHTML()}</p>
+      <p class="hint">Con Home Assistant, aparecen solos «Vigía servidor» y un dispositivo por cada nodo vigilado («Vigía · nombre»): sus lecturas, un sensor por cada alarma que le pongas, un botón de «Enterado» y un evento por cada alarma para notificar al móvil. Si el servidor se apaga, Home Assistant lo marca como no disponible. Para el Mosquitto de Home Assistant, usa un usuario de Home Assistant (o uno de la configuración del complemento Mosquitto).</p>
+    </section>`;
+}
+async function guardarMqtt() {
+  const err = $("#mqttErr");
+  const clave = $("#mqttPass").value;
+  const cambio = {
+    activado: $("#mqttOn").checked, url: $("#mqttUrl").value.trim(), usuario: $("#mqttUser").value.trim(),
+    base: $("#mqttBase").value.trim(), ha: { activado: $("#mqttHa").checked, prefijo: $("#mqttPref").value.trim() },
+    ...(clave ? { clave } : {}),
+  };
+  const res = await orden({ orden: "mqtt", cambio });
+  if (!res.ok) return showErr(err, res.error || "No se pudo guardar.");
+  err.hidden = true;
+  mqttBorrador = null;
+  $("#mqttPass").value = "";
+  toast(res.toast);
+}
+const MQTT_CAMPOS = { mqttOn: "activado", mqttUrl: "url", mqttUser: "usuario", mqttHa: "haOn", mqttBase: "base", mqttPref: "prefijo" };
+
 function meshSection() {
   const cfg = meshCfg();
   const chs = S.channels;
@@ -1489,6 +1552,7 @@ function renderSettings() {
       <p class="hint">${SERVIDOR ? "El servidor vigila siempre. Esta pantalla suena y avisa mientras está abierta; si das «Enterado» aquí, queda visto en todos tus aparatos." : "Las alarmas solo saltan con la app abierta y en pantalla. Con el móvil bloqueado, Chrome congela la página; al volver, recoge lo que guardó el receptor y avisa de lo que se perdió."}</p>
     </section>
     ${PREVIEW && !S.demo ? "" : meshSection()}
+    ${SERVIDOR ? mqttSection() : ""}
     <section class="blk"><h3>Histórico</h3>
       <div class="set-row"><span id="histCount">Contando lecturas…</span><select id="setRet" class="inp sel" aria-label="Tiempo que se guardan las lecturas">${[7, 30, 90, 365].map((d) => `<option value="${d}"${S.settings.retentionDays === d ? " selected" : ""}>Guardar ${d} días</option>`).join("")}</select></div>
       <div class="btns">${PREVIEW ? "" : `<button class="btn ghost" data-export>Exportar CSV</button>`}<button class="btn danger-ghost" data-wipe>Borrar histórico</button></div>
@@ -1794,6 +1858,8 @@ document.addEventListener("click", async (ev) => {
     return render();
   }
   if ("diag" in ds) { openSettings(); setTimeout(() => $("#diagBox")?.scrollIntoView({ block: "start" }), 50); return; }
+  if ("mqttSave" in ds) return guardarMqtt();
+  if ("mqttNoclave" in ds) { const r = await orden({ orden: "mqtt", cambio: { clave: null } }); if (r.error) return toast(r.error); return toast("Contraseña quitada"); }
   if ("meshTest" in ds) {
     const res = SERVIDOR ? await orden({ orden: "pruebaMalla" }) : acciones.pruebaMalla();
     if (res.toast) toast(res.toast);
@@ -1901,7 +1967,11 @@ document.addEventListener("keydown", (ev) => {
   if (ev.key === "Enter" && ev.target.matches?.("#detail .inp")) ev.target.blur();
 });
 
-document.addEventListener("input", (ev) => { if (ev.target.id === "meshQ") onMeshQuery(ev.target.value); });
+document.addEventListener("input", (ev) => {
+  if (ev.target.id === "meshQ") onMeshQuery(ev.target.value);
+  const campo = MQTT_CAMPOS[ev.target.id];
+  if (campo) mqttBorrador = { ...(mqttBorrador || {}), [campo]: ev.target.type === "checkbox" ? ev.target.checked : ev.target.value };
+});
 
 document.addEventListener("change", async (ev) => {
   const t = ev.target;
@@ -1962,7 +2032,7 @@ function aplicarPartes(p) {
     S.active = new Map(p.active.map((a) => [a.key, a]));
     if (prueba) S.active.set("test", prueba);
   }
-  for (const k of ["log", "channels", "myNode", "myUser", "lora", "traces", "meshLast", "link", "device", "trouble", "diag"]) if (k in p) S[k] = p[k];
+  for (const k of ["log", "channels", "myNode", "myUser", "lora", "traces", "meshLast", "link", "device", "trouble", "diag", "mqtt"]) if (k in p) S[k] = p[k];
   if ("req" in p) S.req = new Map(p.req.map((r) => [askKey(r.num, r.type), r]));
   if ("settings" in p) Object.assign(S.settings, p.settings); // sonido y pantalla encendida siguen siendo de este aparato
   if ("recent" in p) S.recent = new Map(Object.entries(p.recent));
@@ -1983,6 +2053,7 @@ function refrescarAbiertos(p) {
   if (S.full && (p.nodes || p.rows || "active" in p)) refreshFull(S.full.num);
   if ($("#settings").open) {
     if ("meshLast" in p) patchMeshLast();
+    if ("mqtt" in p) patchMqttEstado();
     if (("link" in p || "diag" in p || "settings" in p || "channels" in p || "trouble" in p) && !escribiendo("#settings input, #settings select")) renderSettings();
   }
   if (mapView && $("#map").open && (p.nodes || "traces" in p)) mapView.update();

@@ -4,8 +4,8 @@ Vigía Mesh funcionando 24/7 en Linux: las mismas alarmas que la app (umbral, ca
 señal) y el histórico de lecturas en SQLite, aunque no haya ningún móvil ni ordenador mirando.
 
 > **En pruebas.** Vigila, guarda el histórico y lo cuenta en el diario del sistema; tiene la misma pantalla que la app
-> (ábrela desde el navegador en la red de casa) y manda los avisos por la malla si los activas. Home Assistant y el
-> acceso desde fuera con https (Tailscale) llegan en los siguientes pasos.
+> (ábrela desde el navegador en la red de casa), manda los avisos por la malla si los activas y publica en Home
+> Assistant por MQTT. El acceso desde fuera con https (Tailscale) llega en el siguiente paso.
 
 ## Qué hace falta
 
@@ -113,3 +113,67 @@ queda visto en todos. El sonido y la pantalla encendida son de cada aparato.
 Los activas en Ajustes → *Avisos por la malla*, como en la app (vienen apagados). Una vez activados, los manda el
 servidor 24/7, aunque no haya ninguna pantalla abierta: cada alarma (y, si quieres, cuando se resuelve) a un canal
 privado, a un nodo o a ambos. Como mucho 20 por hora; los canales públicos están bloqueados.
+
+## MQTT y Home Assistant
+
+El servidor se conecta a un broker MQTT (el Mosquitto de Home Assistant, por ejemplo) y Home Assistant crea solo los
+dispositivos de Vigía. Se configura en Ajustes → *MQTT y Home Assistant* (viene apagado); la configuración se guarda en
+el servidor y la contraseña no vuelve a salir en ninguna pantalla.
+
+**Con el complemento Mosquitto de Home Assistant:**
+
+1. En Home Assistant, crea un usuario para Vigía: Ajustes → Personas → *Añadir persona* (por ejemplo `vigia`), con
+   permiso para iniciar sesión, y ponle contraseña. Mosquitto deja entrar con los usuarios de Home Assistant (los
+   nombres `homeassistant` y `addons` están reservados).
+2. En la pantalla de Vigía servidor, Ajustes → *MQTT y Home Assistant*: la dirección de Home Assistant (como
+   `192.168.1.20`; si no pones puerto, usa el 1883), ese usuario y su contraseña. Activa *Conectar a un broker MQTT* y
+   pulsa *Guardar*. Debajo dice si ha conectado o qué falla.
+3. En Home Assistant aparecen solos, en Ajustes → Dispositivos y servicios → MQTT:
+   - **Vigía servidor**: receptor conectado, alarmas sin atender (sí/no y cuántas), alarmas activas, nodos oídos en la
+     última hora, último aviso por la malla, el evento *Alarmas* y el botón *Enterado todas*.
+   - **Vigía · Caseta huerto** (uno por cada nodo vigilado): sus lecturas (temperatura, humedad, batería…), cuándo se
+     oyó por última vez, saltos y SNR; y por cada alarma que le tengas puesta, un sensor (encendido mientras salta,
+     con el detalle en sus atributos) y su botón *Enterado*. La posición no se manda.
+
+Las alarmas y los límites se siguen poniendo en Vigía: Home Assistant los ve y puede dar «Enterado», pero no los
+cambia. Si dejas de vigilar un nodo, su dispositivo desaparece de Home Assistant. Si el servidor se apaga o se cae,
+Home Assistant marca sus entidades como no disponibles. Vigía sigue sonando y avisando como siempre: Home Assistant es
+una salida más.
+
+**Avisar al móvil con la app de Home Assistant.** Cada alarma que salta, se resuelve o se da por vista llega como
+evento (`event.vigia_servidor_alarmas`, con `event_type` *alarma*, *resuelta* o *vista*, y en sus atributos `texto`,
+`detalle`, `nodo` e `id`). Una automatización (en YAML; cambia `mobile_app_mi_movil` por tu móvil, y comprueba el
+nombre de la entidad *Alarmas* en el dispositivo *Vigía servidor*):
+
+```yaml
+alias: Vigía → móvil
+triggers:
+  - trigger: state
+    entity_id: event.vigia_servidor_alarmas
+    not_from: [unavailable, unknown]   # que no avise al reiniciar Home Assistant o el servidor
+conditions:
+  - condition: template
+    value_template: "{{ trigger.to_state.attributes.event_type == 'alarma' }}"
+actions:
+  - action: notify.mobile_app_mi_movil
+    data:
+      title: Vigía
+      message: "{{ trigger.to_state.attributes.texto }}. {{ trigger.to_state.attributes.detalle or '' }}"
+```
+
+**Temas** (por si los usas desde otro programa; el tema base se cambia en Ajustes → *Temas*):
+
+```
+vigia/estado                     online / offline (retenido; offline también si el servidor se cae)
+vigia/servidor/estado            JSON: receptor, sin_atender, activas, oidos, aviso (retenido)
+vigia/servidor/evento            JSON por cada alarma, resuelta o vista (no retenido)
+vigia/servidor/enterado_todas    ← cualquier mensaje: «Enterado» a todas
+vigia/nodo/<id>/estado           JSON: m (lecturas), oido, saltos, snr, a (alarmas ON/OFF), d (su detalle) (retenido)
+vigia/nodo/<id>/enterado         ← el nombre de la alarma (como temperature_alta): «Enterado» a esa
+homeassistant/…/vigia_…/config   autodescubrimiento de Home Assistant (retenido)
+```
+
+`<id>` es el número del nodo en hexadecimal, sin `!` (como `3c6e19a2`).
+
+**Sin contraseña en la pantalla**: cualquiera en tu WiFi puede cambiar a qué broker se conecta el servidor o apagar
+MQTT (no ver la contraseña guardada).

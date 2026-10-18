@@ -8,6 +8,9 @@ import { HOUR, DAY } from "@vigia/nucleo/textos.js";
 import { abrirAlmacen } from "./almacen.js";
 import { ReceptorNodo, CONSEJO } from "./receptor.js";
 import { describirReceptor } from "./config.js";
+import os from "node:os";
+import { crearServicioMqtt } from "./mqtt.js";
+import { crearSalidaHA } from "./homeassistant.js";
 
 const GUARDAR_NODOS_MS = 30000; // la lista de nodos (cientos) se guarda como mucho cada 30 s
 const DIAG_MAX = 200;
@@ -158,6 +161,9 @@ export async function crearVigia(config, registro, opts = {}) {
     onTelemetry: (p) => motor.recibir.telemetry(p),
   }, config.receptor, opts.receptorOpts);
 
+  /* ── MQTT (Home Assistant y, más adelante, lo que llegue por MQTT) ── */
+  const mqtt = await crearServicioMqtt({ S, motor, eventos, almacen, registro }, { crearSalidaHA, clienteId: `vigia-servidor-${os.hostname()}` });
+
   /* ── tareas periódicas ── */
   const offlineId = setInterval(() => motor.evalOffline(), 15000);
   async function podar() {
@@ -184,19 +190,21 @@ export async function crearVigia(config, registro, opts = {}) {
   const resumenId = setInterval(resumen, HOUR);
 
   return {
-    S, motor, acciones, almacen, eventos,
+    S, motor, acciones, almacen, eventos, mqtt,
     get receptor() { return receptor; },
     /** Empieza a conectar con el receptor (y a reintentar mientras no se pare). */
     arrancar() {
       registro.info(`Receptor ${describirReceptor(config.receptor)}${config.receptor.tipo === "usb" && config.receptor.puerto === "auto" ? " (el nodo que haya enchufado)" : ""}`);
       registro.info(`Avisos por la malla: ${S.settings.mesh?.enabled ? "encendidos" : "apagados"}`);
       receptor.start();
+      mqtt.arrancar();
     },
     async detener() {
       if (cerrado) return;
       clearInterval(offlineId);
       clearInterval(podarId);
       clearInterval(resumenId);
+      await mqtt.parar(); // antes de cerrar: deja dicho «offline» a Home Assistant
       await receptor.disconnect();
       motor.resetAsks(); // peticiones a medias: sus temporizadores ya no deben tocar nada
       guardarNodos();

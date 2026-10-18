@@ -11,11 +11,15 @@ const REPO = fileURLToPath(new URL("..", import.meta.url)).replace(/\/$/, ""); /
 // Playwright no va en el repo: el que haya instalado (PLAYWRIGHT_DIR = carpeta node_modules que lo contiene).
 const PW_DIR = process.env.PLAYWRIGHT_DIR || "/opt/npm-tools/node_modules/";
 const pw = createRequire(PW_DIR)("playwright");
-const { NodoFalso, ME, CASETA, AVISADO, VECINO, PORT } = await import(`${REPO}/servidor/test/nodo-falso.mjs`);
+const { NodoFalso, ME, CASETA, VECINO, PORT } = await import(`${REPO}/servidor/test/nodo-falso.mjs`);
 const req = createRequire(`${REPO}/servidor/`);
 const { create, toBinary } = req("@bufbuild/protobuf");
 const { Protobuf } = await import(`${REPO}/node_modules/@meshtastic/core/dist/mod.js`);
 const M = Protobuf.Mesh, TEL = Protobuf.Telemetry;
+const { pathToFileURL } = await import("node:url");
+const { Aedes } = await import(pathToFileURL(req.resolve("aedes")).href);
+const mqttLib = (await import(pathToFileURL(req.resolve("mqtt")).href)).default;
+const net = await import("node:net");
 
 const out = process.argv[2] || "salida";
 fs.rmSync(out, { recursive: true, force: true });
@@ -162,6 +166,62 @@ await paso("avisos por la malla desde el servidor: canal privado", async () => {
 await foto(movil, "movil-ajustes");
 await movil.keyboard.press("Escape");
 
+// Broker MQTT con usuario y contraseña, y un «Home Assistant» que mira lo que se publica y pulsa botones.
+const broker = await Aedes.createBroker();
+broker.authenticate = (c, u, p, cb) => cb(null, u === "vigia" && p?.toString() === "clave-secreta");
+const srvMqtt = net.createServer(broker.handle);
+await new Promise((r) => srvMqtt.listen(0, "127.0.0.1", r));
+const MQTT_PUERTO = srvMqtt.address().port;
+const ha = await mqttLib.connectAsync(`mqtt://127.0.0.1:${MQTT_PUERTO}`, { username: "vigia", password: "clave-secreta" });
+const visto = new Map();
+const estados = []; // lo que va pasando por vigia/estado (online / offline)
+ha.on("message", (t, c) => { visto.set(t, c.toString()); if (t === "vigia/estado") estados.push(c.toString()); });
+await ha.subscribeAsync("#");
+const ID = CASETA.toString(16).padStart(8, "0");
+const esperarMqtt = async (f, que, ms = 8000) => { const fin = Date.now() + ms; while (Date.now() < fin) { if (f()) return; await sleep(100); } throw new Error(`MQTT no vio: ${que}`); };
+
+await paso("MQTT desde Ajustes: con usuario y contraseña conecta y Home Assistant recibe los dispositivos", async () => {
+  await pc.click("#setBtn");
+  await sleep(400);
+  await pc.locator("#mqttBox").screenshot({ path: path.join(out, "mqtt-apagado.png") });
+  await pc.fill("#mqttUrl", `127.0.0.1:${MQTT_PUERTO}`);
+  await pc.fill("#mqttUser", "vigia");
+  await pc.fill("#mqttPass", "otra");
+  await pc.check("#mqttOn", { force: true });
+  await pc.click("[data-mqtt-save]");
+  await esperarTexto(pc, /No se puede conectar con mqtt:\/\/127\.0\.0\.1:\d+: usuario o contraseña incorrectos/, "error de contraseña en Ajustes");
+  await pc.locator("#mqttBox").screenshot({ path: path.join(out, "mqtt-error.png") });
+  await pc.fill("#mqttPass", "clave-secreta");
+  await pc.click("[data-mqtt-save]");
+  await esperarTexto(pc, new RegExp(`Conectado a mqtt://127\\.0\\.0\\.1:${MQTT_PUERTO}`), "Conectado en Ajustes");
+  await esperarMqtt(() => visto.get("vigia/estado") === "online", "online");
+  await esperarMqtt(() => visto.get(`homeassistant/sensor/vigia_${ID}/temperature/config`), "sensor de temperatura");
+  const cfg = JSON.parse(visto.get(`homeassistant/sensor/vigia_${ID}/temperature/config`));
+  if (cfg.device.name !== "Vigía · Caseta huerto") throw new Error(`nombre del dispositivo: ${cfg.device.name}`);
+  if (/clave-secreta/.test(await (await fetch(`${URL0}api/estado`)).text())) throw new Error("la contraseña sale en /api/estado");
+  if (await pc.inputValue("#mqttPass")) throw new Error("la contraseña se queda escrita en la pantalla");
+});
+await foto(pc, "pc-ajustes-mqtt");
+await pc.keyboard.press("Escape");
+
+await paso("el móvil ve la misma configuración MQTT (sin la contraseña)", async () => {
+  await movil.click("#setBtn");
+  await esperarTexto(movil, /Conectado a mqtt:/, "Conectado en el móvil");
+  if ((await movil.inputValue("#mqttUser")) !== "vigia") throw new Error("usuario");
+  if (await movil.inputValue("#mqttPass")) throw new Error("la contraseña aparece en el móvil");
+  await movil.locator("#mqttBox").screenshot({ path: path.join(out, "mqtt-conectado-movil.png") });
+  await movil.keyboard.press("Escape");
+});
+
+await paso("Enterado desde Home Assistant queda visto en las pantallas", async () => {
+  await esperarMqtt(() => JSON.parse(visto.get(`vigia/nodo/${ID}/estado`) || "{}").a?.temperature_alta === "ON", "alarma encendida en HA");
+  await ha.publishAsync(`vigia/nodo/${ID}/enterado`, "temperature_alta");
+  await esperarTexto(movil, /alarma vista, sigue activa/i, "vista en el móvil");
+  await esperarMqtt(() => JSON.parse(visto.get(`vigia/nodo/${ID}/estado`) || "{}").d?.temperature_alta?.visto === true, "vista en HA");
+  const act = (await (await fetch(`${URL0}api/estado`)).json()).active;
+  if (!act.some((a) => a.acked)) throw new Error(`en el servidor: ${JSON.stringify(act.map((a) => [a.key, a.acked]))}`);
+});
+
 await paso("gráfica: serie desde el servidor", async () => {
   const r = await (await fetch(`${URL0}api/serie?nodo=${CASETA}&metrica=temperature&desde=0`)).json();
   if (r.length < 4) throw new Error(`serie con ${r.length} puntos`);
@@ -178,11 +238,17 @@ await paso("al reiniciar el servidor se acuerda de todo y las pantallas vuelven 
   if (!/Caseta huerto/.test(t) || !/por encima de 30/.test(t)) throw new Error("se ha perdido el vigilado o la alarma");
 });
 await foto(movil, "movil-tras-reinicio");
+await paso("al pararse avisa a Home Assistant (offline) y al volver se conecta solo (online)", async () => {
+  await esperarMqtt(() => estados.lastIndexOf("offline") >= 0 && estados.lastIndexOf("online") > estados.lastIndexOf("offline"), "offline y luego online", 15000);
+});
 await foto(pc, "pc-final");
 
 fs.writeFileSync(path.join(out, "servidor.log"), serverLog);
 fs.writeFileSync(path.join(out, "errores.txt"), errores.join("\n"));
 await browser.close();
+await ha.endAsync();
+broker.close();
+srvMqtt.close();
 srv.kill("SIGTERM");
 await nodo.cerrar();
 log(`\n${errores.length} errores`);

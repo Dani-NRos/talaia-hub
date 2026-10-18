@@ -70,6 +70,20 @@ function crearOrdenes(vigia) {
     pruebaMalla: () => acciones.pruebaMalla(),
     borrarHistorico: () => acciones.borrarHistorico(),
     reconectar: () => { vigia.receptor.retryNow(); return { ok: true }; },
+    mqtt: async ({ cambio }) => {
+      exigir(cambio && typeof cambio === "object" && !Array.isArray(cambio), "cambio");
+      exigir(Object.keys(cambio).every((k) => ["activado", "url", "usuario", "clave", "base", "ha"].includes(k)), "cambio");
+      if ("activado" in cambio) exigir(typeof cambio.activado === "boolean", "activado");
+      for (const k of ["url", "usuario", "base"]) if (k in cambio) exigir(typeof cambio[k] === "string", k);
+      if ("clave" in cambio) exigir(cambio.clave === null || typeof cambio.clave === "string", "clave");
+      if ("ha" in cambio) {
+        const h = cambio.ha;
+        exigir(h && typeof h === "object" && Object.keys(h).every((k) => ["activado", "prefijo"].includes(k)), "ha");
+        if ("activado" in h) exigir(typeof h.activado === "boolean", "ha.activado");
+        if ("prefijo" in h) exigir(typeof h.prefijo === "string", "ha.prefijo");
+      }
+      return vigia.mqtt.configurar(cambio);
+    },
   };
 }
 
