@@ -1,26 +1,22 @@
-import { METRICS, extractMetrics, metricMeta, sortMetrics, fmtValue, fmtWithUnit, fmtNum, fmtLimit } from "@vigia/nucleo/metrics.js";
+import { metricMeta, sortMetrics, fmtValue, fmtWithUnit, fmtNum, fmtLimit } from "@vigia/nucleo/metrics.js";
 import { createIdbStore, createMemStore } from "./store.js";
 import { createMapView } from "./map.js";
 import { Receptor } from "./receptor.js";
 import { buildDemo, DEMO_IDS } from "./demo.js";
-import { Protobuf } from "@meshtastic/core";
-import { encodeUser, routingErrorReason, decodeRouteDiscovery } from "@vigia/nucleo/pb.js";
-import { readTrace, relays, snrQuality, loraSf, weakest, traceTimeout, UNKNOWN_NODE, PRESET_NAME } from "@vigia/nucleo/route.js";
-import { distM, compass, precisionM, fmtDist, coordText, mapsUrl, SOURCE, nextPlace, placeFromPos } from "@vigia/nucleo/geo.js";
-import { trendCheck, trendDefault, parseTrendRule } from "@vigia/nucleo/trend.js";
+import { relays, snrQuality, loraSf, weakest, UNKNOWN_NODE, PRESET_NAME } from "@vigia/nucleo/route.js";
+import { distM, compass, precisionM, fmtDist, coordText, mapsUrl, SOURCE } from "@vigia/nucleo/geo.js";
+import { trendDefault, parseTrendRule } from "@vigia/nucleo/trend.js";
 import { searchNodes, highlight, tokens, FILTERS, SORTS } from "./meshsearch.js";
-import { newDelivery, deliveryStep } from "@vigia/nucleo/delivery.js";
+import { MIN, HOUR, DAY, isNum, hhmm, dShort, dur, ago, stamp, trendDec, fmtTrend, trendVerb, hoursText, lastWindow } from "@vigia/nucleo/textos.js";
+import { crearMotor, estadoInicial, MESH_DEFAULT, MESH_HOURLY, ASK, ASK_ALL, askKey, RE, INFO_SUPPRESS, seriesKey, trendKey, hexId } from "@vigia/nucleo/motor.js";
 
 /* ───────────── utilidades ───────────── */
 const $ = (s, r = document) => r.querySelector(s);
 const $$ = (s, r = document) => [...r.querySelectorAll(s)];
 const esc = (s) => String(s ?? "").replace(/[&<>"']/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[c]));
-const isNum = (x) => typeof x === "number" && Number.isFinite(x);
-const MIN = 60000, HOUR = 60 * MIN, DAY = 24 * HOUR;
 const APP_VERSION = "1.13.0";
 const REPO_URL = "https://github.com/Dani-NRos/vigia-mesh";
 const ISSUES_URL = `${REPO_URL}/issues`;
-const validT = (t) => isNum(t) && t > 1.6e12 && t < Date.now() + 5 * MIN;
 
 const LS = {
   get(k, d) { try { const v = localStorage.getItem(k); return v == null ? d : JSON.parse(v); } catch { return d; } },
@@ -28,29 +24,8 @@ const LS = {
   del(k) { try { localStorage.removeItem(k); } catch { /* nada */ } },
 };
 
-const hhmm = new Intl.DateTimeFormat("es-ES", { hour: "2-digit", minute: "2-digit" });
-const dShort = new Intl.DateTimeFormat("es-ES", { day: "numeric", month: "short" });
 const wday = new Intl.DateTimeFormat("es-ES", { weekday: "short" });
 
-function dur(ms) {
-  const m = Math.max(0, Math.round(ms / MIN));
-  if (m < 60) return `${m} min`;
-  const h = Math.floor(m / 60), r = m % 60;
-  if (h < 24) return r ? `${h} h ${r} min` : `${h} h`;
-  const d = Math.floor(h / 24);
-  return d === 1 ? "1 día" : `${d} días`;
-}
-function ago(t) {
-  if (!t) return "nunca";
-  const ms = Date.now() - t;
-  if (ms < 60000) return "ahora mismo";
-  return `hace ${dur(ms)}`;
-}
-function stamp(t) {
-  const d = new Date(t), today = new Date();
-  const same = d.toDateString() === today.toDateString();
-  return same ? hhmm.format(d) : `${dShort.format(d)} ${hhmm.format(d)}`;
-}
 function parseNum(s) {
   const x = String(s ?? "").trim().replace(",", ".");
   if (x === "") return null;
@@ -60,27 +35,14 @@ function parseNum(s) {
 
 /* ───────────── estado ───────────── */
 const DEFAULT_SETTINGS = { sound: true, wake: false, retentionDays: 30, defaultOfflineMin: 75, mesh: null };
-const MESH_DEFAULT = () => ({ enabled: false, channel: null, node: null, onClear: false });
+// Lo que comparte con el servidor (nodos, alarmas, peticiones…) lo define el núcleo; aquí se añade lo de pantalla.
 const S = {
-  demo: false,
+  ...estadoInicial(),
   demoTimer: null,
-  store: null,
-  cfg: { watched: {} },
   settings: { ...DEFAULT_SETTINGS },
-  nodes: new Map(),
-  myNode: null,
   trouble: null, // último fallo de conexión clasificado
   otherWindow: null, // "busy" | "lost" si otra ventana de Vigía tiene el receptor
   diag: [],
-  channels: [], // canales del receptor: { index, name, primary, private, why } (sin claves)
-  demoMesh: null,
-  meshLast: null,
-  link: { state: "idle", extra: null },
-  device: null,
-  active: new Map(),
-  log: [],
-  recent: new Map(),
-  seen: new Set(),
   meshExpanded: false,
   ui: { collapsed: {}, order: [] }, // tarjetas vigiladas: contraídas y orden elegido (se guardan aparte de las alarmas)
   ordering: false, // modo «Ordenar» de las tarjetas
@@ -89,18 +51,39 @@ const S = {
   meshView: { filters: [], sort: "auto" }, // filtros y orden del buscador (se guardan)
   logExpanded: false,
   detail: null, // { num, range }
-  req: new Map(), // peticiones a nodos en curso o recientes, por nodo|tipo
-  myUser: null, // ficha de nuestro receptor, se manda al pedir la de otro nodo
-  infoAsked: {}, // última vez que se pidió la ficha a cada nodo: los nodos no contestan otra vez en 12 h
-  traces: {}, // última ruta trazada a cada nodo: { t, ms, fwd, back }
-  traceAt: 0, // último traceroute enviado, a cualquier nodo (el firmware solo deja uno cada 30 s)
-  lora: null, // preset y límite de saltos del receptor: { usePreset, modemPreset, spreadFactor, hopLimit }
-  demoData: null,
-  demoToken: 0,
 };
 let receptor = null;
 let swReg = null;
 let mapView = null; // se crea al abrir el mapa por primera vez
+
+/* ───────────── motor (núcleo común con el servidor) ───────────── */
+const motor = crearMotor(S, {
+  cambio: () => render(),
+  lectura(num) { if (S.detail && S.detail.num === num) refreshDetailLive(); refreshFull(num); },
+  posicion: (num) => refreshPos(num),
+  peticion: (num) => refreshAsk(num),
+  peticionEstado: (num) => patchAskStatus(num),
+  ruta() { if (mapView && $("#map").open) mapView.update(); },
+  avisoMalla: () => patchMeshLast(),
+  registro: () => renderLog(),
+  alarma: (al) => fireAlarm(al),
+  toast: (msg) => toast(msg),
+  diag: (e) => pushDiag(e),
+  guardar: (k) => SAVE[k]?.(),
+  radio: {
+    listo: () => !!receptor?.mesh,
+    requestTelemetry: (...a) => receptor.requestTelemetry(...a),
+    requestNodeInfo: (...a) => receptor.requestNodeInfo(...a),
+    requestPosition: (...a) => receptor.requestPosition(...a),
+    requestTraceroute: (...a) => receptor.requestTraceroute(...a),
+    sendText: (...a) => receptor.sendText(...a),
+  },
+});
+const {
+  node, nodeName, isWatched, ingest, evalThreshold, evalNode, trendNow, evalTrend, evalOffline, raise, clearAlarm,
+  ack, ackAll, unacked, alarmTitle, alarmDetail, addLog, canAsk, askVisible, askFailText, receptorUsesPki, keyNeeded,
+  staleKeyFail, ask, resetAsks, hopName, meshCfg, meshNotify, pumpMesh,
+} = motor;
 
 /* ───────────── persistencia (solo modo real) ───────────── */
 function saveCfg() { if (!S.demo) LS.set("vigia.cfg", S.cfg); }
@@ -130,127 +113,20 @@ function loadReal() {
   S.lora = LS.get("vigia.lora", null);
   S.recent = new Map();
 }
-
-/* ───────────── nodos ───────────── */
-function node(num) {
-  let n = S.nodes.get(num);
-  if (!n) {
-    const hex = (num >>> 0).toString(16).padStart(8, "0");
-    n = { num, short: hex.slice(-4), long: `!${hex}`, hw: "", lastHeard: 0, hops: null, snr: null, metrics: {}, hasEnv: false };
-    S.nodes.set(num, n);
-  }
-  if (!n.metrics) n.metrics = {};
-  return n;
-}
-const hexId = (num) => `!${(num >>> 0).toString(16).padStart(8, "0")}`;
-const nodeName = (num) => (S.nodes.get(num)?.long) || hexId(num);
-const isWatched = (num) => !!S.cfg.watched[num];
-
-function touch(num, t) {
-  const n = node(num);
-  if (validT(t) && t > (n.lastHeard || 0)) {
-    n.lastHeard = t;
-    if (S.active.has(`${num}||offline`)) evalOffline();
-  }
-}
-
-/* ───────────── lecturas y alarmas ───────────── */
-function seriesKey(num, metric) { return `${num}|${metric}`; }
-
-function ingest(num, metrics, t, opts = {}) {
-  const n = node(num);
-  const rows = [];
-  for (const [k, v] of Object.entries(metrics)) {
-    const prev = n.metrics[k];
-    const newer = !prev || t >= prev.t;
-    if (newer) n.metrics[k] = { v, t };
-    rows.push({ node: num, metric: k, t, v });
-    const key = seriesKey(num, k);
-    const arr = S.recent.get(key) || [];
-    arr.push({ t, v });
-    if (arr.length > 1 && arr[arr.length - 2].t > t) arr.sort((a, b) => a.t - b.t);
-    while (arr.length && arr[0].t < Date.now() - 26 * HOUR) arr.shift();
-    S.recent.set(key, arr);
-    if (newer) { evalThreshold(num, k, v, t, opts); evalTrend(num, k, opts); }
-  }
-  if (opts.env || opts.kind === "environmentMetrics") n.hasEnv = true;
-  if (opts.store !== false) S.store.add(rows);
-  touch(num, t);
-  saveNodes();
-  if (S.detail && S.detail.num === num) refreshDetailLive();
-  refreshFull(num);
-  render();
-}
-
-function evalThreshold(num, metric, v, t, opts = {}) {
-  const w = S.cfg.watched[num];
-  const kh = `${num}|${metric}|high`, kl = `${num}|${metric}|low`;
-  if (!w) { clearAlarm(kh, { v, t, silent: true }); clearAlarm(kl, { v, t, silent: true }); return; }
-  const r = (w.rules || {})[metric] || {};
-  const hy = metricMeta(metric).hyst || 0;
-  if (isNum(r.max) && v > r.max) raise(kh, { num, metric, kind: "high", value: v, limit: r.max, t }, opts);
-  else if (S.active.has(kh) && (!isNum(r.max) || v <= r.max - hy)) clearAlarm(kh, { v, t });
-  if (isNum(r.min) && v < r.min) raise(kl, { num, metric, kind: "low", value: v, limit: r.min, t }, opts);
-  else if (S.active.has(kl) && (!isNum(r.min) || v >= r.min + hy)) clearAlarm(kl, { v, t });
-}
-
-function evalNode(num, opts = {}) {
-  const n = S.nodes.get(num);
-  if (n) for (const [k, m] of Object.entries(n.metrics)) evalThreshold(num, k, m.v, m.t, opts);
-  for (const k of Object.keys(S.cfg.watched[num]?.rules || {})) evalTrend(num, k, opts);
-  // métricas con regla pero que ya no tienen dato: nada que evaluar
-  for (const key of [...S.active.keys()]) {
-    const a = S.active.get(key);
-    if (a.num === num && (a.kind === "high" || a.kind === "low" || a.kind === "trend") && !isWatched(num)) clearAlarm(key, { silent: true });
-  }
-  evalOffline(opts);
-  evalFence(num, { silent: opts.silent });
-}
-
-function linkKnown() { return S.demo || S.link.state === "ready"; }
+// Lo que el motor pide guardar. En la demo no se guarda nada (lo comprueba cada función o el propio motor).
+const SAVE = {
+  cfg: saveCfg,
+  nodes: saveNodes,
+  log: saveLog,
+  active: saveActive,
+  infoAsk: () => LS.set("vigia.infoAsk", Object.fromEntries(Object.entries(S.infoAsked).filter(([, t]) => Date.now() - t < INFO_SUPPRESS))),
+  traces: () => LS.set("vigia.traces", S.traces),
+  channels: () => LS.set("vigia.channels", S.channels),
+  lora: () => LS.set("vigia.lora", S.lora),
+  my: () => LS.set("vigia.my", S.myNode),
+};
 
 /* ───────────── cambio rápido (tendencia) ───────────── */
-// Avisa cuando un valor baja o sube mucho en poco tiempo aunque no llegue a ningún límite
-// (la presión que cae antes de una tormenta, la batería que se vacía de golpe).
-const trendKey = (num, k) => `${num}|${k}|trend`;
-/** Lecturas de las últimas 26 h; la batería «USB» (101) no cuenta. */
-function trendSeries(num, k) {
-  const s = S.recent.get(seriesKey(num, k)) || [];
-  return k === "batteryLevel" ? s.filter((p) => p.v <= 100) : s;
-}
-/** Cambio en la ventana de la regla, hasta la última lectura; null sin historia suficiente. */
-function trendNow(num, k, rule) {
-  const last = S.nodes.get(num)?.metrics?.[k];
-  if (!last || (k === "batteryLevel" && last.v > 100)) return null;
-  return trendCheck(trendSeries(num, k), last.t, rule);
-}
-/** strict: al cambiar la regla, se cierra en cuanto deja de cumplirse (sin el margen del 70 %). */
-function evalTrend(num, k, opts = {}) {
-  const key = trendKey(num, k);
-  const rule = S.cfg.watched[num]?.rules?.[k]?.trend;
-  if (!rule) return clearAlarm(key, { silent: true });
-  const last = S.nodes.get(num)?.metrics?.[k];
-  if (k === "batteryLevel" && last?.v > 100) return clearAlarm(key, { v: last.v, t: last.t }); // ya está enchufado
-  const r = trendNow(num, k, rule);
-  if (!r) return;
-  if (r.fire) raise(key, { num, metric: k, kind: "trend", dir: rule.dir, value: r.change, limit: rule.delta, hours: rule.hours, from: r.from, to: r.to, t: r.to.t }, opts);
-  else if (S.active.has(key) && (r.clear || opts.strict)) clearAlarm(key, { v: r.to.v, t: r.to.t });
-}
-/** Decimales para un cambio: los pequeños llevan uno más (3,4 hPa, no 3 hPa). */
-const trendDec = (k, change) => Math.max(metricMeta(k).dec, Math.abs(change) < 10 ? 1 : 0);
-function fmtTrend(k, v, dec) {
-  const u = metricMeta(k).unit;
-  return u ? `${fmtNum(v, dec)} ${u}` : fmtNum(v, dec);
-}
-const trendVerb = (dir) => (dir === "down" ? "baja" : "sube");
-/** «30 min», «1,5 h», «3 h». */
-const hoursText = (h) => (h < 1 ? `${Math.round(h * 60)} min` : `${fmtNum(h, h % 1 ? 1 : 0)} h`);
-/** «en las últimas 3 horas», «en la última hora», «en los últimos 30 min». */
-function lastWindow(h) {
-  if (h < 1) return `en los últimos ${Math.round(h * 60)} min`;
-  if (h === 1) return "en la última hora";
-  return `en las últimas ${fmtNum(h, h % 1 ? 1 : 0)} horas`;
-}
 /** «ha bajado 1,2 hPa en las últimas 3 horas» con los datos de ahora, para la ficha. */
 function trendNowText(num, k, rule) {
   const r = trendNow(num, k, rule);
@@ -261,344 +137,7 @@ function trendNowText(num, k, rule) {
 /** Para la tarjeta: «↓3/3 h». */
 const trendShort = (k, rule) => `${rule.dir === "down" ? "↓" : "↑"}${fmtLimit(k, rule.delta)}/${hoursText(rule.hours)}`;
 
-/* ───────────── valla antirrobo ───────────── */
-// Salta cuando dos posiciones nuevas seguidas caen fuera del radio; se cierra al volver con un 20 % de margen.
-const FENCE_CONFIRM = 2, FENCE_CLEAR = 0.8;
-function evalFence(num, opts = {}) {
-  const key = `${num}||moved`;
-  const w = S.cfg.watched[num];
-  const n = S.nodes.get(num);
-  if (!w?.fence || !n?.pos) { clearAlarm(key, { silent: true }); if (n) n.fenceOut = 0; return; }
-  const d = distM(w.fence, n.pos);
-  if (d > w.fence.r) {
-    if (opts.fresh) n.fenceOut = (n.fenceOut || 0) + 1;
-    if (opts.force || (n.fenceOut || 0) >= FENCE_CONFIRM || S.active.has(key)) {
-      raise(key, { num, kind: "moved", value: d, limit: w.fence.r, t: n.pos.t }, opts);
-    }
-  } else {
-    n.fenceOut = 0;
-    if (S.active.has(key) && d <= w.fence.r * FENCE_CLEAR) clearAlarm(key, { v: d, t: n.pos.t });
-  }
-}
-
-/** Guarda una posición nueva del nodo. live: llegó por la malla ahora (no es la copia de la base de datos). */
-function setPosition(num, pos, opts = {}) {
-  const n = node(num);
-  const prev = n.pos;
-  if (prev && pos.t < prev.t) return false;
-  if (!pos.bits && prev?.bits && prev.lat === pos.lat && prev.lon === pos.lon) pos.bits = prev.bits;
-  const fresh = !prev || pos.t > prev.t;
-  n.pos = pos;
-  // Sitio actual y desde cuándo está en él: para saber si sus lecturas se midieron aquí (mapa).
-  n.place = nextPlace(n.place || placeFromPos(prev), pos);
-  evalFence(num, { fresh: fresh && opts.live, replay: opts.replay });
-  saveNodes();
-  refreshPos(num);
-  render();
-  return true;
-}
-
-function evalOffline(opts = {}) {
-  const now = Date.now();
-  for (const key of [...S.active.keys()]) {
-    const a = S.active.get(key);
-    if (a.kind === "offline" && !isWatched(a.num)) clearAlarm(key, { silent: true });
-  }
-  if (!linkKnown()) return; // sin receptor no sé si los nodos callan
-  for (const [numStr, w] of Object.entries(S.cfg.watched)) {
-    const num = Number(numStr);
-    const n = S.nodes.get(num);
-    const key = `${num}||offline`;
-    const lim = isNum(w.offlineMin) ? w.offlineMin : S.settings.defaultOfflineMin;
-    if (num === S.myNode && !S.demo) { clearAlarm(key, {}); continue; }
-    if (!lim || !n || !n.lastHeard) { clearAlarm(key, { silent: true }); continue; }
-    if (now - n.lastHeard > lim * MIN) raise(key, { num, kind: "offline", limit: lim, value: n.lastHeard, t: n.lastHeard + lim * MIN }, opts);
-    else clearAlarm(key, { t: n.lastHeard });
-  }
-}
-
-function raise(key, a, opts = {}) {
-  const ex = S.active.get(key);
-  if (ex) {
-    ex.value = a.value;
-    ex.lastT = a.t;
-    if (isNum(a.limit)) ex.limit = a.limit;
-    if (a.kind === "trend") Object.assign(ex, { dir: a.dir, hours: a.hours, from: a.from, to: a.to });
-    saveActive();
-    return;
-  }
-  const al = { key, ...a, since: isNum(a.t) ? a.t : Date.now(), acked: false, late: !!opts.replay };
-  S.active.set(key, al);
-  addLog("raise", alarmTitle(al) + (al.late ? " (recibida al reconectar)" : ""), al.num);
-  saveActive();
-  if (!opts.silent) fireAlarm(al);
-  if (!opts.silent) meshNotify("raise", al);
-  render();
-}
-
-function clearAlarm(key, info = {}) {
-  const al = S.active.get(key);
-  if (!al) return;
-  S.active.delete(key);
-  if (!info.silent) addLog("clear", clearText(al, info), al.num);
-  if (!info.silent) meshNotify("clear", al, info);
-  saveActive();
-  render();
-}
-
-function ack(key) {
-  const al = S.active.get(key);
-  if (!al || al.acked) return;
-  al.acked = true;
-  addLog("ack", `Enterado: ${alarmTitle(al)}`, al.num);
-  saveActive();
-  render();
-}
-function ackAll() { for (const k of S.active.keys()) ack(k); }
-
-function alarmTitle(al) {
-  if (al.kind === "link") return "Receptor desconectado";
-  if (al.kind === "test") return "Alarma de prueba";
-  const name = nodeName(al.num);
-  if (al.kind === "offline") return `${name} · Sin señal más de ${dur(al.limit * MIN)}`;
-  if (al.kind === "moved") return `${name} · Fuera de su sitio`;
-  const m = metricMeta(al.metric);
-  if (al.kind === "trend") {
-    const sign = al.dir === "down" ? "−" : "+";
-    return `${name} · ${m.label} ${al.dir === "down" ? "bajando" : "subiendo"} rápido (${sign}${fmtTrend(al.metric, al.value, trendDec(al.metric, al.value))} en ${dur(al.to.t - al.from.t)})`;
-  }
-  return `${name} · ${m.label} ${al.kind === "high" ? "por encima de" : "por debajo de"} ${fmtLimit(al.metric, al.limit, true)}`;
-}
-function alarmDetail(al) {
-  if (al.kind === "link") return `Reintentando la conexión${S.device?.kind === "serial" ? " por cable" : " Bluetooth"}. Las alarmas de nodo sin señal quedan en pausa.`;
-  if (al.kind === "test") return "Así suena y se ve un aviso. Pulsa Enterado para callarlo.";
-  if (al.kind === "offline") return `Último dato ${ago(al.value)} (${stamp(al.value)}).`;
-  if (al.kind === "moved") {
-    const n = S.nodes.get(al.num), f = S.cfg.watched[al.num]?.fence;
-    const dir = n?.pos && f ? ` al ${compass(f, n.pos)}` : "";
-    return `Está a ${fmtDist(al.value)}${dir} de su sitio (valla de ${fmtDist(al.limit)}). Posición de las ${n?.pos ? hhmm.format(new Date(n.pos.t)) : "—"}.`;
-  }
-  if (al.kind === "trend") {
-    const d = trendDec(al.metric, al.value);
-    return `De ${fmtTrend(al.metric, al.from.v, d)} a las ${stamp(al.from.t)} a ${fmtTrend(al.metric, al.to.v, d)} a las ${stamp(al.to.t)}. Avisa si ${trendVerb(al.dir)} ${fmtLimit(al.metric, al.limit, true)} o más en ${hoursText(al.hours)}.`;
-  }
-  return `Ahora ${fmtWithUnit(al.metric, al.value)}.`;
-}
-function clearText(al, info) {
-  if (al.kind === "link") return "Receptor conectado de nuevo";
-  if (al.kind === "test") return "Alarma de prueba cerrada";
-  const name = nodeName(al.num);
-  if (al.kind === "offline") return `${name} · Vuelve a dar señal`;
-  if (al.kind === "moved") return `${name} · De vuelta en su sitio${isNum(info.v) ? ` (a ${fmtDist(info.v)})` : ""}`;
-  const m = metricMeta(al.metric);
-  if (al.kind === "trend") return `${name} · ${m.label} ya no ${trendVerb(al.dir)} tan rápido${isNum(info.v) ? ` (${fmtWithUnit(al.metric, info.v)})` : ""}`;
-  return `${name} · ${m.label} de vuelta en rango${isNum(info.v) ? ` (${fmtWithUnit(al.metric, info.v)})` : ""}`;
-}
-
-function addLog(type, text, num) {
-  S.log.unshift({ t: Date.now(), type, text, num: num ?? null });
-  if (S.log.length > 300) S.log.length = 300;
-  saveLog();
-}
-
 /* ───────────── pedir datos a un nodo ───────────── */
-// Telemetría: cada tipo es un campo del mensaje Telemetry; se pide mandando ese campo vacío con want_response.
-const ASK = {
-  env:    { label: "Ambiente", what: "Temperatura, humedad y presión", field: 3, variant: "environmentMetrics" },
-  device: { label: "Batería",  what: "Batería, tensión y uso del canal", field: 2, variant: "deviceMetrics" },
-  air:    { label: "Aire",     what: "CO₂ y partículas", field: 4, variant: "airQualityMetrics" },
-  power:  { label: "Energía",  what: "Tensión y corriente de los canales INA", field: 5, variant: "powerMetrics" },
-};
-// Ficha del nodo (NodeInfo): nombre y clave pública. Sin la clave, el receptor no le manda peticiones.
-const ASK_ALL = { ...ASK, info: { label: "Ficha" }, pos: { label: "Posición" }, route: { label: "Ruta" } };
-const ASK_BY_VARIANT = Object.fromEntries(Object.entries(ASK).map(([k, a]) => [a.variant, k]));
-const ASK_TIMEOUT = 60000, ASK_COOLDOWN = 30000, INFO_COOLDOWN = 60000, ASK_SHOW = 10 * MIN, TRACE_GAP = 30000;
-const RE = Protobuf.Mesh.Routing_Error;
-// Códigos que la librería incluida aún no nombra (firmware 2.7+).
-const E_RATE_LIMIT = 38, E_NO_PUBKEY = 39;
-const KEY_ERRORS = new Set([RE.PKI_FAILED, RE.PKI_UNKNOWN_PUBKEY, E_NO_PUBKEY]);
-const askKey = (num, type) => `${num}|${type}`;
-const canAsk = () => S.demo || (S.link.state === "ready" && !!receptor?.mesh);
-const askVisible = (r) => r && (r.state === "wait" || Date.now() - r.tDone < ASK_SHOW);
-// Quién confirmó cada paquete nuestro (requestId → nodo), para saber si el acuse vino del destino.
-const ackFrom = new Map();
-const askById = new Map(); // id del paquete de cada petición → la petición, para casar acuses y errores tardíos
-const INFO_SUPPRESS = 12 * HOUR;
-let infoArmed = null;
-
-/**
- * Acuse o error de la malla para una de nuestras peticiones. err: 0 acuse, otro número error, null otro tipo.
- * El acuse solo cuenta si lo manda el propio nodo (el de tu receptor al oír que otro la repite no dice nada).
- * Un error, venga de quien venga, cierra la petición: NO_RESPONSE (no tiene ese sensor), PKI (falta una clave),
- * MAX_RETRANSMIT (no llegó)… La librería solo atiende el primer acuse y los perdía si llegaban después.
- */
-function askRouting(reqId, from, err) {
-  const r = askById.get(reqId);
-  if (!r || r.state !== "wait" || err == null) return;
-  if (err === 0) {
-    if (from === r.num && !r.acked) { r.acked = true; patchAskStatus(r.num); }
-    return;
-  }
-  finishAsk(r, "fail", err);
-}
-
-/** Avisa en el diagnóstico si el reloj del receptor va muy desfasado (las horas de las lecturas las pone él). */
-const clock = { n: 0, min: Infinity, said: false };
-function checkClock(rx) {
-  clock.n++;
-  clock.min = Math.min(clock.min, Date.now() - rx); // el paquete más reciente da el desfase real
-  if (clock.said || clock.n < 30 || Math.abs(clock.min) < 2 * MIN) return;
-  clock.said = true;
-  pushDiag({ t: Date.now(), msg: `El reloj del receptor va ${dur(Math.abs(clock.min))} ${clock.min > 0 ? "atrasado" : "adelantado"}: las horas de las lecturas saldrán desplazadas. Se corrige dándole hora (GPS, o conectándolo un momento a la app de Meshtastic).` });
-}
-
-function askFailText(code, r) {
-  switch (code) {
-    case RE.NO_RESPONSE: return "el nodo contesta que no tiene ese sensor";
-    case RE.MAX_RETRANSMIT: return "no llegó al nodo tras varios intentos";
-    case RE.NO_ROUTE: case RE.GOT_NAK: return "no hay ruta hasta el nodo";
-    case RE.NO_CHANNEL: return "el receptor no tiene el canal de ese nodo";
-    case E_NO_PUBKEY: return "tu receptor no tiene la clave de este nodo, pide su ficha";
-    case RE.PKI_UNKNOWN_PUBKEY: return "el nodo no tiene la clave de tu receptor, pedir su ficha se la envía";
-    case RE.PKI_FAILED: return "fallo de cifrado con ese nodo, pedir su ficha suele arreglarlo";
-    case RE.DUTY_CYCLE_LIMIT: return "el receptor ha agotado su tiempo de emisión, prueba en unos minutos";
-    case E_RATE_LIMIT: return "límite de uso del canal alcanzado, prueba en unos minutos";
-    case RE.TOO_LARGE: case RE.BAD_REQUEST: return "el nodo rechazó la petición";
-    case "timeout":
-      if (r?.acked && r.type === "info") return "el nodo la recibió y ya tiene la clave de tu receptor, pero no contestó: no repite su ficha a quien se la pidió en las últimas 12 h, ni si acaba de anunciarla";
-      if (r?.acked && r.type === "pos") return "el nodo la recibió pero no contestó; como mucho repite su posición cada 3 min";
-      if (r?.acked) return "el nodo la recibió pero no mandó datos";
-      if (r?.type === "info") return `sin respuesta en ${ASK_TIMEOUT / 1000} s. Aunque no conteste, si le llegó ya tiene la clave de tu receptor: vuelve a pedirle los datos`;
-      if (r?.type === "route") return `sin respuesta en ${Math.round(r.limit / 1000)} s: el nodo está fuera de alcance, apagado, más lejos que el límite de saltos de tu receptor${S.lora?.hopLimit ? ` (${S.lora.hopLimit})` : ""} o en otro canal; o la respuesta se perdió por el camino`;
-      return `sin respuesta en ${ASK_TIMEOUT / 1000} s`;
-    case "throttled": return "tu receptor solo lanza un traceroute cada 30 s; espera un poco y repite";
-    case "notice": return `el receptor no la envió: ${r?.notice || "sin motivo"}`;
-    case "send": return "no se pudo enviar al receptor";
-    default: return `error ${RE[code] ?? code}`;
-  }
-}
-
-// ¿El receptor cifra los mensajes directos con clave? (firmware 2.5+ y sin modo radioaficionado)
-const receptorUsesPki = () => S.demo || (S.myUser?.publicKey?.length === 32 && !S.myUser.isLicensed);
-// Un fallo de clave deja de contar en cuanto llega la ficha del nodo.
-function keyFixedAt(num) {
-  let t = 0;
-  for (const type of Object.keys(ASK_ALL)) {
-    if (type === "route") continue; // el traceroute no usa claves: que conteste no dice nada de ellas
-    const r = S.req.get(askKey(num, type));
-    if (r?.state === "ok" && r.tDone > t) t = r.tDone;
-  }
-  return t;
-}
-const staleKeyFail = (r) => r.state === "fail" && KEY_ERRORS.has(r.why) && r.tDone <= keyFixedAt(r.num);
-function keyNeeded(num) {
-  if (num === S.myNode) return false;
-  if (receptorUsesPki() && S.nodes.get(num)?.key === false) return true;
-  return Object.keys(ASK).some((t) => {
-    const r = S.req.get(askKey(num, t));
-    return askVisible(r) && r.state === "fail" && KEY_ERRORS.has(r.why) && !staleKeyFail(r);
-  });
-}
-
-async function ask(num, type) {
-  const isInfo = type === "info", isPos = type === "pos", isRoute = type === "route";
-  const k = askKey(num, type);
-  const prev = S.req.get(k);
-  if (prev?.state === "wait") return;
-  if (isRoute && num === S.myNode) return toast("Es tu receptor: las rutas se trazan desde él.");
-  const cool = isInfo || isPos ? INFO_COOLDOWN : ASK_COOLDOWN;
-  const since = prev ? Date.now() - prev.t0 : Infinity;
-  if (!isRoute && since < cool) return toast(`Espera ${Math.ceil((cool - since) / 1000)} s antes de repetir, para no saturar la malla.`);
-  if (!canAsk()) return toast(isRoute ? "Conecta el receptor para trazar la ruta." : "Conecta el receptor para pedir datos.");
-  if (isRoute) {
-    const gap = Date.now() - S.traceAt;
-    if (gap < TRACE_GAP) return toast(`Tu receptor solo lanza un traceroute cada 30 s, a cualquier nodo. Espera ${Math.ceil((TRACE_GAP - gap) / 1000)} s.`);
-  }
-  if (isInfo && !S.demo && !S.myUser) return toast("Espera a que el receptor termine de cargar sus datos.");
-  if (isInfo) {
-    // El firmware no contesta a la misma petición de ficha en 12 h, y cada petición nueva reinicia esa cuenta.
-    const ago = Date.now() - (S.infoAsked[num] || 0);
-    if (ago < INFO_SUPPRESS && infoArmed !== num) {
-      infoArmed = num;
-      setTimeout(() => { if (infoArmed === num) infoArmed = null; }, 6000);
-      return toast(`Ya se la pediste ${ago < MIN ? "hace un momento" : `hace ${dur(ago)}`}. Los nodos no vuelven a contestar en 12 h y cada intento alarga la espera. Toca otra vez si aun así quieres pedirla.`);
-    }
-    infoArmed = null;
-    S.infoAsked[num] = Date.now();
-    if (!S.demo) LS.set("vigia.infoAsk", Object.fromEntries(Object.entries(S.infoAsked).filter(([, t]) => Date.now() - t < INFO_SUPPRESS)));
-  }
-  const r = { num, type, state: "wait", t0: Date.now(), tDone: 0, why: null, timer: null, acked: false };
-  r.limit = isRoute ? traceTimeout(S.nodes.get(num)?.hops) : ASK_TIMEOUT;
-  if (isRoute) S.traceAt = Date.now();
-  S.req.set(k, r);
-  r.timer = setTimeout(() => finishAsk(r, "fail", "timeout"), r.limit);
-  refreshAsk(num);
-  refreshPos(num);
-  if (S.demo) return demoAsk(r);
-  try {
-    const ch = S.nodes.get(num)?.channel || 0;
-    const sent = isInfo ? receptor.requestNodeInfo(num, encodeUser(S.myUser), ch)
-      : isPos ? receptor.requestPosition(num, ch)
-      : isRoute ? receptor.requestTraceroute(num, ch)
-      : receptor.requestTelemetry(num, ASK[type].field, ch);
-    if (sent.id != null) {
-      r.id = sent.id;
-      askById.set(sent.id, r);
-      if (askById.size > 100) askById.delete(askById.keys().next().value);
-    }
-    const id = await sent.done;
-    // Acuse sin respuesta todavía: seguimos esperando. Solo cuenta si lo manda el propio nodo.
-    if (r.state === "wait" && ackFrom.get(id) === num) { r.acked = true; patchAskStatus(num); }
-  } catch (e) {
-    const code = e && typeof e === "object" && "error" in e ? e.error : "send";
-    // La librería no cuenta la respuesta como acuse y da TIMEOUT a los 60 s: manda nuestro temporizador.
-    if (code === RE.TIMEOUT) return;
-    finishAsk(r, "fail", code);
-  }
-}
-
-function finishAsk(r, state, why = null) {
-  if (S.req.get(askKey(r.num, r.type)) !== r) return;
-  const lateOk = state === "ok" && r.state === "fail";
-  if (r.state !== "wait" && !lateOk) return;
-  clearTimeout(r.timer);
-  Object.assign(r, { state, why, tDone: Date.now() });
-  const what = `${nodeName(r.num)} · ${ASK_ALL[r.type].label}`;
-  let msg;
-  if (state !== "ok") msg = `${what}: ${askFailText(why, r)}`;
-  else if (r.type === "info") msg = `${what}: recibida${r.gotKey ? ", clave guardada" : ", el nodo no tiene clave"}`;
-  else if (r.type === "pos") msg = `${what}: ${r.noLoc ? "el nodo no comparte su ubicación en ese canal" : "recibida a petición"}`;
-  else if (r.type === "route") msg = `${what}: ida ${r.trace ? legText(r.trace.fwd) : "?"}; vuelta ${r.trace?.back ? legText(r.trace.back) : "sin datos"}${lateOk ? " (tarde)" : ""}`;
-  else msg = `${what}: datos recibidos a petición${lateOk ? " (tarde)" : ""}`;
-  addLog("info", msg, r.num);
-  refreshAsk(r.num);
-  refreshPos(r.num);
-  render();
-}
-
-function demoAsk(r) {
-  const token = S.demoToken;
-  const res = S.demoData.reply(r.num, r.type);
-  setTimeout(() => {
-    if (!S.demo || token !== S.demoToken) return;
-    if (res.error) return finishAsk(r, "fail", typeof res.error === "number" ? res.error : RE[res.error]);
-    if (r.type === "info") {
-      node(r.num).key = true;
-      r.gotKey = true;
-      return finishAsk(r, "ok");
-    }
-    if (r.type === "route") return gotTrace(r, res.route, S.myNode, r.num, true);
-    if (r.type === "pos") {
-      r.noLoc = !res.pos;
-      finishAsk(r, "ok");
-      if (res.pos) setPosition(r.num, { ...res.pos, t: Date.now() }, { live: true });
-      return;
-    }
-    finishAsk(r, "ok");
-    ingest(r.num, res.metrics, Date.now(), { kind: ASK[r.type].variant });
-  }, res.delay);
-}
-
 function askChips(num) {
   const ok = canAsk();
   return Object.entries(ASK).map(([type, a]) => {
@@ -648,31 +187,6 @@ function patchAskStatus(num) {
 }
 
 /* ───────────── ruta por la malla (traceroute) ───────────── */
-function saveTraces() {
-  if (S.demo) return;
-  // La última de cada nodo; como mucho 60 nodos, los más recientes.
-  S.traces = Object.fromEntries(Object.entries(S.traces).sort((a, b) => b[1].t - a[1].t).slice(0, 60));
-  LS.set("vigia.traces", S.traces);
-}
-/** Respuesta a un traceroute nuestro: rd = RouteDiscovery leído; origin = nuestro receptor; dest = el nodo. */
-function gotTrace(r, rd, origin, dest, hasHopStart) {
-  const trace = readTrace(rd, origin, dest, hasHopStart);
-  r.trace = trace;
-  S.traces[r.num] = { t: Date.now(), ms: Date.now() - r.t0, ...trace };
-  saveTraces();
-  finishAsk(r, "ok");
-  if (mapView && $("#map").open) mapView.update();
-}
-function hopName(num) {
-  if (num === UNKNOWN_NODE) return "Nodo sin la clave del canal";
-  if (num === S.myNode) return "Tu receptor";
-  return S.nodes.get(num)?.long || hexId(num);
-}
-/** «directa» o «por R3 → DNN4». */
-function legText(leg) {
-  const mid = relays(leg);
-  return mid.length ? `por ${mid.map(hopName).join(" → ")}` : "directa";
-}
 function legHops(leg) {
   const k = relays(leg).length;
   return k === 0 ? "directa" : `por ${k} ${k === 1 ? "nodo" : "nodos"}`;
@@ -770,15 +284,9 @@ function refreshPos(num) {
 }
 
 function setFence(num) {
-  const w = S.cfg.watched[num], n = S.nodes.get(num);
-  if (!w || !n?.pos) return;
   const r = parseNum($("#fence-r")?.value);
   if (!r || Number.isNaN(r) || r < 20) return toast("Pon un radio de 20 m o más.");
-  w.fence = { lat: n.pos.lat, lon: n.pos.lon, r: Math.round(r), at: Date.now() };
-  n.fenceOut = 0;
-  saveCfg();
-  clearAlarm(`${num}||moved`, { silent: true });
-  addLog("info", `${nodeName(num)} · Valla de ${fmtDist(w.fence.r)} fijada en ${coordText(w.fence)}`, num);
+  if (!motor.setFence(num, r)) return;
   refreshPos(num);
   render();
   toast("Valla fijada en su posición actual");
@@ -788,21 +296,14 @@ function setFenceRadius(num, input) {
   if (!w?.fence) return;
   const r = parseNum(input.value);
   if (!r || Number.isNaN(r) || r < 20) { input.value = w.fence.r; return toast("Pon un radio de 20 m o más."); }
-  w.fence.r = Math.round(r);
-  saveCfg();
-  evalFence(num, { force: true });
+  motor.setFenceRadius(num, r);
   input.blur();
   refreshPos(num);
   render();
   toast(`Radio de la valla: ${fmtDist(w.fence.r)}`);
 }
 function delFence(num) {
-  const w = S.cfg.watched[num];
-  if (!w?.fence) return;
-  delete w.fence;
-  saveCfg();
-  clearAlarm(`${num}||moved`, { silent: true });
-  addLog("info", `${nodeName(num)} · Valla quitada`, num);
+  if (!motor.delFence(num)) return;
   refreshPos(num);
   render();
 }
@@ -832,207 +333,8 @@ setInterval(() => {
   for (const num of waiting) patchAskStatus(num);
 }, 1000);
 
-function resetAsks() {
-  for (const r of S.req.values()) clearTimeout(r.timer);
-  S.req = new Map();
-}
-
 /* ───────────── avisos por la malla ───────────── */
-// Clave por defecto de Meshtastic (canales públicos) y la del canal de eventos, según Channels.h del firmware.
-const DEFAULT_PSK = [0xd4, 0xf1, 0xbb, 0x3a, 0x20, 0x29, 0x07, 0x59, 0xf0, 0xbc, 0xff, 0xab, 0xcf, 0x4e, 0x69, 0x01];
-const EVENT_PSK = [0x38, 0x4b, 0xbc, 0xc0, 0x1d, 0xc0, 0x22, 0xd1, 0x81, 0xbf, 0x36, 0xb8, 0x61, 0x21, 0xe1, 0xfb,
-  0x96, 0xb7, 0x2e, 0x55, 0xbf, 0x74, 0x22, 0x7e, 0x9d, 0x6a, 0xfb, 0x48, 0xd6, 0x4c, 0xb1, 0xa1];
-const MESH_GAP = 8000, MESH_HOURLY = 20, MESH_MAX_AGE = 30 * MIN;
-// Espera al acuse del nodo destino de un aviso directo; uno que llegue después aún cuenta como entregado (tarde).
-const MESH_CONFIRM = 90000;
-const meshById = new Map(); // id del paquete → aviso directo en curso o reciente
-
-/** ¿Lo puede leer cualquiera? Sin cifrar, clave por defecto (o su atajo de 1 byte), clave corta o canal de eventos. */
-function channelPrivacy(psk) {
-  const k = psk ? [...psk] : [];
-  if (k.length === 0) return { private: false, why: "sin cifrar" };
-  if (k.length === 1) return { private: false, why: k[0] === 0 ? "sin cifrar" : "clave pública por defecto" };
-  if (k.length < 16) return { private: false, why: "clave demasiado corta" };
-  if (k.length === 16 && k.slice(0, 15).every((b, i) => b === DEFAULT_PSK[i])) return { private: false, why: "clave pública por defecto" };
-  if (k.length === 32 && k.every((b, i) => b === EVENT_PSK[i])) return { private: false, why: "clave pública de eventos" };
-  return { private: true, why: "" };
-}
-function setChannel(c) {
-  const idx = c.index;
-  S.channels = S.channels.filter((x) => x.index !== idx);
-  if (c.role !== 0) {
-    const primary = c.role === 1;
-    S.channels.push({ index: idx, name: c.settings?.name || (primary ? "Principal" : `Canal ${idx}`), primary, ...channelPrivacy(c.settings?.psk) });
-    S.channels.sort((a, b) => a.index - b.index);
-  }
-  if (!S.demo) LS.set("vigia.channels", S.channels); // solo nombre e índice: las claves no se guardan
-}
-
-const meshCfg = () => (S.demo ? (S.demoMesh ||= MESH_DEFAULT()) : (S.settings.mesh ||= MESH_DEFAULT()));
 function saveMeshCfg() { if (!S.demo) saveSettings(); }
-
-const te8 = new TextEncoder();
-/** Recorta a 200 bytes (el límite práctico de un texto Meshtastic); las tildes ocupan 2. */
-function fitBytes(str, max = 200) {
-  if (te8.encode(str).length <= max) return str;
-  let s2 = str;
-  while (s2 && te8.encode(s2 + "…").length > max) s2 = s2.slice(0, -1);
-  return s2 + "…";
-}
-function meshText(kind, al, info) {
-  const now = hhmm.format(new Date());
-  if (kind === "test") return `✓ Vigía: mensaje de prueba de avisos · ${now}`;
-  const name = nodeName(al.num);
-  if (kind === "clear") {
-    if (al.kind === "offline") return `✓ Vigía: ${name} vuelve a dar señal · ${now}`;
-    if (al.kind === "moved") return `✓ Vigía: ${name} de vuelta en su sitio · ${now}`;
-    if (al.kind === "trend") return `✓ Vigía: ${name} · ${metricMeta(al.metric).label} ya no ${trendVerb(al.dir)} tan rápido · ${now}`;
-    return `✓ Vigía: ${name} · ${metricMeta(al.metric).label} de vuelta en rango${isNum(info?.v) ? ` (${fmtWithUnit(al.metric, info.v)})` : ""} · ${now}`;
-  }
-  const late = al.late ? " (con retraso)" : "";
-  if (al.kind === "offline") return `⚠ Vigía: ${name} sin señal desde las ${hhmm.format(new Date(al.value))} · ${now}`;
-  if (al.kind === "moved") {
-    const n = S.nodes.get(al.num), f = S.cfg.watched[al.num]?.fence;
-    const where = n?.pos ? ` · ${coordText(n.pos)}` : "";
-    return `⚠ Vigía: ${name} fuera de su sitio, a ${fmtDist(al.value)}${n?.pos && f ? ` al ${compass(f, n.pos)}` : ""}${where} · ${now}${late}`;
-  }
-  if (al.kind === "trend") {
-    const d = trendDec(al.metric, al.value), u = metricMeta(al.metric).unit;
-    return `⚠ Vigía: ${name} · ${metricMeta(al.metric).label} ${al.dir === "down" ? "bajando" : "subiendo"} rápido: ${al.dir === "down" ? "−" : "+"}${fmtTrend(al.metric, al.value, d)} en ${dur(al.to.t - al.from.t)} (${fmtNum(al.from.v, d)}→${fmtNum(al.to.v, d)}${u ? ` ${u}` : ""}) · ${now}${late}`;
-  }
-  return `⚠ Vigía: ${name} · ${metricMeta(al.metric).label} ${fmtWithUnit(al.metric, al.value)} (${al.kind === "high" ? "máx" : "mín"} ${fmtLimit(al.metric, al.limit)}) · ${now}${late}`;
-}
-
-/** Destinos válidos ahora mismo. Un canal público nunca pasa, aunque se haya guardado antes. */
-function meshTargets(report = false) {
-  const cfg = meshCfg();
-  const out = [];
-  if (cfg.channel != null) {
-    const ch = S.channels.find((c) => c.index === cfg.channel);
-    if (ch?.private) out.push({ type: "channel", index: ch.index, label: `canal «${ch.name}»` });
-    else if (report) addLog("info", ch ? `Aviso por la malla bloqueado: el canal «${ch.name}» es público (${ch.why})` : "Aviso por la malla no enviado: el canal elegido ya no existe en el receptor");
-  }
-  if (cfg.node != null) {
-    const n = S.nodes.get(cfg.node);
-    if (!S.demo && !receptorUsesPki() && !S.channels.find((c) => c.index === (n?.channel || 0))?.private) {
-      if (report) addLog("info", `Aviso a ${nodeName(cfg.node)} bloqueado: sin cifrado por clave, iría por un canal público`);
-    } else out.push({ type: "node", num: cfg.node, label: nodeName(cfg.node) });
-  }
-  return out;
-}
-
-const meshQ = [];
-const meshSent = [];
-let meshBusy = false;
-function meshNotify(kind, al, info) {
-  const cfg = meshCfg();
-  if (kind !== "test" && !cfg.enabled) return;
-  if (al && (al.kind === "link" || al.kind === "test")) return; // sin receptor no hay malla; la prueba es local
-  if (kind === "clear" && !cfg.onClear) return;
-  const targets = meshTargets(true);
-  if (!targets.length) { if (kind === "test") toast("Elige un canal privado o un nodo."); return; }
-  const text = fitBytes(meshText(kind, al, info));
-  for (const tg of targets) meshQ.push({ tg, text, t: Date.now() });
-  pumpMesh();
-}
-async function pumpMesh() {
-  if (meshBusy) return;
-  meshBusy = true;
-  try {
-    while (meshQ.length) {
-      if (!S.demo && !(S.link.state === "ready" && receptor?.mesh)) break; // se reanuda al volver el receptor
-      while (meshSent.length && meshSent[0] < Date.now() - HOUR) meshSent.shift();
-      if (meshSent.length >= MESH_HOURLY) {
-        const n = meshQ.splice(0).length;
-        addLog("info", `Avisos por la malla en pausa: ya van ${MESH_HOURLY} en la última hora (${n} sin enviar)`);
-        break;
-      }
-      const it = meshQ.shift();
-      if (Date.now() - it.t > MESH_MAX_AGE) { addLog("info", `Aviso por la malla a ${it.tg.label} descartado: tenía más de 30 min`); continue; }
-      meshSent.push(Date.now());
-      sendMeshOne(it);
-      if (meshQ.length) await new Promise((r) => setTimeout(r, MESH_GAP));
-    }
-  } finally {
-    meshBusy = false;
-  }
-}
-async function sendMeshOne(it) {
-  const { tg, text } = it;
-  const rec = { tg, text, tq: it.t, t: Date.now(), result: "enviando…", ok: null, st: newDelivery(), timer: null };
-  S.meshLast = rec;
-  patchMeshLast();
-  if (S.demo) {
-    await new Promise((r) => setTimeout(r, 1200));
-    if (tg.type === "node") { meshDelivery(rec, { type: "ack", from: S.myNode, err: 0 }); await new Promise((r) => setTimeout(r, 1800)); meshDelivery(rec, { type: "ack", from: tg.num, err: 0 }); }
-    else meshDone(rec, "repetido por la malla", true);
-    return;
-  }
-  const dest = tg.type === "node" ? tg.num : "broadcast";
-  const ch = tg.type === "node" ? S.nodes.get(tg.num)?.channel || 0 : tg.index;
-  const sent = receptor.sendText(dest, ch, text);
-  if (tg.type === "node") {
-    if (sent.id != null) {
-      meshById.set(sent.id, rec);
-      if (meshById.size > 50) meshById.delete(meshById.keys().next().value);
-    }
-    rec.timer = setTimeout(() => meshDelivery(rec, { type: "timeout" }), MESH_CONFIRM);
-  }
-  try {
-    const id = await sent.done;
-    // Primer acuse, el que atiende la librería: si es del destino, entregado; si no, solo salió a la malla.
-    if (tg.type === "node") meshDelivery(rec, { type: "ack", from: ackFrom.get(id) ?? S.myNode, err: 0 });
-    else meshDone(rec, "repetido por la malla", true);
-  } catch (e) {
-    const code = e && typeof e === "object" && "error" in e ? e.error : "send";
-    if (tg.type === "node") {
-      if (code === RE.TIMEOUT) return; // la librería se rinde a los 60 s; manda nuestra espera
-      meshDelivery(rec, { type: "ack", from: null, err: code });
-      return;
-    }
-    meshDone(rec, code === RE.TIMEOUT ? "sin confirmación" : code === RE.MAX_RETRANSMIT ? "nadie lo repitió (¿hay nodos al alcance?)" : askFailText(code), false);
-  }
-}
-
-/** Acuse o error de la malla para un aviso directo (desde onPacket). err: 0 acuse, otro número error. */
-function meshRouting(reqId, from, err) {
-  const rec = meshById.get(reqId);
-  if (rec && err != null) meshDelivery(rec, { type: "ack", from, err });
-}
-
-/** Avanza la entrega de un aviso directo y cuenta el resultado cuando cambia. */
-function meshDelivery(rec, ev) {
-  const prev = rec.st;
-  const st = deliveryStep(prev, ev, { dest: rec.tg.num });
-  if (st === prev) return;
-  rec.st = st;
-  const name = nodeName(rec.tg.num);
-  const secs = `${Math.max(1, Math.round((Date.now() - rec.t) / 1000))} s`;
-  if (st.phase === "relayed") {
-    rec.result = `en camino: un vecino lo ha repetido; esperando a que ${name} confirme…`;
-    rec.ok = null;
-    return patchMeshLast();
-  }
-  clearTimeout(rec.timer);
-  if (st.phase === "delivered") return meshDone(rec, st.late ? `entregado, aunque la confirmación llegó tarde (${secs})` : `entregado (${secs})`, true);
-  if (st.phase === "unconfirmed") {
-    return meshDone(rec, st.relayed
-      ? `sin confirmar: salió a la malla (un vecino lo repitió), pero ${name} no ha confirmado que le llegara en ${MESH_CONFIRM / 1000} s`
-      : `sin confirmar: ni un vecino lo repitió ni ${name} contestó en ${MESH_CONFIRM / 1000} s`, false);
-  }
-  const why = st.code === RE.MAX_RETRANSMIT ? "no llegó tras varios intentos" : askFailText(st.code);
-  meshDone(rec, `no entregado: ${why}`, false);
-}
-
-function meshDone(rec, result, ok) {
-  const late = rec.t - rec.tq > 2 * MIN ? " (salió con retraso)" : "";
-  rec.result = result + late;
-  rec.ok = ok;
-  rec.tDone = Date.now();
-  addLog("info", `Aviso por la malla a ${rec.tg.label}: ${rec.result}`);
-  patchMeshLast();
-  renderLog();
-}
 
 function meshLastHTML() {
   const l = S.meshLast;
@@ -1100,7 +402,6 @@ function beep() {
     o.stop(t0 + d + 0.18);
   });
 }
-const unacked = () => [...S.active.values()].filter((a) => !a.acked);
 setInterval(() => { if (S.settings.sound && unacked().length) beep(); }, 2500);
 
 function fireAlarm(al) {
@@ -2240,7 +1541,7 @@ function makeReceptor() {
       LS.set("vigia.device", S.device);
     },
     onReady() {
-      Object.assign(clock, { n: 0, min: Infinity, said: false });
+      motor.resetClock();
       setTimeout(pumpMesh, 1500);
       S.trouble = null;
       S.otherWindow = null;
@@ -2262,130 +1563,19 @@ function makeReceptor() {
       render();
     },
     onDiag(e) { pushDiag(e); },
-    onChannel(c) { setChannel(c); },
-    onLora(l) {
-      S.lora = { usePreset: l.usePreset, modemPreset: l.modemPreset, spreadFactor: l.spreadFactor, hopLimit: l.hopLimit };
-      LS.set("vigia.lora", S.lora);
-    },
-    onNotice(n) {
-      const msg = String(n?.message || "").trim();
-      if (msg) pushDiag({ t: Date.now(), msg: `Aviso del receptor: ${msg}` });
-      // El firmware avisa así cuando no manda una petición (p. ej. un traceroute antes de 30 s).
-      const r = n?.replyId ? askById.get(n.replyId) : null;
-      if (!r || r.state !== "wait") return;
-      if (r.type === "route" && /trace ?route/i.test(msg)) { S.traceAt = Date.now(); return finishAsk(r, "fail", "throttled"); }
-      r.notice = msg;
-      finishAsk(r, "fail", "notice");
-    },
+    // Lo que llega del receptor lo procesa el motor (el mismo que usa el servidor).
+    onChannel: (c) => motor.recibir.channel(c),
+    onLora: (l) => motor.recibir.lora(l),
+    onNotice: (n) => motor.recibir.notice(n),
     onOtherWindow() { S.otherWindow = "busy"; render(); },
     onLockLost() { S.otherWindow = "lost"; addLog("info", "La conexión con el receptor ha pasado a otra ventana"); render(); },
-    onMyNode(num) {
-      S.myNode = num;
-      LS.set("vigia.my", num);
-      node(num);
-    },
-    onNodeInfo(ni) {
-      const n = node(ni.num);
-      if (ni.user) setUser(n, ni.user);
-      if (ni.user && ni.num === S.myNode) S.myUser = pickUser(ni.user);
-      const lh = ni.lastHeard ? ni.lastHeard * 1000 : 0;
-      touch(ni.num, lh);
-      if (isNum(ni.hopsAway)) n.hops = ni.hopsAway;
-      if (isNum(ni.snr) && ni.snr !== 0) n.snr = ni.snr;
-      if (isNum(ni.channel)) n.channel = ni.channel;
-      const dm = ni.deviceMetrics;
-      if (dm && validT(lh)) {
-        const m = {};
-        if (isNum(dm.batteryLevel) && dm.batteryLevel > 0) m.batteryLevel = dm.batteryLevel;
-        if (isNum(dm.voltage) && dm.voltage > 0) m.voltage = dm.voltage;
-        for (const [k, v] of Object.entries(m)) {
-          const prev = n.metrics[k];
-          if (!prev || lh > prev.t) { n.metrics[k] = { v, t: lh }; evalThreshold(ni.num, k, v, lh); }
-        }
-      }
-      saveNodes();
-      render();
-    },
-    onUser(from, user, meta) {
-      const n = node(from);
-      setUser(n, user);
-      if (from === S.myNode) S.myUser = pickUser(user);
-      // Un paquete en vivo (no la copia de la base de datos del receptor) responde a «Pedir ficha».
-      const live = meta && meta.to !== meta.from;
-      const r = S.req.get(askKey(from, "info"));
-      if (live && r && Date.now() - r.t0 < 5 * MIN) { r.gotKey = user.publicKey?.length === 32; finishAsk(r, "ok"); }
-      saveNodes();
-      render();
-    },
-    onPacket(p) {
-      const rx = p.rxTime ? p.rxTime * 1000 : 0;
-      touch(p.from, validT(rx) ? rx : Date.now());
-      const n = node(p.from);
-      if (p.hopStart > 0 && isNum(p.hopLimit)) n.hops = Math.max(0, p.hopStart - p.hopLimit);
-      if (isNum(p.rxSnr) && p.rxSnr !== 0) n.snr = p.rxSnr;
-      const dec = p.payloadVariant?.case === "decoded" ? p.payloadVariant.value : null;
-      if (dec && dec.portnum === Protobuf.Portnums.PortNum.ROUTING_APP && dec.requestId) {
-        ackFrom.set(dec.requestId, p.from);
-        if (ackFrom.size > 200) ackFrom.delete(ackFrom.keys().next().value);
-        const err = routingErrorReason(dec.payload);
-        askRouting(dec.requestId, p.from, err);
-        meshRouting(dec.requestId, p.from, err);
-      }
-      // Respuesta a un traceroute nuestro: lleva el id de la petición.
-      if (dec && dec.portnum === Protobuf.Portnums.PortNum.TRACEROUTE_APP && dec.requestId) {
-        const r = askById.get(dec.requestId);
-        const rd = r?.type === "route" ? decodeRouteDiscovery(dec.payload) : null;
-        if (rd) gotTrace(r, rd, p.to, p.from, p.hopStart > 0);
-      }
-      if (validT(rx) && S.link.state === "ready") checkClock(rx);
-      // Canal por el que emite el nodo, para pedirle datos por el mismo.
-      if (p.to === 0xffffffff && isNum(p.channel) && p.channel < 8) n.channel = p.channel;
-      saveNodes();
-      render();
-    },
-    onPosition(p) {
-      const d = p.data;
-      const live = p.to !== p.from; // la copia de la base de datos del receptor llega con from = to
-      const hasLoc = !!(d && (d.latitudeI || d.longitudeI));
-      const r = S.req.get(askKey(p.from, "pos"));
-      if (live && r && Date.now() - r.t0 < 5 * MIN) { r.noLoc = !hasLoc; finishAsk(r, "ok"); }
-      if (!hasLoc) return;
-      const tPos = d.time ? d.time * 1000 : 0;
-      const rx = p.rxTime?.getTime?.() || 0;
-      const t = validT(tPos) ? tPos : live && validT(rx) ? rx : S.nodes.get(p.from)?.lastHeard || Date.now();
-      setPosition(p.from, {
-        lat: d.latitudeI / 1e7, lon: d.longitudeI / 1e7, t,
-        alt: d.altitude || null, bits: d.precisionBits || 0, src: d.locationSource || 0,
-      }, { live, replay: live && Date.now() - t > 5 * MIN });
-    },
-    onTelemetry(p) {
-      const id = `${p.from}:${p.id}`;
-      if (p.id && S.seen.has(id)) return;
-      if (p.id) { S.seen.add(id); if (S.seen.size > 600) S.seen.delete(S.seen.values().next().value); }
-      const rx = p.rxTime?.getTime?.() || 0;
-      const sent = p.data?.time ? p.data.time * 1000 : 0;
-      const t = validT(rx) ? rx : validT(sent) ? sent : Date.now();
-      const kind = p.data.variant?.case;
-      const pending = ASK_BY_VARIANT[kind] && S.req.get(askKey(p.from, ASK_BY_VARIANT[kind]));
-      // Es la respuesta si llega después de pedirla. No se compara la hora del paquete: la pone el reloj del
-      // receptor, y si va unos segundos atrasado la lectura parecía anterior a la petición y se perdía la respuesta.
-      if (pending && Date.now() - pending.t0 < 5 * MIN) finishAsk(pending, "ok");
-      const metrics = extractMetrics(p.data);
-      if (!Object.keys(metrics).length) return;
-      ingest(p.from, metrics, t, { kind, replay: Date.now() - t > 5 * MIN });
-    },
+    onMyNode: (num) => motor.recibir.myNode(num),
+    onNodeInfo: (ni) => motor.recibir.nodeInfo(ni),
+    onUser: (from, user, meta) => motor.recibir.user(from, user, meta),
+    onPacket: (p) => motor.recibir.packet(p),
+    onPosition: (p) => motor.recibir.position(p),
+    onTelemetry: (p) => motor.recibir.telemetry(p),
   });
-}
-
-function setUser(n, u) {
-  if (u.longName) n.long = u.longName;
-  if (u.shortName) n.short = u.shortName;
-  if (typeof u.hwModel === "number" && u.hwModel > 0) n.hw = Protobuf.Mesh.HardwareModel?.[u.hwModel] || n.hw;
-  if (u.publicKey) n.key = u.publicKey.length === 32;
-}
-function pickUser(u) {
-  const { id, longName, shortName, macaddr, hwModel, isLicensed, role, publicKey, isUnmessagable } = u;
-  return { id, longName, shortName, macaddr, hwModel, isLicensed, role, publicKey, isUnmessagable };
 }
 
 function btErrorText(e) {
