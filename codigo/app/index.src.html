@@ -407,6 +407,13 @@ dialog::backdrop { background: rgb(8 14 12 / .5); }
 .est-r > .sel:not(:first-child) { flex: 0 0 auto; }
 .est-u { flex: 0 0 auto; min-width: 44px; color: var(--ink-2); font-size: 14px; }
 .est-d > .sel { width: 100%; }
+.est-h { display: grid; gap: 6px; }
+.est-h .inp { font-size: 15px; }
+.est-hl { list-style: none; margin: 0; padding: 0; max-height: 320px; overflow-y: auto; border: 1px solid var(--line); border-radius: 9px; }
+.est-hl li { display: flex; align-items: center; justify-content: space-between; gap: 8px; padding: 6px 8px; border-top: 1px solid var(--line); }
+.est-hl li:first-child { border-top: 0; }
+.est-hn { display: grid; min-width: 0; }
+.est-ht { font: 13px/1.3 var(--f-mono); overflow-wrap: anywhere; }
 .est-pre { margin: 6px 0; padding: 8px 10px; border-radius: 9px; background: var(--surface-2); font: 12.5px/1.45 var(--f-mono); overflow-x: auto; }
 .inp-u .inp { width: 84px; text-align: right; }
 .inp-u span { font: 400 13px/1 var(--f-mono); color: var(--ink-2); }

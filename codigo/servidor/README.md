@@ -193,7 +193,9 @@ Se configura en Ajustes → *De MQTT a la malla* (viene apagado; hace falta MQTT
   un JSON, el campo (`humidity`, o `datos.humedad` si va dentro de otro). Si el viento llega en km/h o la temperatura
   en °F, se elige la unidad y Vigía la pasa a la de Meshtastic. Un valor imposible (la presión en Pa en vez de hPa)
   no se manda. Debajo de cada dato se ve el último valor que ha llegado.
-- **Buscar temas** escucha el broker unos segundos y ofrece los temas con números para elegirlos al escribir.
+- **Buscar temas** escucha el broker unos segundos y enseña los temas con números (se pueden filtrar). **Usar**
+  pone uno en la lista: adivina qué dato es por el nombre (temperature, humidity, pressure, wind_speed…) y, si
+  Home Assistant publica la unidad, la elige; si no, el viento queda en km/h, lo normal en Home Assistant. Compruébalo.
 - **Enviar ahora** manda lo que haya sin esperar (como mucho, uno por minuto).
 
 Lo que hay que saber:
@@ -226,5 +228,6 @@ mqtt_statestream:
       - sensor.estacion_viento
 ```
 
+Con `publish_attributes: true` (debajo de `base_topic`), sale también la unidad de cada uno y Vigía la elige sola.
 Cada uno sale en `ha_estados/sensor/estacion_temperatura/state` (retenido: Vigía lo tiene nada más conectar). No
 incluyas los sensores «Vigía · …»: Vigía rechaza sus propios temas para no mandar a la malla lo que ya viene de ella.

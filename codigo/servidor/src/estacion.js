@@ -14,7 +14,7 @@ import { RE } from "@vigia/nucleo/motor.js";
 import { hhmm } from "@vigia/nucleo/textos.js";
 
 const BUSCAR_MS = 3000; // al buscar temas, cuánto se escucha el broker
-const BUSCAR_MAX = 400;
+const BUSCAR_MAX = 2000; // un broker con mucho retenido (Home Assistant, zigbee2mqtt…) tiene cientos
 const A_MANO_MS = 60000; // entre dos «Enviar ahora»
 
 /** Un Telemetry con la telemetría de ambiente, codificado. valores: { metrica: número } en unidades de Meshtastic. */
@@ -200,11 +200,19 @@ export function crearEstacion({ S, motor, eventos, almacen, registro, receptor }
       programar();
       return { ok: true, toast: cfg.activado ? `Guardado. Próximo envío a las ${hhmm.format(new Date(proximo))}.` : "Guardado. No se manda nada a la malla." };
     },
-    /** Escucha el broker unos segundos y devuelve los temas que traen números: { ok, temas: [{ tema, campo, v }] }. */
+    /**
+     * Escucha el broker unos segundos y devuelve los temas que traen números: { ok, temas: [{ tema, campo, v, unidad? }] }
+     * (la unidad, si Home Assistant la publica con mqtt_statestream y publish_attributes).
+     */
     async buscarTemas() {
       if (!conexion?.conectada) return { ok: false, error: "Primero conecta MQTT (en el apartado de arriba)." };
       const vistos = new Map();
+      const uds = new Map(); // mqtt_statestream con publish_attributes: «…/entidad/unit_of_measurement» → «"km/h"»
       const soltar = conexion.suscribir("#", (tema, carga) => {
+        if (tema.endsWith("/unit_of_measurement")) {
+          try { const u = JSON.parse(carga.toString()); if (typeof u === "string") uds.set(tema.slice(0, -20), u); } catch { /* no es una unidad */ }
+          return;
+        }
         if (vistos.size >= BUSCAR_MAX || temaProhibido(tema) || /\/config$/.test(tema) || /(^|\/)bridge\//.test(tema)) return;
         const r = leerValor(carga);
         if (r.v != null) return vistos.set(`${tema}\n`, { tema, campo: "", v: r.v });
@@ -215,6 +223,10 @@ export function crearEstacion({ S, motor, eventos, almacen, registro, receptor }
       await new Promise((r) => setTimeout(r, BUSCAR_MS));
       soltar();
       const temas = [...vistos.values()].sort((a, b) => a.tema.localeCompare(b.tema) || a.campo.localeCompare(b.campo));
+      for (const x of temas) {
+        const u = x.tema.endsWith("/state") && uds.get(x.tema.slice(0, -6));
+        if (u) x.unidad = u;
+      }
       return { ok: true, temas, toast: temas.length ? `${temas.length} con números` : "No ha llegado ningún tema con números" };
     },
     /** Manda ya lo que haya (sin esperar al siguiente envío). */

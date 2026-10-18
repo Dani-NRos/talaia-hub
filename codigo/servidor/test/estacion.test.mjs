@@ -196,6 +196,10 @@ test("buscar temas: los que traen números, sin lo que publica Vigía; y sigue a
   await publicar(T_Z2M, { humidity: 61, datos: { presion: 1016 }, nombre: "estación", lista: [1, 2] });
   await publicar("ha_estados/sensor/vigia_dnn_5_temperatura/state", "21.4");
   await publicar("homeassistant/sensor/algo/config", { suggested_display_precision: 1 });
+  // mqtt_statestream con publish_attributes: la unidad va en su propio tema, como texto JSON.
+  await publicar(T_VIENTO, "15");
+  await publicar("ha_estados/sensor/estacion_viento/unit_of_measurement", '"km/h"');
+  await publicar("ha_estados/sensor/estacion_viento/friendly_name", '"Viento"');
   await hasta(() => vigia.S.mqtt.estado.fase === "conectada", 3000, "conectado");
   const r = await estacion.buscarTemas();
   assert.equal(r.ok, true);
@@ -203,6 +207,9 @@ test("buscar temas: los que traen números, sin lo que publica Vigía; y sigue a
   assert.ok(vistos.includes(`${T_TEMP}|`));
   assert.ok(vistos.includes(`${T_Z2M}|humidity`));
   assert.ok(vistos.includes(`${T_Z2M}|datos.presion`));
+  assert.equal(r.temas.find((x) => x.tema === T_VIENTO).unidad, "km/h");
+  assert.equal(r.temas.find((x) => x.tema === T_TEMP).unidad, undefined);
+  assert.ok(!vistos.some((v) => /unit_of_measurement|friendly_name/.test(v)));
   assert.ok(!vistos.some((v) => /vigia|config|nombre|lista/.test(v)), vistos.join("\n"));
   // Lo que publica la salida a Home Assistant (vigia/…) tampoco.
   assert.ok(!r.temas.some((x) => x.tema.startsWith("vigia/")));

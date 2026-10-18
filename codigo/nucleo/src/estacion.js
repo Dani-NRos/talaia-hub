@@ -28,6 +28,41 @@ const RANGO = {
   soilMoisture: [0, 100], distance: [0, 1e6], weight: [0, 1e5],
 };
 
+/**
+ * Qué dato parece un tema por su nombre (el de la entidad de Home Assistant, el campo de zigbee2mqtt…): para
+ * proponerlo al elegir lo encontrado en el broker. null si no se sabe o no es de los que caben (punto de rocío,
+ * dirección del viento, batería…). El orden importa: la racha antes que el viento, el suelo antes que el aire.
+ */
+const B = "(^|[^a-z0-9])", E = "([^a-z]|$)"; // límites de palabra (el «_» de los nombres de entidad también separa)
+const PISTAS = [
+  [`dew|rocio|feels|apparent|sensaci|heat_?index|chill|bearing|direc|batter|linkquality|signal|rssi|${B}uv${E}`, null],
+  ["gust|racha|rafaga|max_?wind|wind_?max", "windGust"],
+  [`wind|viento|${B}vent${E}`, "windSpeed"],
+  [`rain_?rate|precip(itation)?_?rate|${B}1_?h${E}|hourly|lluvia_?hora`, "rainfall1h"],
+  ["precip|rain|lluvia|pluja|pluvi", "rainfall24h"],
+  ["soil.*temp|temp.*soil|suelo.*temp|temp.*suelo", "soilTemperature"],
+  ["soil|moisture|suelo", "soilMoisture"],
+  ["humid|humedad|humitat", "relativeHumidity"],
+  ["press|presi", "barometricPressure"],
+  ["temp", "temperature"],
+  [`illumin|lux|luminos|light|${B}luz${E}`, "lux"],
+  ["distance|distancia", "distance"],
+  ["weight|peso", "weight"],
+].map(([re, m]) => [new RegExp(re), m]);
+export function adivinarMetrica(tema, campo = "") {
+  // Si llega un JSON, manda el campo (zigbee2mqtt: «humidity»); si no, lo último del tema que no sea «state»
+  // (mqtt_statestream: base/sensor/entidad/state).
+  const partes = String(tema).toLowerCase().split("/").filter((p) => p && p !== "state");
+  const txt = (campo ? String(campo) : partes.at(-1) || "").toLowerCase().normalize("NFD").replace(/[\u0300-\u036f]/g, "");
+  for (const [re, m] of PISTAS) if (re.test(txt)) return m;
+  return null;
+}
+/** La unidad tal como la escribe Home Assistant, si es una de las que entiende ese dato (mbar es lo mismo que hPa). */
+export function unidadDe(metrica, txt) {
+  const u = String(txt || "").trim().replace(/^mbar$/i, "hPa").replace(/^km\/h$/i, "km/h");
+  return unidades(metrica).includes(u) ? u : null;
+}
+
 export const ESTACION_CADA = [15, 30, 60, 180]; // minutos entre envíos
 export const ESTACION_CADUCA = [0, 60, 180, 720, 1440]; // minutos sin llegar nada nuevo para no mandarlo (0: nunca)
 export const ESTACION_DEFECTO = { activado: false, cada: 30, canal: 0, saltos: null, datos: [] };

@@ -10,7 +10,7 @@ import { searchNodes, highlight, tokens, FILTERS, SORTS } from "./meshsearch.js"
 import { conectarServidor, crearStoreRemoto } from "./remoto.js";
 import { MIN, HOUR, DAY, isNum, hhmm, dShort, ago, stamp, trendDec, fmtTrend, trendVerb, hoursText, lastWindow } from "@vigia/nucleo/textos.js";
 import { crearAcciones } from "@vigia/nucleo/acciones.js";
-import { METRICAS_ESTACION, ESTACION_MAX_SALTOS, unidades } from "@vigia/nucleo/estacion.js";
+import { METRICAS_ESTACION, ESTACION_MAX_SALTOS, unidades, adivinarMetrica, unidadDe } from "@vigia/nucleo/estacion.js";
 import { crearMotor, estadoInicial, MESH_DEFAULT, MESH_HOURLY, ASK, ASK_ALL, askKey, RE, INFO_SUPPRESS, seriesKey, trendKey, hexId } from "@vigia/nucleo/motor.js";
 
 /* ───────────── utilidades ───────────── */
@@ -421,13 +421,18 @@ const MQTT_CAMPOS = { mqttOn: "activado", mqttUrl: "url", mqttUser: "usuario", m
 /* ───────────── De MQTT a la malla: la estación (solo con servidor) ───────────── */
 // Datos que llegan por MQTT y el servidor manda a la malla como telemetría del receptor (ver servidor/src/estacion.js).
 let estBorrador = null; // lo cambiado y aún sin guardar: { activado, cada, canal, saltos, datos }
-let estTemas = []; // lo encontrado con «Buscar temas»: [{ tema, campo, v }]
+let estTemas = []; // lo encontrado con «Buscar temas»: [{ tema, campo, v, unidad? }]
+let estFiltro = ""; // lo escrito para filtrar lo encontrado
+const EST_VISTOS = 40; // de lo encontrado, cuántos se enseñan (filtrando se llega al resto)
 const EST_CADA = { 15: "15 minutos", 30: "30 minutos", 60: "1 hora", 180: "3 horas" };
 const EST_CADUCA = { 0: "Si deja de llegar, mandar el último", 60: "No mandarlo si lleva 1 h sin llegar", 180: "No mandarlo si lleva 3 h sin llegar", 720: "No mandarlo si lleva 12 h sin llegar", 1440: "No mandarlo si lleva 24 h sin llegar" };
 function estCfg() {
   if (estBorrador) return estBorrador;
   const e = S.estacion;
-  return e ? { activado: e.activado, cada: e.cada, canal: e.canal, saltos: e.saltos, datos: e.datos.map((d) => ({ ...d })) } : null;
+  if (!e) return null;
+  // Sin ningún dato todavía, una fila vacía: que se vea dónde va el tema.
+  const datos = e.datos.length ? e.datos.map((d) => ({ ...d })) : [{ metrica: METRICAS_ESTACION[0], tema: "", campo: "", unidad: unidades(METRICAS_ESTACION[0])[0], caduca: 0 }];
+  return { activado: e.activado, cada: e.cada, canal: e.canal, saltos: e.saltos, datos };
 }
 const estEditar = () => (estBorrador ||= estCfg());
 const estMismo = (a, b) => a && b && a.metrica === b.metrica && a.tema === b.tema && a.campo === b.campo && a.unidad === b.unidad;
@@ -459,6 +464,48 @@ function estDatoHTML(d, i, datos) {
       <p class="hint" id="estV${i}">${estValorHTML(d)}</p>
       <datalist id="estCampos${i}">${estCamposOpts(d.tema)}</datalist>
     </div>`;
+}
+/** Nombre corto de un tema encontrado: de «ha_estados/sensor/entidad/state», la entidad; y el campo si es un JSON. */
+function estNombre(x) {
+  const p = x.tema.split("/").filter((q) => q && q !== "state");
+  let n = p.length > 1 ? p.at(-1) : x.tema;
+  if (n.length > 44) n = `…${n.slice(-43)}`;
+  return x.campo ? `${n} · ${x.campo}` : n;
+}
+/** Lo encontrado al buscar, filtrado, con lo que parece cada uno y un botón para usarlo. */
+function estHalladosHTML() {
+  if (!estTemas.length) return "";
+  const f = estFiltro.trim().toLowerCase();
+  const lista = estTemas.map((x, i) => ({ x, i, m: adivinarMetrica(x.tema, x.campo) }))
+    .filter(({ x }) => !f || `${x.tema} ${x.campo}`.toLowerCase().includes(f))
+    .sort((a, b) => (a.m ? 0 : 1) - (b.m ? 0 : 1)); // primero lo que parece un dato de los que caben
+  const usados = new Set(estCfg().datos.map((d) => `${d.tema}\n${d.campo}`));
+  const filas = lista.slice(0, EST_VISTOS).map(({ x, i, m }) => `<li><div class="est-hn"><span class="est-ht" title="${esc(x.tema)}${x.campo ? ` · ${esc(x.campo)}` : ""}">${esc(estNombre(x))}</span>
+      <span class="hint">${esc(String(x.v))}${x.unidad ? ` ${esc(x.unidad)}` : ""}${m ? ` · parece ${esc(metricMeta(m).label.toLowerCase())}` : ""}</span></div>
+      ${usados.has(`${x.tema}\n${x.campo}`) ? `<span class="hint">ya está</span>` : `<button type="button" class="mini" data-est-usar="${i}">Usar</button>`}</li>`).join("");
+  const mas = lista.length > EST_VISTOS ? `<p class="hint">Y ${lista.length - EST_VISTOS} más: escribe arriba para filtrar.</p>` : "";
+  return `<input id="estFiltro" class="inp" autocomplete="off" spellcheck="false" placeholder="Filtrar, p. ej. meteoclimatic o temperature" aria-label="Filtrar lo encontrado" value="${esc(estFiltro)}">
+    ${lista.length ? `<ul class="est-hl">${filas}</ul>${mas}` : `<p class="hint">Nada con «${esc(estFiltro)}».</p>`}`;
+}
+/** Pone un tema encontrado en la lista de datos: lo que parece por el nombre, en la fila vacía si la hay. */
+function estUsar(i) {
+  const x = estTemas[i];
+  if (!x) return;
+  const c = estEditar();
+  const conTema = (m) => c.datos.some((d) => d.metrica === m && d.tema.trim());
+  const adiv = adivinarMetrica(x.tema, x.campo);
+  const m = adiv && !conTema(adiv) ? adiv : METRICAS_ESTACION.find((k) => !conTema(k));
+  if (!m) return toast("Ya están todos los datos que caben.");
+  let d = c.datos.find((y) => !y.tema.trim() && y.metrica === m) || c.datos.find((y) => !y.tema.trim());
+  if (!d) { d = { caduca: 0 }; c.datos.push(d); }
+  // Si otra fila vacía tenía ya ese dato, se le cambia para que no se repita.
+  for (const y of c.datos) if (y !== d && y.metrica === m) y.metrica = METRICAS_ESTACION.find((k) => !c.datos.some((z) => z.metrica === k)) || y.metrica;
+  const uds = unidades(m);
+  const ud = unidadDe(m, x.unidad) || (uds.includes("km/h") ? "km/h" : uds[0]); // el viento en Home Assistant suele ir en km/h
+  Object.assign(d, { metrica: m, tema: x.tema, campo: x.campo, unidad: ud });
+  renderEstacion();
+  const ojo = !x.unidad && ud !== uds[0] ? ` en ${ud}: comprueba que llega en esa unidad` : "";
+  toast(adiv === m ? `Añadido como «${metricMeta(m).label}»${ojo}.` : `Añadido como «${metricMeta(m).label}»: no sé qué dato es, elígelo en su fila.`);
 }
 /** Para elegir tema y campo de lo que se ha encontrado al buscar. */
 function estTemasOpts() {
@@ -512,7 +559,8 @@ function estacionSection() {
       <div class="set-row"><label for="estHop">Saltos</label><select id="estHop" class="inp sel">${hopOpts}</select></div>
       <div id="estDatos">${c.datos.map((d, i) => estDatoHTML(d, i, c.datos)).join("")}</div>
       <div class="btns">${c.datos.length < METRICAS_ESTACION.length ? `<button type="button" class="btn ghost" data-est-add>Añadir dato</button>` : ""}<button type="button" class="btn ghost" data-est-buscar>Buscar temas</button></div>
-      <p class="hint" id="estBusca">${estTemas.length ? `Encontrados ${estTemas.length}: al escribir en el tema (y en el campo) salen para elegir.` : ""}</p>
+      <p class="hint" id="estBusca">${estTemas.length ? `Encontrados ${estTemas.length} con números. Pulsa «Usar» en los que quieras (o escribe en el tema y elige).` : "«Buscar temas» enseña lo que publica el broker con números, para elegirlo sin escribir el tema."}</p>
+      <div id="estHallados" class="est-h">${estHalladosHTML()}</div>
       <datalist id="estTemas">${estTemasOpts()}</datalist>
       <p class="form-err" id="estErr" role="alert" hidden></p>
       <div class="btns"><button type="button" class="btn primary" data-est-save>Guardar</button>${e.datos.length ? `<button type="button" class="btn ghost" data-est-send>Enviar ahora</button>` : ""}</div>
@@ -525,7 +573,7 @@ function estacionSection() {
     entities:
       - sensor.estacion_temperatura
       - sensor.estacion_humedad</pre>
-        <p class="hint">Cada sensor sale en «ha_estados/sensor/…/state». Pulsa «Buscar temas» y elígelos. No incluyas los sensores «Vigía · …»: Vigía los rechaza, porque mandaría a la malla lo que ya viene de ella. Comprueba la unidad (viento en km/h, temperatura en °F…): Vigía la pasa a la de Meshtastic.</p>
+        <p class="hint">Cada sensor sale en «ha_estados/sensor/…/state». Pulsa «Buscar temas» y elígelos. Con «publish_attributes: true» debajo de base_topic, Vigía ve también la unidad de cada uno (km/h, °C…). No incluyas los sensores «Vigía · …»: Vigía los rechaza, porque mandaría a la malla lo que ya viene de ella. Comprueba la unidad (viento en km/h, temperatura en °F…): Vigía la pasa a la de Meshtastic.</p>
       </details>
     </section>`;
 }
@@ -549,7 +597,7 @@ function patchEstacion() {
 }
 async function guardarEstacion() {
   const c = estCfg();
-  const res = await orden({ orden: "estacion", cambio: c });
+  const res = await orden({ orden: "estacion", cambio: { ...c, datos: c.datos.filter((d) => d.tema.trim()) } });
   if (!res.ok) return showErr($("#estErr"), res.error || "No se pudo guardar.");
   estBorrador = null;
   toast(res.toast);
@@ -566,7 +614,8 @@ async function buscarTemasEstacion(btn) {
   $("#estErr").hidden = true;
   $("#estTemas").innerHTML = estTemasOpts();
   estCfg().datos.forEach((d, i) => { const dl = $(`#estCampos${i}`); if (dl) dl.innerHTML = estCamposOpts(d.tema); });
-  $("#estBusca").textContent = estTemas.length ? `Encontrados ${estTemas.length}: al escribir en el tema (y en el campo) salen para elegir.` : "No ha llegado ningún tema con números. ¿Publica algo el broker? (Con Home Assistant, mira «Cómo sacar los datos».)";
+  $("#estBusca").textContent = estTemas.length ? `Encontrados ${estTemas.length} con números. Pulsa «Usar» en los que quieras (o escribe en el tema y elige).` : "No ha llegado ningún tema con números. ¿Publica algo el broker? (Con Home Assistant, mira «Cómo sacar los datos».)";
+  $("#estHallados").innerHTML = estHalladosHTML();
 }
 /** Un cambio en un campo del apartado: va al borrador. */
 function editarEstacion(t) {
@@ -2037,6 +2086,7 @@ document.addEventListener("click", async (ev) => {
     return $(`#estDatos .est-d:last-child [data-est-k="metrica"]`)?.focus();
   }
   if ("estDel" in ds) { estEditar().datos.splice(Number(ds.estDel), 1); return renderEstacion(); }
+  if ("estUsar" in ds) return estUsar(Number(ds.estUsar));
   if ("estSend" in ds) { const r = await orden({ orden: "estacionEnviar" }); return toast(r.error || r.toast); }
   if ("mqttNoclave" in ds) { const r = await orden({ orden: "mqtt", cambio: { clave: null } }); if (r.error) return toast(r.error); return toast("Contraseña quitada"); }
   if ("meshTest" in ds) {
@@ -2150,6 +2200,16 @@ document.addEventListener("input", (ev) => {
   if (ev.target.id === "meshQ") onMeshQuery(ev.target.value);
   const campo = MQTT_CAMPOS[ev.target.id];
   if (campo) mqttBorrador = { ...(mqttBorrador || {}), [campo]: ev.target.type === "checkbox" ? ev.target.checked : ev.target.value };
+  if (ev.target.id === "estFiltro") {
+    estFiltro = ev.target.value;
+    const ul = $("#estHallados");
+    // Solo la lista: el campo de filtrar se queda donde está (y con el foco).
+    const tmp = document.createElement("div");
+    tmp.innerHTML = estHalladosHTML();
+    ul.querySelectorAll(":scope > .est-hl, :scope > p").forEach((el) => el.remove());
+    ul.append(...[...tmp.children].filter((el) => el.id !== "estFiltro"));
+    return;
+  }
   if (ev.target.closest?.("#estBox") && ev.target.matches("input:not([type=checkbox])")) editarEstacion(ev.target);
 });
 

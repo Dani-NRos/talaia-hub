@@ -222,11 +222,14 @@ await paso("Enterado desde Home Assistant queda visto en las pantallas", async (
   if (!act.some((a) => a.acked)) throw new Error(`en el servidor: ${JSON.stringify(act.map((a) => [a.key, a.acked]))}`);
 });
 
-// La estación: lo que Home Assistant (mqtt_statestream) y zigbee2mqtt publican sale a la malla como del receptor.
-const T_TEMP = "ha_estados/sensor/estacion_temperatura/state", T_VIENTO = "ha_estados/sensor/estacion_viento/state", T_Z2M = "zigbee2mqtt/Estación";
-await ha.publishAsync(T_TEMP, "19.6", { retain: true });
-await ha.publishAsync(T_VIENTO, "18", { retain: true });
-await ha.publishAsync(T_Z2M, JSON.stringify({ humidity: 64, pressure: 1014.8, battery: 90 }), { retain: true });
+// La estación: lo que Home Assistant publica con mqtt_statestream (los nombres largos de Meteoclimatic de Dani) sale a
+// la malla como del receptor. La unidad del viento, con publish_attributes.
+const MC = (x) => `ha_estados/sensor/meteoclimatic_weather_for_alzira_ajuntament_valencia_espva4600000046600b_alzira_ajuntament_valencia_${x}`;
+for (const [x, v, u] of [["temperature", "19.6", "°C"], ["humidity", "64", "%"], ["pressure", "1014.8", "hPa"], ["wind_speed", "18", "km/h"], ["dew_point", "12.4", "°C"]]) {
+  await ha.publishAsync(MC(`${x}/state`), v, { retain: true });
+  await ha.publishAsync(MC(`${x}/unit_of_measurement`), JSON.stringify(u), { retain: true });
+}
+await ha.publishAsync("zigbee2mqtt/Salón", JSON.stringify({ temperature: 22.1, battery: 90 }), { retain: true });
 const fila = (page, i, k) => page.locator(`#estDatos .est-d:nth-child(${i + 1}) [data-est-k="${k}"]`);
 /** Foto de un apartado de Ajustes entero: la ventana, alta para que quepa (Ajustes tiene su propio desplazamiento). */
 async function fotoApartado(page, sel, nombre) {
@@ -237,22 +240,27 @@ async function fotoApartado(page, sel, nombre) {
   await page.setViewportSize(vp);
 }
 
-await paso("estación desde Ajustes: buscar temas, cuatro datos (viento en km/h), canal privado; se ven los valores", async () => {
+await paso("estación desde Ajustes: se ve dónde va el tema; buscar, filtrar y «Usar» rellenan dato, tema y unidad", async () => {
   await pc.click("#setBtn");
   await sleep(400);
+  if (!(await fila(pc, 0, "tema").isVisible())) throw new Error("sin datos, no se ve dónde poner el tema");
   await fotoApartado(pc, "#estBox", "estacion-vacia");
   await pc.click("[data-est-buscar]");
-  await esperarTexto(pc, /Encontrados \d+/, "temas encontrados");
-  const n = await pc.locator("#estTemas option").count();
-  if (n < 2) throw new Error(`solo ${n} temas en la lista`);
-  const datos = [["temperature", T_TEMP, ""], ["relativeHumidity", T_Z2M, "humidity"], ["barometricPressure", T_Z2M, "pressure"], ["windSpeed", T_VIENTO, ""]];
-  for (const [i, [m, tema, campo]] of datos.entries()) {
-    await pc.click("[data-est-add]");
-    await fila(pc, i, "metrica").selectOption(m);
-    await fila(pc, i, "tema").fill(tema);
-    if (campo) await fila(pc, i, "campo").fill(campo);
+  await esperarTexto(pc, /Encontrados \d+ con números/, "temas encontrados");
+  await pc.fill("#estFiltro", "meteoclimatic");
+  await sleep(200);
+  const n = await pc.locator("#estHallados li").count();
+  if (n !== 5) throw new Error(`con el filtro salen ${n}, no 5`);
+  await fotoApartado(pc, "#estBox", "estacion-encontrados");
+  for (const x of ["temperature", "humidity", "pressure", "wind_speed"]) {
+    await pc.locator(`#estHallados li:has(.est-ht[title="${MC(`${x}/state`)}"]) [data-est-usar]`).click();
+    await sleep(150);
   }
-  await fila(pc, 3, "unidad").selectOption("km/h");
+  const metricas = [];
+  for (let i = 0; i < 4; i++) metricas.push(await fila(pc, i, "metrica").inputValue());
+  if (metricas.join() !== "temperature,relativeHumidity,barometricPressure,windSpeed") throw new Error(`datos: ${metricas}`);
+  if ((await fila(pc, 3, "unidad").inputValue()) !== "km/h") throw new Error("el viento no quedó en km/h");
+  if ((await fila(pc, 0, "tema").inputValue()) !== MC("temperature/state")) throw new Error("tema de la temperatura");
   await pc.selectOption("#estCh", "1");
   await pc.check("#estOn", { force: true });
   await pc.click("[data-est-save]");

@@ -78,3 +78,29 @@ test("horario: en punto y a las y media (cada 30 min), contando desde la mediano
   assert.equal(proximoEnvio(h(10, 1), 180), h(12, 0));
   assert.equal(proximoEnvio(h(10, 1), 60), h(11, 0));
 });
+
+test("adivinar qué dato es por el nombre del tema (Home Assistant) o del campo (zigbee2mqtt)", async () => {
+  const { adivinarMetrica: a, unidadDe } = await import("../src/estacion.js");
+  // Los de Dani: Meteoclimatic en Home Assistant con mqtt_statestream.
+  const ha = (x) => `ha_estados/sensor/meteoclimatic_weather_for_alzira_ajuntament_valencia_espva4600000046600b_alzira_ajuntament_valencia_${x}/state`;
+  assert.equal(a(ha("temperature")), "temperature");
+  assert.equal(a(ha("humidity")), "relativeHumidity");
+  assert.equal(a(ha("pressure")), "barometricPressure");
+  assert.equal(a(ha("daily_precipitation")), "rainfall24h");
+  assert.equal(a(ha("wind_speed")), "windSpeed");
+  assert.equal(a(ha("daily_max_wind_speed")), "windGust");
+  // Lo que no cabe o no es lo que parece.
+  for (const x of ["dew_point", "wind_bearing", "uv_index", "feels_like", "battery"]) assert.equal(a(ha(x)), null, x);
+  assert.equal(a("x/event_count"), null);
+  // Con JSON, manda el campo.
+  assert.equal(a("zigbee2mqtt/Sensor temperatura", "humidity"), "relativeHumidity");
+  assert.equal(a("zigbee2mqtt/Sensor temperatura", "voltage"), null);
+  assert.equal(a("zigbee2mqtt/Huerto", "soil_moisture"), "soilMoisture");
+  assert.equal(a("tele/tasmota/SENSOR", "BME280.Pressure"), "barometricPressure");
+  assert.equal(a("shellies/ht/sensor/temperature"), "temperature");
+  assert.equal(a("estacio/pluviometre"), "rainfall24h");
+  // Unidades tal como las escribe Home Assistant.
+  assert.equal(unidadDe("windSpeed", "km/h"), "km/h");
+  assert.equal(unidadDe("barometricPressure", "mbar"), "hPa");
+  assert.equal(unidadDe("windSpeed", "kn"), null);
+});
