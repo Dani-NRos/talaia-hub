@@ -1,5 +1,5 @@
 // Vigía Mesh: guarda la app en el móvil para que abra sin internet.
-const CACHE = "vigia-mvd0k2tr";
+const CACHE = "vigia-mvdzw1c1";
 const SHELL = ["./", "./index.html", "./manifest.webmanifest", "./icon-192.png", "./icon-512.png", "./icon-maskable-512.png"];
 
 // Fondo del mapa (teselas de OpenStreetMap). Caché aparte, sin «vigia-» en el nombre: al actualizar la app

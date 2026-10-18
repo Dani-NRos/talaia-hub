@@ -14,7 +14,7 @@ import { crearMotor, estadoInicial, MESH_DEFAULT, MESH_HOURLY, ASK, ASK_ALL, ask
 const $ = (s, r = document) => r.querySelector(s);
 const $$ = (s, r = document) => [...r.querySelectorAll(s)];
 const esc = (s) => String(s ?? "").replace(/[&<>"']/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[c]));
-const APP_VERSION = "1.13.0";
+const APP_VERSION = "1.13.1";
 const REPO_URL = "https://github.com/Dani-NRos/vigia-mesh";
 const ISSUES_URL = `${REPO_URL}/issues`;
 
