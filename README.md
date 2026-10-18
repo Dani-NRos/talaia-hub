@@ -74,7 +74,8 @@ Los fallos y las sugerencias se recogen en los [avisos de GitHub](https://github
 La misma vigilancia funcionando las 24 horas en un ordenador con Linux (un mini PC o una Raspberry Pi) con un nodo
 enchufado por USB o accesible por la red: alarmas aunque no haya ningún móvil mirando, histórico en el propio
 servidor, avisos por la malla y conexión con Home Assistant por MQTT (los nodos vigilados aparecen como dispositivos,
-con sus lecturas, sus alarmas y «Enterado» desde Home Assistant). Se abre desde el navegador en la red de casa, con
+con sus lecturas, sus alarmas y «Enterado» desde Home Assistant). También puede mandar a la malla, como telemetría
+de su nodo, los datos de una estación meteorológica que lleguen por MQTT. Se abre desde el navegador en la red de casa, con
 esta misma pantalla, y todos tus aparatos ven lo mismo. Instalación y detalles en
 [`codigo/servidor`](codigo/servidor/README.md).
 

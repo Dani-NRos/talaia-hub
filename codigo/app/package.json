@@ -1,6 +1,6 @@
 {
   "name": "@vigia/app",
-  "version": "1.15.0",
+  "version": "1.16.0",
   "private": true,
   "description": "Vigía Mesh: la app web (PWA) por Bluetooth o cable USB",
   "license": "GPL-3.0-only",
