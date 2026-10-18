@@ -73,16 +73,18 @@ Los fallos y las sugerencias se recogen en los [avisos de GitHub](https://github
 
 La misma vigilancia funcionando las 24 horas en un ordenador con Linux (un mini PC o una Raspberry Pi) con un nodo
 enchufado por USB o accesible por la red: alarmas aunque no haya ningún móvil mirando, histórico en el propio
-servidor y avisos por la malla. Se abre desde el navegador en la red de casa, con esta misma pantalla, y todos tus
-aparatos ven lo mismo. Instalación y detalles en [`codigo/servidor`](codigo/servidor/README.md).
+servidor, avisos por la malla y conexión con Home Assistant por MQTT (los nodos vigilados aparecen como dispositivos,
+con sus lecturas, sus alarmas y «Enterado» desde Home Assistant). Se abre desde el navegador en la red de casa, con
+esta misma pantalla, y todos tus aparatos ven lo mismo. Instalación y detalles en
+[`codigo/servidor`](codigo/servidor/README.md).
 
 ## Código fuente
 
-El código está en la carpeta [`codigo/`](codigo/), en dos partes:
+El código está en la carpeta [`codigo/`](codigo/), en tres partes:
 
 - [`codigo/nucleo/`](codigo/nucleo/): la lógica sin pantalla (alarmas, peticiones a nodos, rutas, avisos por la malla, conexión con el nodo). La comparten la app y el servidor.
 - [`codigo/app/`](codigo/app/): la app web (pantalla, Bluetooth, cable USB, mapa y demo).
-- [`codigo/servidor/`](codigo/servidor/): Vigía servidor (Node.js, SQLite, instalador para Linux).
+- [`codigo/servidor/`](codigo/servidor/): Vigía servidor (Node.js, SQLite, MQTT, instalador para Linux).
 
 Para compilar y probar:
 

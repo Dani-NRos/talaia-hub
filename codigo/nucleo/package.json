@@ -1,6 +1,6 @@
 {
   "name": "@vigia/nucleo",
-  "version": "1.14.0",
+  "version": "1.15.0",
   "private": true,
   "description": "Lógica de Vigía Mesh sin pantalla: alarmas, peticiones, avisos por la malla y tramas. La usan la app y el servidor.",
   "license": "GPL-3.0-only",
