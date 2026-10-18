@@ -7,7 +7,8 @@
   "type": "module",
   "workspaces": [
     "nucleo",
-    "app"
+    "app",
+    "servidor"
   ],
   "scripts": {
     "build": "npm run build -w @vigia/app",

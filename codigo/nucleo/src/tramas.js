@@ -8,6 +8,21 @@
 // (puede pasar en un id de nodo o en datos cifrados) y no se recupera de una cabecera falsa con longitud imposible.
 
 const START1 = 0x94, START2 = 0xc3, MAX_LEN = 512;
+
+/**
+ * Fabricantes USB de los conversores y placas que llevan los nodos Meshtastic: para el selector de Chrome en la app
+ * y para encontrar el nodo enchufado en el servidor.
+ */
+export const USB_VENDORS = [
+  { vid: 0x303a, name: "Espressif" }, // USB del propio ESP32-S3/C3 (Heltec V4, T-Beam S3, Station G2…)
+  { vid: 0x10c4, name: "Silicon Labs CP210x" }, // Heltec V3, T-Beam…
+  { vid: 0x1a86, name: "WCH CH340/CH9102" }, // TTGO, LilyGO…
+  { vid: 0x0403, name: "FTDI" },
+  { vid: 0x239a, name: "Adafruit nRF52" }, // nRF52 con su cargador (RAK4631, T-Echo, DNN…)
+  { vid: 0x2886, name: "Seeed" }, // XIAO, T1000-E, Wio Tracker
+  { vid: 0x1915, name: "Nordic" },
+  { vid: 0x2e8a, name: "Raspberry Pi RP2040" },
+];
 // Sin un latido el firmware deja el modo API del puerto a los 15 min sin tráfico del cliente (también por TCP).
 export const HEARTBEAT_MS = 5 * 60000;
 export const HEARTBEAT = new Uint8Array([0x3a, 0x00]); // ToRadio { heartbeat: {} } (campo 7)

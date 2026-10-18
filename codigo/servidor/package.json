@@ -1,0 +1,26 @@
+{
+  "name": "@vigia/servidor",
+  "version": "1.13.1",
+  "private": true,
+  "description": "Vigía servidor: el motor de Vigía Mesh funcionando 24/7 en Linux, con histórico en SQLite",
+  "license": "GPL-3.0-only",
+  "type": "module",
+  "engines": {
+    "node": ">=22.13"
+  },
+  "bin": {
+    "vigia-servidor": "src/main.js"
+  },
+  "scripts": {
+    "start": "node src/main.js",
+    "test": "node --test --test-force-exit test/*.test.mjs"
+  },
+  "dependencies": {
+    "@meshtastic/core": "^2.6.7",
+    "@vigia/nucleo": "*",
+    "serialport": "^13.0.0"
+  },
+  "devDependencies": {
+    "@bufbuild/protobuf": "^2.2.3"
+  }
+}

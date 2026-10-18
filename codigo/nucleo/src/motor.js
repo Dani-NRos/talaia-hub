@@ -354,7 +354,7 @@ export function crearMotor(S, g = {}) {
     return `${name} · ${m.label} ${al.kind === "high" ? "por encima de" : "por debajo de"} ${fmtLimit(al.metric, al.limit, true)}`;
   }
   function alarmDetail(al) {
-    if (al.kind === "link") return `Reintentando la conexión${S.device?.kind === "serial" ? " por cable" : " Bluetooth"}. Las alarmas de nodo sin señal quedan en pausa.`;
+    if (al.kind === "link") return `Reintentando la conexión${S.device?.kind === "serial" ? " por cable" : S.device?.kind === "tcp" ? " por la red" : " Bluetooth"}. Las alarmas de nodo sin señal quedan en pausa.`;
     if (al.kind === "test") return "Así suena y se ve un aviso. Pulsa Enterado para callarlo.";
     if (al.kind === "offline") return `Último dato ${ago(al.value)} (${stamp(al.value)}).`;
     if (al.kind === "moved") {

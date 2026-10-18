@@ -2,7 +2,7 @@
 // Las tramas (cabecera 0x94 0xC3 y troceado propio) están en el núcleo: @vigia/nucleo/tramas.js.
 
 import { Types } from "@meshtastic/core";
-import { frame, createFramer, createLines, HEARTBEAT, HEARTBEAT_MS, DISCONNECT, wakeBytes } from "@vigia/nucleo/tramas.js";
+import { frame, createFramer, createLines, HEARTBEAT, HEARTBEAT_MS, DISCONNECT, wakeBytes, USB_VENDORS } from "@vigia/nucleo/tramas.js";
 
 export { frame, createFramer };
 
@@ -13,16 +13,7 @@ const BAUD = 115200;
  * Fabricantes USB de los conversores y placas que llevan los nodos Meshtastic, para el selector de Chrome.
  * Si el nodo no sale, «Ver todos los puertos» abre el selector sin filtro.
  */
-export const USB_FILTERS = [
-  0x303a, // Espressif, USB del propio ESP32-S3/C3 (Heltec V4, T-Beam S3, Station G2…)
-  0x10c4, // Silicon Labs CP210x (Heltec V3, T-Beam…)
-  0x1a86, // WCH CH340 / CH9102 (TTGO, LilyGO…)
-  0x0403, // FTDI
-  0x239a, // Adafruit: nRF52 con su cargador (RAK4631, T-Echo…)
-  0x2886, // Seeed (XIAO, T1000-E, Wio Tracker)
-  0x1915, // Nordic
-  0x2e8a, // Raspberry Pi (RP2040)
-].map((usbVendorId) => ({ usbVendorId }));
+export const USB_FILTERS = USB_VENDORS.map(({ vid }) => ({ usbVendorId: vid }));
 
 export class LinkError extends Error {
   /** stage: open (no se pudo abrir el puerto) | io | lost ; cause: error original */
