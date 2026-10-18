@@ -20,15 +20,26 @@ https://dani-nros.github.io/vigia-mesh/ . En camino: **Vigía servidor**, la mis
 codigo/                 raíz de npm workspaces: npm install, npm test, npm run build
   nucleo/               lógica sin pantalla, la usan la app y el servidor (@vigia/nucleo)
     src/motor.js        nodos, lecturas, alarmas, peticiones, traceroute, avisos por la malla, lo que llega del receptor
+    src/acciones.js     lo que cambia el usuario (vigilar, límites, valla, ajustes…): igual en la app y el servidor
+    src/receptor-base.js  ciclo de conexión, lectura inicial, reintentos y peticiones con id (app y servidor)
     src/textos.js       tiempos y textos comunes (dur, ago, stamp…)
     src/canales.js      qué canal es privado; recorte a 200 bytes
-    src/tramas.js       tramas del puerto serie (0x94 0xC3), troceado propio, latido, despertar
+    src/tramas.js       tramas del puerto serie (0x94 0xC3), troceado propio, latido, despertar, fabricantes USB
     src/metrics.js trend.js delivery.js route.js geo.js pb.js
   app/                  la PWA (@vigia/app)
-    src/app.js          pantalla; crea el motor con ganchos (redibujar, guardar en localStorage, sonar…) y radio
-    src/receptor.js     conexión al nodo (Bluetooth o cable), reconexión, peticiones con id capturado
-    src/ble.js serial.js store.js (IndexedDB) map.js mapdata.js meshsearch.js demo.js
+    src/app.js          pantalla; crea el motor con ganchos (redibujar, guardar en localStorage, sonar…) y radio.
+                        Con window.__VIGIA_SERVIDOR (lo pone el servidor al servirla) arranca en modo «Servidor»:
+                        estado del servidor por SSE y órdenes por POST (src/remoto.js)
+    src/receptor.js     conexión al nodo desde el navegador (Bluetooth o Web Serial)
+    src/ble.js serial.js store.js (IndexedDB) map.js mapdata.js meshsearch.js demo.js remoto.js
     index.src.html build.mjs pwa/
+  servidor/             Vigía servidor (@vigia/servidor), Node ≥ 22.13
+    src/main.js         arranque (systemd o a mano); src/vigia.js: motor + receptor + SQLite + tareas periódicas
+    src/receptor.js enlace.js puertos.js   nodo por USB (serialport, con binarios: no compila) o TCP 4403
+    src/almacen.js      SQLite (node:sqlite): lecturas y el estado que la app guarda en localStorage
+    src/web.js sincro.js  la app servida en la red de casa y su API (SSE + órdenes), sin contraseña (decisión de Dani)
+    instalar.sh sistema/  instalador (Node propio en /opt/vigia), servicio systemd y regla de udev
+    test/nodo-falso.mjs nodo Meshtastic simulado (protobuf de verdad) por TCP o puerto virtual
   dist/app/             app compilada (no va al repo)
 ```
 
@@ -36,12 +47,21 @@ El motor recibe el objeto de estado `S` (ver `estadoInicial()`) y ganchos; la ap
 No cambiar el formato de lo que se guarda en `localStorage` (`vigia.*`): la copia de `/beta/` comparte origen con la
 app instalada y lee y escribe los mismos datos.
 
+### Decisiones del servidor (Dani, 18 oct. 2026)
+
+- Nodo propio por USB para el servidor (su DNN 5); Home Assistant sigue con el suyo por WiFi.
+- Sin contraseña ni token: la red de casa es la protección. Puerto web 4404.
+- Manda por la malla todo lo que la app: peticiones que se pulsan y avisos automáticos de alarmas (si se activan).
+- Histórico de todos los nodos que oye el receptor, un año por defecto (`retencionDias`).
+- Con un año de todo, nada que recorra la tabla de lecturas entera en el camino normal: el total va en memoria y el
+  CSV sale por bloques.
+
 ## Publicar
 
 - Se desarrolla en la rama `mapa`; se publica subiendo `mapa:main`. GitHub Pages sirve `main` desde la raíz.
 - **Copia de pruebas**: compilar y copiar `codigo/dist/app` a `beta/` **sin `sw.js`** (para no tocar la app
   instalada), con un `beta/README.md` que lo explique. Commit «… (en pruebas en /beta/)».
-- **Publicar una versión**: subir la versión en los tres `package.json` (`codigo/`, `codigo/nucleo/`, `codigo/app/`) y
+- **Publicar una versión**: subir la versión en los `package.json` (`codigo/`, `nucleo/`, `app/`, `servidor/`) y
   `APP_VERSION` en `app.js`; compilar; copiar `codigo/dist/app/*` a la raíz; borrar `beta/`. Commit «Vigía Mesh X.Y: …».
 
 ## Comprobar que la app no cambia
@@ -70,7 +90,8 @@ imágenes con tolerancia de suavizado.
     Assistant mantiene el suyo por WiFi.
   - Sin tráfico del cliente, el modo API se corta a los 15 min (cable y TCP): mandar latido (`tramas.js`).
 
-## Pendiente conocido
+## Comportamiento aceptado
 
 - Avisos por la malla: si saltan varias alarmas en el mismo instante y van a un solo destino, salen seguidos sin los
-  8 s de separación (prueba `todo` en `nucleo/test/motor.test.mjs`). Falta que Dani decida si se arregla.
+  8 s de separación (los que se juntan en cola sí los respetan). Dani decidió dejarlo así (18 oct. 2026); el README ya
+  no promete los 8 s. Lo fija una prueba en `nucleo/test/motor.test.mjs`.

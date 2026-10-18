@@ -374,14 +374,14 @@ test("avisos por la malla: uno cada 8 s mientras hay cola, y como mucho 20 por h
   assert.ok(S.log.some((l) => l.text === `Avisos por la malla en pausa: ya van ${MESH_HOURLY} en la última hora (2 sin enviar)`));
 });
 
-// Fallo conocido de la 1.13, pendiente de decidir: si saltan varias alarmas en el mismo instante (una lectura de
-// ambiente con temperatura y humedad fuera de rango) y los avisos van a un solo destino, salen seguidos, sin los 8 s.
-test("dos alarmas a la vez con un solo destino también respetan los 8 s", { todo: "fallo conocido de la 1.13" }, async (t) => {
+// Aceptado (Dani, 18 oct. 2026): si saltan varias alarmas en el mismo instante (una lectura de ambiente con temperatura
+// y humedad fuera de rango) y los avisos van a un solo destino, salen seguidos, sin los 8 s. El nodo los pone en cola.
+test("dos alarmas a la vez con un solo destino salen seguidas (aceptado)", async (t) => {
   const mesh = { enabled: true, channel: 1, node: null, onClear: false };
   const { motor, enviados } = montar(t, { mesh, watched: { [CASETA]: vigilado({ temperature: { max: 30 }, relativeHumidity: { max: 80 } }) } });
   motor.ingest(CASETA, { temperature: 35, relativeHumidity: 90 }, T0);
   await flush();
-  assert.equal(enviados.length, 1);
+  assert.equal(enviados.length, 2);
 });
 
 test("sin receptor los avisos esperan en cola; si pasan 30 min se descartan", async (t) => {
