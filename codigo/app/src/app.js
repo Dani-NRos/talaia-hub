@@ -16,7 +16,7 @@ import { crearMotor, estadoInicial, MESH_DEFAULT, MESH_HOURLY, ASK, ASK_ALL, ask
 const $ = (s, r = document) => r.querySelector(s);
 const $$ = (s, r = document) => [...r.querySelectorAll(s)];
 const esc = (s) => String(s ?? "").replace(/[&<>"']/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[c]));
-const APP_VERSION = "1.13.1";
+const APP_VERSION = "1.14.0";
 // Abierta desde Vigía servidor: el estado es el del servidor y lo que se pulsa va a él como una orden.
 const SERVIDOR = typeof window !== "undefined" && !!window.__VIGIA_SERVIDOR;
 const REPO_URL = "https://github.com/Dani-NRos/vigia-mesh";

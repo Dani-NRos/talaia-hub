@@ -65,16 +65,24 @@ Los fallos y las sugerencias se recogen en los [avisos de GitHub](https://github
 
 ## Límites conocidos
 
-- **Solo en primer plano.** Las alarmas saltan con la app abierta y en pantalla; con el móvil bloqueado, Chrome congela la página. Al volver, la app recoge lo que guardó el receptor y marca como «recibida al reconectar» lo que pasó mientras tanto.
+- **Solo en primer plano.** Las alarmas saltan con la app abierta y en pantalla; con el móvil bloqueado, Chrome congela la página. Al volver, la app recoge lo que guardó el receptor y marca como «recibida al reconectar» lo que pasó mientras tanto. Para vigilar las 24 horas está [Vigía servidor](#vigía-servidor-en-pruebas).
 - **No es tiempo real.** La telemetría sale cada 30 min por defecto, así que una alarma de umbral puede llegar con ese retraso. En 868 MHz el tiempo de emisión está limitado: no conviene bajar mucho el intervalo.
 - **Nodos dormidos.** Un nodo en modo de ahorro de energía no escucha mientras duerme, así que no contesta a *Pedir datos ahora*.
+
+## Vigía servidor (en pruebas)
+
+La misma vigilancia funcionando las 24 horas en un ordenador con Linux (un mini PC o una Raspberry Pi) con un nodo
+enchufado por USB o accesible por la red: alarmas aunque no haya ningún móvil mirando, histórico en el propio
+servidor y avisos por la malla. Se abre desde el navegador en la red de casa, con esta misma pantalla, y todos tus
+aparatos ven lo mismo. Instalación y detalles en [`codigo/servidor`](codigo/servidor/README.md).
 
 ## Código fuente
 
 El código está en la carpeta [`codigo/`](codigo/), en dos partes:
 
-- [`codigo/nucleo/`](codigo/nucleo/): la lógica sin pantalla (alarmas, peticiones a nodos, rutas, avisos por la malla, tramas del puerto serie). La usará también el futuro servidor de Vigía.
+- [`codigo/nucleo/`](codigo/nucleo/): la lógica sin pantalla (alarmas, peticiones a nodos, rutas, avisos por la malla, conexión con el nodo). La comparten la app y el servidor.
 - [`codigo/app/`](codigo/app/): la app web (pantalla, Bluetooth, cable USB, mapa y demo).
+- [`codigo/servidor/`](codigo/servidor/): Vigía servidor (Node.js, SQLite, instalador para Linux).
 
 Para compilar y probar:
 
