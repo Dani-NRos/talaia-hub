@@ -21,14 +21,16 @@ integración de Meshtastic, el servidor necesita otro.
 
 ## Instalar
 
+Con `wget`, que viene en Ubuntu y en Raspberry Pi OS (con `curl` también vale: `curl -fsSL` en vez de `wget -qO-`):
+
 ```
-curl -fsSL https://raw.githubusercontent.com/Dani-NRos/vigia-mesh/main/codigo/servidor/instalar.sh | sudo bash
+wget -qO- https://raw.githubusercontent.com/Dani-NRos/vigia-mesh/main/codigo/servidor/instalar.sh | sudo bash
 ```
 
 Por defecto usa el nodo que haya enchufado por USB. Para un nodo por la red:
 
 ```
-curl -fsSL https://raw.githubusercontent.com/Dani-NRos/vigia-mesh/main/codigo/servidor/instalar.sh | sudo bash -s -- --tcp 192.168.1.60
+wget -qO- https://raw.githubusercontent.com/Dani-NRos/vigia-mesh/main/codigo/servidor/instalar.sh | sudo bash -s -- --tcp 192.168.1.60
 ```
 
 El instalador:
@@ -89,7 +91,7 @@ El diario dice qué pasa y qué hacer. Lo más habitual:
 ## Desinstalar
 
 ```
-curl -fsSL https://raw.githubusercontent.com/Dani-NRos/vigia-mesh/main/codigo/servidor/instalar.sh | sudo bash -s -- --desinstalar
+wget -qO- https://raw.githubusercontent.com/Dani-NRos/vigia-mesh/main/codigo/servidor/instalar.sh | sudo bash -s -- --desinstalar
 ```
 
 Los datos se quedan en `/var/lib/vigia`; con `--desinstalar --borrar-datos` se borran también.

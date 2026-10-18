@@ -1,7 +1,8 @@
 #!/usr/bin/env bash
 # Instala o actualiza Vigía servidor en Linux (Ubuntu, Debian, Raspberry Pi OS).
 #
-#   curl -fsSL https://raw.githubusercontent.com/Dani-NRos/vigia-mesh/main/codigo/servidor/instalar.sh | sudo bash
+#   wget -qO- https://raw.githubusercontent.com/Dani-NRos/vigia-mesh/main/codigo/servidor/instalar.sh | sudo bash
+#   (o con curl -fsSL en vez de wget -qO-)
 #
 # Opciones (detrás de «bash -s --» si va por tubería):
 #   --tcp HOST[:PUERTO]   el nodo por la red (WiFi/Ethernet o meshtasticd) en vez de por USB
@@ -94,9 +95,21 @@ case "$ARQ" in
   armv6l) falla "esta placa es ARMv6 (Raspberry Pi Zero W o 1): Node.js ya no funciona en ella. La Zero 2 W sí vale." ;;
   *) falla "arquitectura no soportada: $ARQ" ;;
 esac
-for orden in curl tar xz sha256sum; do
-  command -v "$orden" >/dev/null || falla "falta «$orden»: instálalo (sudo apt install curl tar xz-utils coreutils) y repite"
+for orden in tar xz sha256sum; do
+  command -v "$orden" >/dev/null || falla "falta «$orden»: instálalo (sudo apt install tar xz-utils coreutils) y repite"
 done
+# Descargas a la salida estándar, y quien llama decide dónde guardarlas: así sirve también el curl de snap, que tiene
+# su propio /tmp y no puede escribir donde le diga este script. Se prefiere el curl normal; si no, wget; si no, el de snap.
+CURL="$(command -v curl || true)"
+if [ -n "$CURL" ] && [ "${CURL#/snap/}" = "$CURL" ]; then
+  bajar() { curl -fsSL "$1"; }
+elif command -v wget >/dev/null; then
+  bajar() { wget -qO- "$1"; }
+elif [ -n "$CURL" ]; then
+  bajar() { curl -fsSL "$1" 2>/dev/null; }
+else
+  falla "hace falta curl o wget para descargar: sudo apt update && sudo apt install curl"
+fi
 
 # ── Node, propio de Vigía ──
 mkdir -p "$BASE"
@@ -105,7 +118,7 @@ if [ -n "$NODE_LOCAL" ]; then
   rm -rf "$BASE/node"; cp -a "$NODE_LOCAL" "$BASE/node"
   dice "Node $("$BASE/node/bin/node" --version) copiado de $NODE_LOCAL"
 else
-  SUMAS="$(curl -fsSL "$NODE_DIST/latest-v$NODE_RAMA.x/SHASUMS256.txt")" || falla "no se pudo consultar $NODE_DIST (¿hay internet?)"
+  SUMAS="$(bajar "$NODE_DIST/latest-v$NODE_RAMA.x/SHASUMS256.txt")" || falla "no se pudo consultar $NODE_DIST (¿hay internet?)"
   LINEA="$(printf '%s\n' "$SUMAS" | grep -E " node-v[0-9.]+-linux-$NODE_ARQ\.tar\.xz$" | head -1)"
   [ -n "$LINEA" ] || falla "$NODE_DIST no tiene Node $NODE_RAMA para linux-$NODE_ARQ"
   FICHERO="${LINEA##* }"
@@ -116,7 +129,7 @@ else
   else
     dice "Descargando Node $VERSION_NODE ($NODE_ARQ)…"
     TMP="$(mktemp -d)"; trap 'rm -rf "$TMP"' EXIT
-    curl -fsSL -o "$TMP/$FICHERO" "$NODE_DIST/$VERSION_NODE/$FICHERO"
+    bajar "$NODE_DIST/$VERSION_NODE/$FICHERO" > "$TMP/$FICHERO" || falla "no se pudo descargar Node de $NODE_DIST"
     (cd "$TMP" && printf '%s\n' "$LINEA" | sha256sum -c --quiet -) || falla "la descarga de Node no coincide con su suma de comprobación"
     mkdir -p "$TMP/node" && tar -xJf "$TMP/$FICHERO" -C "$TMP/node" --strip-components=1
     rm -rf "$BASE/node" && mv "$TMP/node" "$BASE/node"
@@ -135,13 +148,13 @@ if [ -n "$CODIGO_LOCAL" ]; then
   # Solo el código: sin node_modules ni compilados de la copia local.
   tar -C "$CODIGO_LOCAL/codigo" --exclude=node_modules --exclude=dist -cf - . | tar -C "$DEST" -xf -
 else
-  COMMIT="$(curl -fsSL "https://api.github.com/repos/$REPO/commits/$RAMA" 2>/dev/null | grep -m1 '"sha"' | sed -E 's/.*"([0-9a-f]{40})".*/\1/' || true)"
+  COMMIT="$(bajar "https://api.github.com/repos/$REPO/commits/$RAMA" 2>/dev/null | grep -m1 '"sha"' | sed -E 's/.*"([0-9a-f]{40})".*/\1/' || true)"
   REF="${COMMIT:-$RAMA}"
   ID="$(date +%Y%m%d-%H%M%S)-${REF:0:7}"
   DEST="$BASE/versiones/$ID"
   dice "Descargando Vigía (rama $RAMA${COMMIT:+, ${COMMIT:0:7}})…"
   TMPC="$(mktemp -d)"
-  curl -fsSL "https://codeload.github.com/$REPO/tar.gz/$REF" | tar -xz -C "$TMPC" --strip-components=1 || falla "no se pudo descargar el programa de GitHub"
+  bajar "https://codeload.github.com/$REPO/tar.gz/$REF" | tar -xz -C "$TMPC" --strip-components=1 || falla "no se pudo descargar el programa de GitHub"
   mkdir -p "$DEST" && cp -a "$TMPC/codigo/." "$DEST/" && rm -rf "$TMPC"
 fi
 dice "Instalando lo que necesita el servidor y compilando la pantalla…"
