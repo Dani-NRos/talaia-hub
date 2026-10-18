@@ -2,7 +2,8 @@
 // Funciona 24/7: alarmas, histórico y registro aunque no haya nadie mirando.
 import path from "node:path";
 import { EventEmitter } from "node:events";
-import { crearMotor, estadoInicial, INFO_SUPPRESS, seriesKey } from "@vigia/nucleo/motor.js";
+import { crearMotor, estadoInicial, INFO_SUPPRESS } from "@vigia/nucleo/motor.js";
+import { crearAcciones } from "@vigia/nucleo/acciones.js";
 import { HOUR, DAY } from "@vigia/nucleo/textos.js";
 import { abrirAlmacen } from "./almacen.js";
 import { ReceptorNodo, CONSEJO } from "./receptor.js";
@@ -50,7 +51,7 @@ export async function crearVigia(config, registro, opts = {}) {
     channels: () => almacen.guardar("channels", S.channels),
     lora: () => almacen.guardar("lora", S.lora),
     my: () => almacen.guardar("my", S.myNode),
-    settings: () => almacen.guardar("settings", S.settings),
+    settings: () => almacen.guardar("settings", { defaultOfflineMin: S.settings.defaultOfflineMin, retentionDays: S.settings.retentionDays, mesh: S.settings.mesh }),
   };
   // Lo que entra en el registro de Vigía (alarmas, Enterado, peticiones, avisos) va también al del sistema.
   let ultimo = S.log[0] || null;
@@ -94,16 +95,9 @@ export async function crearVigia(config, registro, opts = {}) {
     eventos.emit("diag", e);
   }
 
-  /* ── histórico reciente de los nodos vigilados (para el cambio rápido) ── */
-  const desde = Date.now() - 26 * HOUR;
-  for (const num of Object.keys(S.cfg.watched).map(Number)) {
-    const n = S.nodes.get(num);
-    if (!n) continue;
-    for (const k of Object.keys(n.metrics || {})) {
-      const ser = await S.store.series(num, k, desde);
-      if (ser.length) S.recent.set(seriesKey(num, k), ser);
-    }
-  }
+  /* ── acciones del usuario (las mismas que en la app) y lecturas recientes de los vigilados ── */
+  const acciones = crearAcciones(motor);
+  await acciones.cargarRecientes();
 
   /* ── receptor ── */
   let avisados = 0;
@@ -177,7 +171,7 @@ export async function crearVigia(config, registro, opts = {}) {
   const resumenId = setInterval(resumen, HOUR);
 
   return {
-    S, motor, almacen, eventos,
+    S, motor, acciones, almacen, eventos,
     get receptor() { return receptor; },
     /** Empieza a conectar con el receptor (y a reintentar mientras no se pare). */
     arrancar() {

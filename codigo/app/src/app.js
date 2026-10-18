@@ -7,7 +7,8 @@ import { relays, snrQuality, loraSf, weakest, UNKNOWN_NODE, PRESET_NAME } from "
 import { distM, compass, precisionM, fmtDist, coordText, mapsUrl, SOURCE } from "@vigia/nucleo/geo.js";
 import { trendDefault, parseTrendRule } from "@vigia/nucleo/trend.js";
 import { searchNodes, highlight, tokens, FILTERS, SORTS } from "./meshsearch.js";
-import { MIN, HOUR, DAY, isNum, hhmm, dShort, dur, ago, stamp, trendDec, fmtTrend, trendVerb, hoursText, lastWindow } from "@vigia/nucleo/textos.js";
+import { MIN, HOUR, DAY, isNum, hhmm, dShort, ago, stamp, trendDec, fmtTrend, trendVerb, hoursText, lastWindow } from "@vigia/nucleo/textos.js";
+import { crearAcciones } from "@vigia/nucleo/acciones.js";
 import { crearMotor, estadoInicial, MESH_DEFAULT, MESH_HOURLY, ASK, ASK_ALL, askKey, RE, INFO_SUPPRESS, seriesKey, trendKey, hexId } from "@vigia/nucleo/motor.js";
 
 /* ───────────── utilidades ───────────── */
@@ -80,10 +81,12 @@ const motor = crearMotor(S, {
   },
 });
 const {
-  node, nodeName, isWatched, ingest, evalThreshold, evalNode, trendNow, evalTrend, evalOffline, raise, clearAlarm,
+  node, nodeName, isWatched, ingest, evalNode, trendNow, evalOffline, raise, clearAlarm,
   ack, ackAll, unacked, alarmTitle, alarmDetail, addLog, canAsk, askVisible, askFailText, receptorUsesPki, keyNeeded,
-  staleKeyFail, ask, resetAsks, hopName, meshCfg, meshNotify, pumpMesh,
+  staleKeyFail, ask, resetAsks, hopName, meshCfg, pumpMesh,
 } = motor;
+// Lo que cambia el usuario (vigilar, límites, valla, ajustes…): lo mismo que hará el servidor con sus órdenes.
+const acciones = crearAcciones(motor);
 
 /* ───────────── persistencia (solo modo real) ───────────── */
 function saveCfg() { if (!S.demo) LS.set("vigia.cfg", S.cfg); }
@@ -124,6 +127,7 @@ const SAVE = {
   channels: () => LS.set("vigia.channels", S.channels),
   lora: () => LS.set("vigia.lora", S.lora),
   my: () => LS.set("vigia.my", S.myNode),
+  settings: saveSettings,
 };
 
 /* ───────────── cambio rápido (tendencia) ───────────── */
@@ -284,26 +288,24 @@ function refreshPos(num) {
 }
 
 function setFence(num) {
-  const r = parseNum($("#fence-r")?.value);
-  if (!r || Number.isNaN(r) || r < 20) return toast("Pon un radio de 20 m o más.");
-  if (!motor.setFence(num, r)) return;
+  const res = acciones.fijarValla(num, parseNum($("#fence-r")?.value));
+  if (res.error) return toast(res.error);
+  if (!res.ok) return;
   refreshPos(num);
   render();
-  toast("Valla fijada en su posición actual");
+  toast(res.toast);
 }
 function setFenceRadius(num, input) {
-  const w = S.cfg.watched[num];
-  if (!w?.fence) return;
-  const r = parseNum(input.value);
-  if (!r || Number.isNaN(r) || r < 20) { input.value = w.fence.r; return toast("Pon un radio de 20 m o más."); }
-  motor.setFenceRadius(num, r);
+  const res = acciones.radioValla(num, parseNum(input.value));
+  if (res.error) { input.value = res.radio; return toast(res.error); }
+  if (!res.ok) return;
   input.blur();
   refreshPos(num);
   render();
-  toast(`Radio de la valla: ${fmtDist(w.fence.r)}`);
+  toast(res.toast);
 }
 function delFence(num) {
-  if (!motor.delFence(num)) return;
+  if (!acciones.quitarValla(num).ok) return;
   refreshPos(num);
   render();
 }
@@ -334,7 +336,6 @@ setInterval(() => {
 }, 1000);
 
 /* ───────────── avisos por la malla ───────────── */
-function saveMeshCfg() { if (!S.demo) saveSettings(); }
 
 function meshLastHTML() {
   const l = S.meshLast;
@@ -1247,32 +1248,22 @@ function saveRuleFromInput(inp) {
   if (!w) return;
   const err = $("#ruleErr");
   if (inp.id === "r-off") {
-    const v = parseNum(inp.value);
-    if (Number.isNaN(v) || (v !== null && v < 1)) { showErr(err, "Pon un número de minutos (1 o más) o déjalo vacío."); inp.focus(); return; }
-    w.offlineMin = v === null ? 0 : Math.round(v);
+    const res = acciones.ponerSinSenal(num, parseNum(inp.value));
+    if (res.error) { showErr(err, res.error); inp.focus(); return; }
     err.hidden = true;
-    saveCfg();
-    evalOffline();
     render();
-    toast(v === null ? "Aviso de nodo sin señal desactivado" : `Avisará tras ${dur(w.offlineMin * MIN)} sin señal`);
+    toast(res.toast);
     return;
   }
   const k = inp.dataset.rule, side = inp.dataset.side;
   const v = parseNum(inp.value);
   if (Number.isNaN(v)) { showErr(err, `“${inp.value}” no es un número. Usa coma o punto para los decimales.`); inp.focus(); return; }
-  w.rules = w.rules || {};
-  const r = { ...(w.rules[k] || {}) };
-  if (v === null) delete r[side]; else r[side] = v;
-  if (isNum(r.min) && isNum(r.max) && r.min >= r.max) { showErr(err, `En ${metricMeta(k).label.toLowerCase()} el mínimo tiene que ser menor que el máximo.`); inp.focus(); return; }
+  const res = acciones.ponerLimite(num, k, side, v);
+  if (res.error) { showErr(err, res.error); inp.focus(); return; }
   err.hidden = true;
-  if (isNum(r.min) || isNum(r.max) || r.trend) w.rules[k] = r; else delete w.rules[k];
-  saveCfg();
-  const cur = S.nodes.get(num)?.metrics[k];
-  if (cur) evalThreshold(num, k, cur.v, cur.t);
-  else { clearAlarm(`${num}|${k}|high`, { silent: true }); clearAlarm(`${num}|${k}|low`, { silent: true }); }
   render();
   drawCharts();
-  toast("Límite guardado");
+  toast(res.toast);
 }
 function showErr(el, msg) { el.textContent = msg; el.hidden = false; }
 
@@ -1331,49 +1322,35 @@ function addTrend(num) {
   const delta = parseNum($("#tr-delta").value), hours = parseNum($("#tr-hours").value);
   const { rule, error } = parseTrendRule($("#tr-dir").value, delta ?? NaN, hours ?? NaN);
   if (error) { showErr(err, error); return; }
-  w.rules = w.rules || {};
-  const had = !!w.rules[k]?.trend;
-  w.rules[k] = { ...(w.rules[k] || {}), trend: rule };
-  saveCfg();
-  addLog("info", `${nodeName(num)} · Aviso de cambio rápido: ${metricMeta(k).label} si ${trendVerb(rule.dir)} ${fmtLimit(k, rule.delta, true)} o más en ${hoursText(rule.hours)}`, num);
-  evalTrend(num, k, { strict: true });
+  const res = acciones.ponerTendencia(num, k, rule);
+  if (res.error) { showErr(err, res.error); return; }
   refreshTrend(num, k);
   render();
-  toast(had ? "Aviso de cambio rápido actualizado" : "Aviso de cambio rápido añadido");
+  toast(res.toast);
 }
 function delTrend(num, k) {
-  const w = S.cfg.watched[num];
-  if (!w?.rules?.[k]?.trend) return;
-  delete w.rules[k].trend;
-  if (!Object.keys(w.rules[k]).length) delete w.rules[k];
-  saveCfg();
-  clearAlarm(trendKey(num, k), { silent: true });
-  addLog("info", `${nodeName(num)} · Quitado el aviso de cambio rápido de ${metricMeta(k).label.toLowerCase()}`, num);
+  const res = acciones.quitarTendencia(num, k);
+  if (!res.ok) return;
   refreshTrend(num);
   render();
-  toast("Aviso quitado");
+  toast(res.toast);
 }
 
 function watch(num) {
-  if (isWatched(num)) return;
-  S.cfg.watched[num] = { offlineMin: S.settings.defaultOfflineMin, rules: {} };
-  saveCfg();
-  loadRecent([num]).then(render);
-  addLog("info", `Vigilando ${nodeName(num)}`, num);
-  evalNode(num);
+  const res = acciones.vigilar(num);
+  if (!res.ok) return;
+  res.recientes.then(render);
   render();
   if (S.detail?.num === num && $("#detail").open) { renderDetail(); drawCharts(); }
-  toast(`${nodeName(num)} fijado arriba. Ponle límites en su ficha.`);
+  toast(res.toast);
 }
 
 function unwatch(num) {
-  delete S.cfg.watched[num];
-  saveCfg();
+  acciones.dejarDeVigilar(num);
+  // Lo de la pantalla (tarjeta contraída, orden) es de este aparato.
   delete S.ui.collapsed[num];
   S.ui.order = S.ui.order.filter((n) => n !== num);
   saveUi();
-  for (const k of [...S.active.keys()]) if (S.active.get(k).num === num) clearAlarm(k, { silent: true });
-  addLog("info", `Ya no se vigila ${nodeName(num)}`, num);
   render();
 }
 
@@ -1685,18 +1662,7 @@ function stopDemo() {
   render();
 }
 
-async function loadRecent(nums) {
-  const list = nums || Object.keys(S.cfg.watched).map(Number);
-  const since = Date.now() - 26 * HOUR;
-  for (const num of list) {
-    const n = S.nodes.get(num);
-    if (!n) continue;
-    for (const k of Object.keys(n.metrics)) {
-      const ser = await S.store.series(num, k, since);
-      if (ser.length) S.recent.set(seriesKey(num, k), ser);
-    }
-  }
-}
+const loadRecent = (nums) => acciones.cargarRecientes(nums);
 
 /* ───────────── toast ───────────── */
 let toastT = null;
@@ -1761,8 +1727,8 @@ document.addEventListener("click", async (ev) => {
   }
   if ("diag" in ds) { openSettings(); setTimeout(() => $("#diagBox")?.scrollIntoView({ block: "start" }), 50); return; }
   if ("meshTest" in ds) {
-    if (!S.demo && S.link.state !== "ready") return toast("Conecta el receptor para enviar la prueba.");
-    meshNotify("test");
+    const res = acciones.pruebaMalla();
+    if (res.toast) toast(res.toast);
     return;
   }
   if ("copyDiag" in ds) {
@@ -1797,11 +1763,10 @@ document.addEventListener("click", async (ev) => {
   if ("wipe" in ds) {
     if (Date.now() - wipeArmed > 4000) { wipeArmed = Date.now(); t.textContent = "Toca otra vez para borrar"; return; }
     wipeArmed = 0;
-    await S.store.clear();
-    S.recent = new Map();
+    const res = await acciones.borrarHistorico();
     renderSettings();
     render();
-    return toast("Histórico borrado");
+    return toast(res.toast);
   }
   if ("wipeTiles" in ds) {
     try { await caches.delete(TILE_CACHE); } catch { /* nada que borrar */ }
@@ -1880,34 +1845,23 @@ document.addEventListener("change", (ev) => {
   if (t.id === "setSound") { S.settings.sound = t.checked; saveSettings(); if (t.checked) { unlockAudio(); beep(); } return; }
   if (t.id === "setWake") { S.settings.wake = t.checked; saveSettings(); return applyWake(); }
   if (t.id === "setOff") {
-    const v = parseNum(t.value);
-    if (!v || Number.isNaN(v) || v < 1) { t.value = S.settings.defaultOfflineMin; return toast("Pon un número de minutos (1 o más)."); }
-    S.settings.defaultOfflineMin = Math.round(v);
-    saveSettings();
-    return toast("Guardado");
+    const res = acciones.sinSenalPorDefecto(parseNum(t.value));
+    if (res.error) { t.value = res.valor; return toast(res.error); }
+    return toast(res.toast);
   }
   if (t.id === "meshOn" || t.id === "meshClear") {
-    const cfg = meshCfg();
-    if (t.id === "meshOn") cfg.enabled = t.checked; else cfg.onClear = t.checked;
-    saveMeshCfg();
-    if (t.id === "meshOn" && t.checked && cfg.channel == null && cfg.node == null) toast("Elige ahora un canal privado o un nodo.");
+    const res = acciones.avisosMalla(t.id === "meshOn" ? { enabled: t.checked } : { onClear: t.checked });
+    if (res.toast) toast(res.toast);
     return;
   }
   if (t.id === "meshCh" || t.id === "meshNode") {
-    const cfg = meshCfg();
     const v = t.value === "" ? null : Number(t.value);
-    if (t.id === "meshCh") {
-      const ch = S.channels.find((c) => c.index === v);
-      if (v != null && !ch?.private) { t.value = ""; cfg.channel = null; saveMeshCfg(); return toast("Ese canal es público: no se puede usar para avisos."); }
-      cfg.channel = v;
-    } else cfg.node = v;
-    saveMeshCfg();
+    const res = acciones.avisosMalla(t.id === "meshCh" ? { channel: v } : { node: v });
+    if (!res.ok) { t.value = ""; return toast(res.toast); }
     return renderSettings();
   }
   if (t.id === "setRet") {
-    S.settings.retentionDays = Number(t.value);
-    saveSettings();
-    S.store.prune(Date.now() - S.settings.retentionDays * DAY).then(renderSettings);
+    acciones.retencion(Number(t.value)).poda.then(renderSettings);
   }
 });
 

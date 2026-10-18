@@ -912,5 +912,7 @@ export function crearMotor(S, g = {}) {
     setChannel, meshCfg, meshTargets, meshText, meshNotify, pumpMesh,
     // lo que llega del receptor
     recibir,
+    // guardar una parte del estado (lo usan las acciones)
+    guardar: save,
   };
 }
