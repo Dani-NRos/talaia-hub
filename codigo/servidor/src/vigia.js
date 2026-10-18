@@ -35,7 +35,14 @@ export async function crearVigia(config, registro, opts = {}) {
   S.traces = almacen.leer("traces", {}) || {};
   S.lora = almacen.leer("lora", null);
   // Si el disco falla, se apunta y se sigue vigilando.
-  S.store = { ...almacen.lecturas, add: (rows) => (cerrado ? Promise.resolve() : almacen.lecturas.add(rows).catch((e) => registro.error(`No se pudo guardar una lectura: ${e.message}`))) };
+  S.store = {
+    ...almacen.lecturas,
+    add(rows) {
+      if (cerrado) return Promise.resolve();
+      eventos.emit("filas", rows);
+      return almacen.lecturas.add(rows).catch((e) => registro.error(`No se pudo guardar una lectura: ${e.message}`));
+    },
+  };
 
   /* ── guardado ── */
   let cerrado = false;
@@ -76,7 +83,12 @@ export async function crearVigia(config, registro, opts = {}) {
     alarma: (al) => eventos.emit("alarma", al),
     toast: (msg) => { registro.info(msg); eventos.emit("toast", msg); },
     diag: (e) => diag(e),
-    guardar: (k) => { if (!cerrado) GUARDAR[k]?.(); },
+    guardar: (k) => {
+      if (cerrado) return;
+      GUARDAR[k]?.();
+      eventos.emit("parte", k === "my" ? "myNode" : k);
+      if (k === "cfg") eventos.emit("parte", "recent"); // vigilar o dejar de vigilar cambia qué series van
+    },
     radio: {
       listo: () => !!receptor?.mesh,
       requestTelemetry: (...a) => receptor.requestTelemetry(...a),

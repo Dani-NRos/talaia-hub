@@ -60,6 +60,15 @@ try {
   process.exit(1);
 }
 vigia.arrancar();
+const { crearWeb, direcciones } = await import("./web.js");
+const web = crearWeb(vigia, config, registro);
+try {
+  const puerto = await web.escuchar();
+  const dirs = direcciones(puerto);
+  registro.info(`Pantalla: ${dirs.length ? dirs.join(" · ") : `puerto ${puerto}`}`);
+} catch (e) {
+  registro.error(`No se pudo abrir la pantalla en el puerto ${config.web.puerto}: ${e.code === "EADDRINUSE" ? "otro programa ya lo usa; cambia web.puerto en la configuración" : e.message}`);
+}
 
 let parando = false;
 async function parar(senal) {
@@ -67,7 +76,7 @@ async function parar(senal) {
   parando = true;
   registro.info(`Parando (${senal})…`);
   const t = setTimeout(() => process.exit(0), 5000);
-  try { await vigia.detener(); } catch (e) { registro.error(`Al parar: ${e.message}`); }
+  try { await web.cerrar(); await vigia.detener(); } catch (e) { registro.error(`Al parar: ${e.message}`); }
   clearTimeout(t);
   process.exit(0);
 }

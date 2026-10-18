@@ -144,8 +144,9 @@ else
   curl -fsSL "https://codeload.github.com/$REPO/tar.gz/$REF" | tar -xz -C "$TMPC" --strip-components=1 || falla "no se pudo descargar el programa de GitHub"
   mkdir -p "$DEST" && cp -a "$TMPC/codigo/." "$DEST/" && rm -rf "$TMPC"
 fi
-dice "Instalando lo que necesita el servidor…"
-(cd "$DEST" && "$BASE/node/bin/npm" ci --omit=dev -w @vigia/servidor --no-audit --no-fund --loglevel=error) || falla "npm no pudo instalar las dependencias"
+dice "Instalando lo que necesita el servidor y compilando la pantalla…"
+(cd "$DEST" && "$BASE/node/bin/npm" ci --omit=dev -w @vigia/servidor -w @vigia/app --no-audit --no-fund --loglevel=error) || falla "npm no pudo instalar las dependencias"
+(cd "$DEST" && "$BASE/node/bin/npm" run build -w @vigia/app --silent >/dev/null) || falla "no se pudo compilar la pantalla"
 VERSION_VIGIA="$("$NODE" "$DEST/servidor/src/main.js" --version)" || falla "el programa instalado no arranca"
 ln -sfn "$DEST" "$BASE/actual.nuevo" && mv -Tf "$BASE/actual.nuevo" "$BASE/actual"
 # Se guardan las tres últimas versiones, para volver atrás si hace falta.
@@ -214,6 +215,13 @@ if con_systemd; then
   journalctl -u "$SERVICIO" -n 12 --no-pager -o cat 2>/dev/null || true
 fi
 
+echo
+IPS="$(hostname -I 2>/dev/null | tr ' ' '\n' | grep -E '^[0-9.]+$' | head -3 || true)"
+PUERTO_WEB="$("$NODE" -e 'import("'"$BASE"'/actual/servidor/src/config.js").then((m) => console.log(m.leerConfig(process.argv[1]).web.puerto))' "$ETC/servidor.json" 2>/dev/null || echo 4404)"
+if [ -n "$IPS" ]; then
+  dice "Pantalla en la red de casa:"
+  for ip in $IPS; do echo "    http://$ip:$PUERTO_WEB"; done
+fi
 echo
 dice "Hecho. Para seguirlo:"
 echo "    journalctl -u $SERVICIO -f          lo que va pasando"
