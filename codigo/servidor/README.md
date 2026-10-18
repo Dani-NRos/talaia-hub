@@ -177,3 +177,54 @@ homeassistant/…/vigia_…/config   autodescubrimiento de Home Assistant (reten
 
 **Sin contraseña en la pantalla**: cualquiera en tu WiFi puede cambiar a qué broker se conecta el servidor o apagar
 MQTT (no ver la contraseña guardada).
+
+## De MQTT a la malla (una estación)
+
+Los datos de una estación que lleguen por MQTT (una estación meteorológica en Home Assistant, un sensor de
+zigbee2mqtt…) salen cada cierto tiempo a la malla como **telemetría de ambiente del receptor**, como si tuviera esos
+sensores: la app de Meshtastic y Vigía los ven en sus gráficas. El servidor los guarda además como lecturas del
+receptor, así que tienen gráficas, alarmas (vigilando el receptor) e histórico como cualquier nodo.
+
+Se configura en Ajustes → *De MQTT a la malla* (viene apagado; hace falta MQTT conectado):
+
+- **Cada** cuánto (por defecto, 30 minutos, a las en punto y a las y media), **por qué canal** y con **cuántos
+  saltos** (por defecto, los del receptor).
+- **Los datos**: qué es cada uno (temperatura, humedad, presión, viento, racha, lluvia…), el tema MQTT y, si llega
+  un JSON, el campo (`humidity`, o `datos.humedad` si va dentro de otro). Si el viento llega en km/h o la temperatura
+  en °F, se elige la unidad y Vigía la pasa a la de Meshtastic. Un valor imposible (la presión en Pa en vez de hPa)
+  no se manda. Debajo de cada dato se ve el último valor que ha llegado.
+- **Buscar temas** escucha el broker unos segundos y ofrece los temas con números para elegirlos al escribir.
+- **Enviar ahora** manda lo que haya sin esperar (como mucho, uno por minuto).
+
+Lo que hay que saber:
+
+- **Un dato de cada tipo.** La telemetría de Meshtastic no lleva nombres: tiene un hueco por tipo de dato. Con un
+  receptor se manda una temperatura, una humedad… (una estación), no varias temperaturas.
+- **Salen como medidos por el receptor y en su posición.** Para una estación del barrio, bien; para datos de otro
+  sitio, quien los vea en el mapa los pondrá donde está el receptor.
+- **Si el receptor tiene sensores de ambiente propios**, sus valores se mezclarían con los de la estación.
+- **«No disponible» no se manda.** Si Home Assistant dice `unavailable` o `unknown`, ese dato no sale. Como Home
+  Assistant solo publica cuando el valor cambia (la lluvia puede estar a 0 días), por defecto se manda el último que
+  llegó; en cada dato se puede elegir dejar de mandarlo si lleva 1, 3, 12 o 24 h sin llegar nada nuevo.
+- **Canal público o privado.** Por un canal público lo ve cualquiera y puede acabar en los mapas de internet; para
+  una estación del barrio puede tener sentido, para datos de casa, mejor uno privado. El firmware manda su propia
+  telemetría por el canal principal; por otro canal la ven quienes lo tengan.
+- **Lluvia 24 h** es «las últimas 24 horas»: si tu estación da «lluvia de hoy», saldrá con ese nombre.
+- En el diario sale cada fallo (una vez, no cada media hora) y cuando vuelve a salir bien.
+
+**Desde Home Assistant**, sus sensores no salen por MQTT por su cuenta. Con `mqtt_statestream` en
+`configuration.yaml` (y reiniciar Home Assistant):
+
+```yaml
+mqtt_statestream:
+  base_topic: ha_estados
+  include:
+    entities:
+      - sensor.estacion_temperatura
+      - sensor.estacion_humedad
+      - sensor.estacion_presion
+      - sensor.estacion_viento
+```
+
+Cada uno sale en `ha_estados/sensor/estacion_temperatura/state` (retenido: Vigía lo tiene nada más conectar). No
+incluyas los sensores «Vigía · …»: Vigía rechaza sus propios temas para no mandar a la malla lo que ya viene de ella.

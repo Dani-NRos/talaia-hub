@@ -13,7 +13,7 @@ const PW_DIR = process.env.PLAYWRIGHT_DIR || "/opt/npm-tools/node_modules/";
 const pw = createRequire(PW_DIR)("playwright");
 const { NodoFalso, ME, CASETA, VECINO, PORT } = await import(`${REPO}/servidor/test/nodo-falso.mjs`);
 const req = createRequire(`${REPO}/servidor/`);
-const { create, toBinary } = req("@bufbuild/protobuf");
+const { create, toBinary, fromBinary } = req("@bufbuild/protobuf");
 const { Protobuf } = await import(`${REPO}/node_modules/@meshtastic/core/dist/mod.js`);
 const M = Protobuf.Mesh, TEL = Protobuf.Telemetry;
 const { pathToFileURL } = await import("node:url");
@@ -220,6 +220,68 @@ await paso("Enterado desde Home Assistant queda visto en las pantallas", async (
   await esperarMqtt(() => JSON.parse(visto.get(`vigia/nodo/${ID}/estado`) || "{}").d?.temperature_alta?.visto === true, "vista en HA");
   const act = (await (await fetch(`${URL0}api/estado`)).json()).active;
   if (!act.some((a) => a.acked)) throw new Error(`en el servidor: ${JSON.stringify(act.map((a) => [a.key, a.acked]))}`);
+});
+
+// La estación: lo que Home Assistant (mqtt_statestream) y zigbee2mqtt publican sale a la malla como del receptor.
+const T_TEMP = "ha_estados/sensor/estacion_temperatura/state", T_VIENTO = "ha_estados/sensor/estacion_viento/state", T_Z2M = "zigbee2mqtt/Estación";
+await ha.publishAsync(T_TEMP, "19.6", { retain: true });
+await ha.publishAsync(T_VIENTO, "18", { retain: true });
+await ha.publishAsync(T_Z2M, JSON.stringify({ humidity: 64, pressure: 1014.8, battery: 90 }), { retain: true });
+const fila = (page, i, k) => page.locator(`#estDatos .est-d:nth-child(${i + 1}) [data-est-k="${k}"]`);
+/** Foto de un apartado de Ajustes entero: la ventana, alta para que quepa (Ajustes tiene su propio desplazamiento). */
+async function fotoApartado(page, sel, nombre) {
+  const vp = page.viewportSize();
+  await page.setViewportSize({ width: vp.width, height: 4000 });
+  await sleep(300);
+  await page.locator(sel).screenshot({ path: path.join(out, `${nombre}.png`) });
+  await page.setViewportSize(vp);
+}
+
+await paso("estación desde Ajustes: buscar temas, cuatro datos (viento en km/h), canal privado; se ven los valores", async () => {
+  await pc.click("#setBtn");
+  await sleep(400);
+  await fotoApartado(pc, "#estBox", "estacion-vacia");
+  await pc.click("[data-est-buscar]");
+  await esperarTexto(pc, /Encontrados \d+/, "temas encontrados");
+  const n = await pc.locator("#estTemas option").count();
+  if (n < 2) throw new Error(`solo ${n} temas en la lista`);
+  const datos = [["temperature", T_TEMP, ""], ["relativeHumidity", T_Z2M, "humidity"], ["barometricPressure", T_Z2M, "pressure"], ["windSpeed", T_VIENTO, ""]];
+  for (const [i, [m, tema, campo]] of datos.entries()) {
+    await pc.click("[data-est-add]");
+    await fila(pc, i, "metrica").selectOption(m);
+    await fila(pc, i, "tema").fill(tema);
+    if (campo) await fila(pc, i, "campo").fill(campo);
+  }
+  await fila(pc, 3, "unidad").selectOption("km/h");
+  await pc.selectOption("#estCh", "1");
+  await pc.check("#estOn", { force: true });
+  await pc.click("[data-est-save]");
+  await esperarTexto(pc, /19,6 °C · ahora mismo/, "temperatura en Ajustes");
+  await esperarTexto(pc, /5,0 m\/s \(18,0 km\/h\)/, "viento convertido");
+  await esperarTexto(pc, /Próximo envío a las \d\d:\d\d: «Temperatura 19,6 °C · Humedad 64 % · Presión 1015 hPa · Viento 5,0 m\/s»/, "próximo envío");
+  await fotoApartado(pc, "#estBox", "estacion-pc");
+});
+
+await paso("Enviar ahora: el nodo recibe la telemetría por el canal 1; las dos pantallas ven «repetido por la malla»", async () => {
+  const antes = nodo.paquetes(PORT.TELEMETRY_APP).length;
+  await pc.click("[data-est-send]");
+  await nodo.esperar(() => nodo.paquetes(PORT.TELEMETRY_APP).length > antes, 5000, "telemetría de la estación");
+  const p = nodo.paquetes(PORT.TELEMETRY_APP).at(-1);
+  const tel = fromBinary(TEL.TelemetrySchema, p.payloadVariant.value.payload);
+  const e = tel.variant.value;
+  log("   telemetría:", p.channel, p.to.toString(16), JSON.stringify({ t: e.temperature, h: e.relativeHumidity, p: e.barometricPressure, v: e.windSpeed }));
+  if (p.channel !== 1 || p.to !== 0xffffffff || Math.abs(e.temperature - 19.6) > 1e-3 || Math.abs(e.windSpeed - 5) > 1e-3) throw new Error("paquete equivocado");
+  const rout = toBinary(M.RoutingSchema, create(M.RoutingSchema, { variant: { case: "errorReason", value: 0 } }));
+  nodo.paquete({ from: ME, payloadVariant: { case: "decoded", value: create(M.DataSchema, { portnum: PORT.ROUTING_APP, payload: rout, requestId: p.id }) } });
+  await esperarTexto(pc, /Último \(a mano\), a las \d\d:\d\d: «Temperatura 19,6 °C[^»]*» → canal «avisos»: repetido por la malla/, "último envío en el PC");
+  await movil.click("#setBtn");
+  await esperarTexto(movil, /repetido por la malla\./, "último envío en el móvil");
+  await fotoApartado(movil, "#estBox", "estacion-movil");
+  await movil.keyboard.press("Escape");
+  await pc.keyboard.press("Escape");
+  // Y es una lectura del receptor.
+  const yo = (await (await fetch(`${URL0}api/estado`)).json()).nodes.find((x) => x.num === ME);
+  if (yo?.metrics?.temperature?.v !== 19.6) throw new Error(`receptor: ${JSON.stringify(yo?.metrics)}`);
 });
 
 await paso("gráfica: serie desde el servidor", async () => {

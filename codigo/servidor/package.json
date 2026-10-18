@@ -16,13 +16,13 @@
     "test": "node --test --test-force-exit test/*.test.mjs"
   },
   "dependencies": {
+    "@bufbuild/protobuf": "^2.2.3",
     "@meshtastic/core": "^2.6.7",
     "@vigia/nucleo": "*",
     "mqtt": "5.16.0",
     "serialport": "^13.0.0"
   },
   "devDependencies": {
-    "@bufbuild/protobuf": "^2.2.3",
     "aedes": "1.2.0"
   }
 }

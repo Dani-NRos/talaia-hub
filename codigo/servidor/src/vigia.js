@@ -11,6 +11,7 @@ import { describirReceptor } from "./config.js";
 import os from "node:os";
 import { crearServicioMqtt } from "./mqtt.js";
 import { crearSalidaHA } from "./homeassistant.js";
+import { crearEstacion } from "./estacion.js";
 
 const GUARDAR_NODOS_MS = 30000; // la lista de nodos (cientos) se guarda como mucho cada 30 s
 const DIAG_MAX = 200;
@@ -161,8 +162,11 @@ export async function crearVigia(config, registro, opts = {}) {
     onTelemetry: (p) => motor.recibir.telemetry(p),
   }, config.receptor, opts.receptorOpts);
 
-  /* ── MQTT (Home Assistant y, más adelante, lo que llegue por MQTT) ── */
-  const mqtt = await crearServicioMqtt({ S, motor, eventos, almacen, registro }, { crearSalidaHA, clienteId: `vigia-servidor-${os.hostname()}` });
+  /* ── MQTT: Home Assistant, y la estación (datos que llegan por MQTT y salen a la malla como del receptor) ── */
+  const estacion = crearEstacion({ S, motor, eventos, almacen, registro, receptor: () => receptor });
+  const mqtt = await crearServicioMqtt({ S, motor, eventos, almacen, registro }, {
+    crearSalidaHA, clienteId: `vigia-servidor-${os.hostname()}`, enganches: [estacion.enganchar],
+  });
 
   /* ── tareas periódicas ── */
   const offlineId = setInterval(() => motor.evalOffline(), 15000);
@@ -190,7 +194,7 @@ export async function crearVigia(config, registro, opts = {}) {
   const resumenId = setInterval(resumen, HOUR);
 
   return {
-    S, motor, acciones, almacen, eventos, mqtt,
+    S, motor, acciones, almacen, eventos, mqtt, estacion,
     get receptor() { return receptor; },
     /** Empieza a conectar con el receptor (y a reintentar mientras no se pare). */
     arrancar() {
@@ -198,12 +202,14 @@ export async function crearVigia(config, registro, opts = {}) {
       registro.info(`Avisos por la malla: ${S.settings.mesh?.enabled ? "encendidos" : "apagados"}`);
       receptor.start();
       mqtt.arrancar();
+      estacion.arrancar();
     },
     async detener() {
       if (cerrado) return;
       clearInterval(offlineId);
       clearInterval(podarId);
       clearInterval(resumenId);
+      estacion.parar();
       await mqtt.parar(); // antes de cerrar: deja dicho «offline» a Home Assistant
       await receptor.disconnect();
       motor.resetAsks(); // peticiones a medias: sus temporizadores ya no deben tocar nada

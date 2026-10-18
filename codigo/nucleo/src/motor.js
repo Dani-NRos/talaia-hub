@@ -157,7 +157,7 @@ export function crearMotor(S, g = {}) {
     }
     if (opts.env || opts.kind === "environmentMetrics") n.hasEnv = true;
     if (opts.store !== false) S.store.add(rows);
-    touch(num, t);
+    if (opts.touch !== false) touch(num, t); // false: no llegó por radio (la estación del servidor)
     saveNodes();
     g.lectura?.(num);
     render();

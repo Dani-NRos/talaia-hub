@@ -84,6 +84,23 @@ function crearOrdenes(vigia) {
       }
       return vigia.mqtt.configurar(cambio);
     },
+    estacion: ({ cambio }) => {
+      exigir(cambio && typeof cambio === "object" && !Array.isArray(cambio), "cambio");
+      exigir(Object.keys(cambio).every((k) => ["activado", "cada", "canal", "saltos", "datos"].includes(k)), "cambio");
+      if ("activado" in cambio) exigir(typeof cambio.activado === "boolean", "activado");
+      for (const k of ["cada", "canal", "saltos"]) if (k in cambio) exigir(cambio[k] === null || Number.isInteger(cambio[k]), k);
+      if ("datos" in cambio) {
+        exigir(Array.isArray(cambio.datos) && cambio.datos.length <= 30, "datos");
+        for (const d of cambio.datos) {
+          exigir(d && typeof d === "object" && Object.keys(d).every((k) => ["metrica", "tema", "campo", "unidad", "caduca"].includes(k)), "dato");
+          for (const k of ["metrica", "tema", "campo", "unidad"]) if (k in d) exigir(typeof d[k] === "string", `dato.${k}`);
+          if ("caduca" in d) exigir(Number.isInteger(d.caduca), "dato.caduca");
+        }
+      }
+      return vigia.estacion.configurar(cambio);
+    },
+    estacionBuscar: () => vigia.estacion.buscarTemas(),
+    estacionEnviar: () => vigia.estacion.enviarAhora(),
   };
 }
 
@@ -168,7 +185,7 @@ export function crearWeb(vigia, config, registro, opts = {}) {
     try {
       const r = await f(cuerpo);
       sincro.vaciar(); // que las pantallas vean el cambio ya, antes de la respuesta
-      json(res, 200, { ok: !!r?.ok, toast: r?.toast || avisos[0], error: r?.error, ...(r?.radio != null ? { radio: r.radio } : {}), ...(r?.valor != null ? { valor: r.valor } : {}) });
+      json(res, 200, { ok: !!r?.ok, toast: r?.toast || avisos[0], error: r?.error, ...(r?.radio != null ? { radio: r.radio } : {}), ...(r?.valor != null ? { valor: r.valor } : {}), ...(r?.temas ? { temas: r.temas } : {}) });
     } catch (e) {
       if (e instanceof ErrorOrden) return json(res, 400, { ok: false, error: e.message });
       registro.error(`Orden «${cuerpo.orden}»: ${e.stack || e}`);

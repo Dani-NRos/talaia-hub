@@ -1,6 +1,6 @@
 // Conexión MQTT del servidor (MQTT.js, JavaScript puro: no compila nada en la Pi).
-// Hoy la usa la salida a Home Assistant; mañana, lo que llegue por MQTT (zigbee2mqtt, Shelly…), que podrá
-// suscribirse a sus temas con suscribir(). Una conexión = un broker.
+// La usan la salida a Home Assistant y la estación (datos que llegan por MQTT y salen a la malla), que se suscribe a
+// sus temas con suscribir(). Una conexión = un broker.
 import { EventEmitter } from "node:events";
 import mqtt from "mqtt";
 
@@ -182,14 +182,15 @@ export class ConexionMqtt extends EventEmitter {
 }
 
 /**
- * MQTT del servidor: guarda la configuración (SQLite, «mqtt»), mantiene la conexión y engancha lo que la usa (hoy, la
- * salida a Home Assistant). Deja en S.mqtt lo que ven las pantallas (sin contraseña) y avisa con la parte «mqtt».
+ * MQTT del servidor: guarda la configuración (SQLite, «mqtt»), mantiene la conexión y engancha lo que la usa: la
+ * salida a Home Assistant y los enganches (f(conexion) → cómo soltarla), como la estación, que escucha sus temas.
+ * Deja en S.mqtt lo que ven las pantallas (sin contraseña) y avisa con la parte «mqtt».
  * vigia: { S, motor, eventos, almacen, registro }.
  */
-export async function crearServicioMqtt(vigia, { crearSalidaHA, clienteId } = {}) {
+export async function crearServicioMqtt(vigia, { crearSalidaHA, clienteId, enganches = [] } = {}) {
   const { S, eventos, almacen, registro } = vigia;
   let cfg = comprobarMqtt(almacen.leer("mqtt", {}) || {}).cfg || { ...MQTT_DEFECTO };
-  let conexion = null, ha = null;
+  let conexion = null, ha = null, soltar = [];
   const despedida = () => ({ tema: `${cfg.base}/estado`, carga: "offline" });
 
   function contar() {
@@ -202,6 +203,7 @@ export async function crearServicioMqtt(vigia, { crearSalidaHA, clienteId } = {}
       conexion = new ConexionMqtt({ url: cfg.url, usuario: cfg.usuario, clave: cfg.clave, clienteId, testamento: despedida() }, registro);
       conexion.on("estado", contar);
       if (cfg.ha.activado && crearSalidaHA) ha = crearSalidaHA(vigia, conexion, { base: cfg.base, prefijo: cfg.ha.prefijo });
+      soltar = enganches.map((f) => f(conexion)); // lo que escucha temas (la estación)
       conexion.arrancar();
     }
     contar();
@@ -211,6 +213,7 @@ export async function crearServicioMqtt(vigia, { crearSalidaHA, clienteId } = {}
     if (ha && retirarHA && conexion?.conectada) await ha.retirar();
     ha?.parar();
     ha = null;
+    for (const f of soltar.splice(0)) f?.();
     await conexion?.parar(despedida());
     conexion = null;
   }

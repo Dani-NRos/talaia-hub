@@ -31,6 +31,7 @@ export const PARTES = {
   settings: (S) => ajustes(S.settings),
   recent: (S) => recientes(S),
   mqtt: (S) => S.mqtt ?? null, // configuración (sin contraseña) y estado de la conexión
+  estacion: (S) => S.estacion ?? null, // datos de MQTT a la malla: configuración, últimos valores y envíos
 };
 
 /** Lecturas de las últimas 26 h de los nodos vigilados (gráficas de las tarjetas y cambio rápido). */

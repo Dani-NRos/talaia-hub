@@ -1,5 +1,7 @@
 // Receptor del servidor: el nodo por cable USB o por TCP. Lo común (lectura inicial, reintentos, peticiones con id)
 // está en el núcleo; aquí, cómo se abre cada enlace y qué decir cuando falla.
+import { create, toBinary } from "@bufbuild/protobuf";
+import { Protobuf } from "@meshtastic/core";
 import { ReceptorBase, LinkError } from "@vigia/nucleo/receptor-base.js";
 import { EnlaceFlujo, abrirSerie, abrirTcp } from "./enlace.js";
 import { listarPuertos, elegirPuerto, describirPuerto } from "./puertos.js";
@@ -57,6 +59,27 @@ export class ReceptorNodo extends ReceptorBase {
   get targetName() {
     if (this.kind === "tcp") return `${this.destino.host}:${this.destino.puerto || 4403}`;
     return this.ruta || String(this.destino.puerto || "auto");
+  }
+
+  /**
+   * Manda a un canal telemetría propia ya codificada (un Telemetry): para la malla es del receptor, como la de un nodo
+   * con sensores. saltos: null, los que tenga configurados el receptor (la librería no deja poner otros: el paquete
+   * se arma aquí igual que lo arma ella). Con want_ack, si no oye a ningún vecino repetirla, el receptor la reintenta;
+   * devuelve { id, done }, y done se resuelve con el primer acuse (alguien la ha repetido).
+   */
+  sendTelemetry(canal, payload, saltos = null) {
+    const port = Protobuf.Portnums.PortNum.TELEMETRY_APP;
+    if (!saltos) return this._sendTracked(payload, port, "broadcast", canal, false);
+    const mesh = this.mesh;
+    if (!mesh || this.state !== "ready") return { id: null, done: Promise.reject({ error: "send" }) };
+    const M = Protobuf.Mesh;
+    const id = mesh.generateRandId();
+    const paquete = create(M.MeshPacketSchema, {
+      payloadVariant: { case: "decoded", value: { payload, portnum: port, wantResponse: false } },
+      from: mesh.myNodeInfo.myNodeNum, to: 0xffffffff, id, wantAck: true, channel: canal, hopLimit: saltos,
+    });
+    const bytes = toBinary(M.ToRadioSchema, create(M.ToRadioSchema, { payloadVariant: { case: "packet", value: paquete } }));
+    return { id, done: mesh.sendRaw(bytes, id) };
   }
 
   /** Empieza a conectar y sigue reintentando solo hasta que se llame a disconnect(). */

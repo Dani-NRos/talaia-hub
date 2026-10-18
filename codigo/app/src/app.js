@@ -10,6 +10,7 @@ import { searchNodes, highlight, tokens, FILTERS, SORTS } from "./meshsearch.js"
 import { conectarServidor, crearStoreRemoto } from "./remoto.js";
 import { MIN, HOUR, DAY, isNum, hhmm, dShort, ago, stamp, trendDec, fmtTrend, trendVerb, hoursText, lastWindow } from "@vigia/nucleo/textos.js";
 import { crearAcciones } from "@vigia/nucleo/acciones.js";
+import { METRICAS_ESTACION, ESTACION_MAX_SALTOS, unidades } from "@vigia/nucleo/estacion.js";
 import { crearMotor, estadoInicial, MESH_DEFAULT, MESH_HOURLY, ASK, ASK_ALL, askKey, RE, INFO_SUPPRESS, seriesKey, trendKey, hexId } from "@vigia/nucleo/motor.js";
 
 /* ───────────── utilidades ───────────── */
@@ -416,6 +417,171 @@ async function guardarMqtt() {
   toast(res.toast);
 }
 const MQTT_CAMPOS = { mqttOn: "activado", mqttUrl: "url", mqttUser: "usuario", mqttHa: "haOn", mqttBase: "base", mqttPref: "prefijo" };
+
+/* ───────────── De MQTT a la malla: la estación (solo con servidor) ───────────── */
+// Datos que llegan por MQTT y el servidor manda a la malla como telemetría del receptor (ver servidor/src/estacion.js).
+let estBorrador = null; // lo cambiado y aún sin guardar: { activado, cada, canal, saltos, datos }
+let estTemas = []; // lo encontrado con «Buscar temas»: [{ tema, campo, v }]
+const EST_CADA = { 15: "15 minutos", 30: "30 minutos", 60: "1 hora", 180: "3 horas" };
+const EST_CADUCA = { 0: "Si deja de llegar, mandar el último", 60: "No mandarlo si lleva 1 h sin llegar", 180: "No mandarlo si lleva 3 h sin llegar", 720: "No mandarlo si lleva 12 h sin llegar", 1440: "No mandarlo si lleva 24 h sin llegar" };
+function estCfg() {
+  if (estBorrador) return estBorrador;
+  const e = S.estacion;
+  return e ? { activado: e.activado, cada: e.cada, canal: e.canal, saltos: e.saltos, datos: e.datos.map((d) => ({ ...d })) } : null;
+}
+const estEditar = () => (estBorrador ||= estCfg());
+const estMismo = (a, b) => a && b && a.metrica === b.metrica && a.tema === b.tema && a.campo === b.campo && a.unidad === b.unidad;
+
+/** El último valor de un dato, si es el que está guardado (si se está cambiando, aún no hay). */
+function estValorHTML(d) {
+  const e = S.estacion;
+  if (!estMismo(d, e?.datos.find((x) => x.metrica === d.metrica))) return d.tema ? "Guarda para ver lo que llega." : "";
+  const x = e.valores[d.metrica];
+  if (!x) return "Aún no ha llegado nada a ese tema.";
+  const cuando = esc(ago(x.t));
+  if (x.error) return `<span class="warn-t">${esc(x.error)}</span> · ${cuando}`;
+  if (x.nulo) return `<span class="warn-t">No disponible</span> (el sensor no responde) · ${cuando}`;
+  return `<strong>${esc(fmtWithUnit(d.metrica, x.v))}</strong>${x.u ? ` (${esc(fmtNum(x.b, 1))} ${esc(x.u)})` : ""} · ${cuando}`;
+}
+function estDatoHTML(d, i, datos) {
+  const usadas = new Set(datos.filter((x, j) => j !== i).map((x) => x.metrica));
+  const opts = METRICAS_ESTACION.map((m) => `<option value="${m}"${m === d.metrica ? " selected" : ""}${usadas.has(m) ? " disabled" : ""}>${esc(metricMeta(m).label)}</option>`).join("");
+  const us = unidades(d.metrica);
+  const unidad = us.length > 1
+    ? `<select class="inp sel" data-est-i="${i}" data-est-k="unidad" aria-label="Unidad en que llega">${us.map((u) => `<option${u === (d.unidad || us[0]) ? " selected" : ""}>${esc(u)}</option>`).join("")}</select>`
+    : `<span class="est-u">${esc(us[0])}</span>`;
+  const caduca = Object.entries(EST_CADUCA).map(([k, t]) => `<option value="${k}"${Number(k) === (d.caduca || 0) ? " selected" : ""}>${esc(t)}</option>`).join("");
+  return `<div class="est-d">
+      <div class="est-r"><select class="inp sel" data-est-i="${i}" data-est-k="metrica" aria-label="Qué dato es">${opts}</select><button type="button" class="mini" data-est-del="${i}">Quitar</button></div>
+      <input class="inp" data-est-i="${i}" data-est-k="tema" list="estTemas" autocomplete="off" spellcheck="false" placeholder="Tema MQTT, p. ej. ha_estados/sensor/temperatura/state" aria-label="Tema MQTT" value="${esc(d.tema || "")}">
+      <div class="est-r"><input class="inp" data-est-i="${i}" data-est-k="campo" list="estCampos${i}" autocomplete="off" spellcheck="false" placeholder="Campo, si llega un JSON" aria-label="Campo del JSON" value="${esc(d.campo || "")}">${unidad}</div>
+      <select class="inp sel" data-est-i="${i}" data-est-k="caduca" aria-label="Si deja de llegar">${caduca}</select>
+      <p class="hint" id="estV${i}">${estValorHTML(d)}</p>
+      <datalist id="estCampos${i}">${estCamposOpts(d.tema)}</datalist>
+    </div>`;
+}
+/** Para elegir tema y campo de lo que se ha encontrado al buscar. */
+function estTemasOpts() {
+  const por = new Map();
+  for (const x of estTemas) {
+    if (!por.has(x.tema)) por.set(x.tema, []);
+    por.get(x.tema).push(x);
+  }
+  return [...por].map(([t, xs]) => `<option value="${esc(t)}" label="${esc(xs.length === 1 && !xs[0].campo ? String(xs[0].v) : `JSON: ${xs.map((x) => x.campo).join(", ")}`.slice(0, 80))}"></option>`).join("");
+}
+const estCamposOpts = (tema) => estTemas.filter((x) => x.tema === tema && x.campo).map((x) => `<option value="${esc(x.campo)}" label="${esc(String(x.v))}"></option>`).join("");
+
+function estEstadoHTML() {
+  const e = S.estacion;
+  if (!e) return "";
+  const out = [];
+  if (!S.mqtt?.activado) out.push(`<span class="warn-t">MQTT está apagado</span>: los datos llegan por MQTT; actívalo en el apartado de arriba.`);
+  if (!e.activado) out.push("Apagado: no se manda nada a la malla.");
+  else if (e.proximo) {
+    out.push(`Próximo envío a las ${esc(hhmm.format(new Date(e.proximo)))}: ${e.previo.texto ? `«${esc(e.previo.texto)}»` : "de momento, nada al día"}.`);
+    if (e.previo.faltan.length) out.push(`<span class="warn-t">Sin</span> ${esc(e.previo.faltan.join(", "))}.`);
+  }
+  const u = e.ultimo;
+  if (u) {
+    const cls = u.ok === true ? "okt" : u.ok === false ? "warn-t" : "";
+    out.push(`Último${u.manual ? " (a mano)" : ""}, a las ${esc(hhmm.format(new Date(u.t)))}${u.texto ? `: «${esc(u.texto)}» → ${esc(u.destino)}` : ""}: <strong class="${cls}">${esc(u.resultado)}</strong>.`);
+  }
+  return out.join("<br>");
+}
+
+function estacionSection() {
+  const e = S.estacion;
+  if (!e) return "";
+  const c = estCfg();
+  const chs = S.channels;
+  let chOpts = chs.map((ch) => `<option value="${ch.index}"${c.canal === ch.index ? " selected" : ""}>${ch.index} · ${esc(ch.name)}${ch.private ? "" : " — público"}</option>`).join("");
+  if (c.canal != null && !chs.some((ch) => ch.index === c.canal)) chOpts += `<option value="${c.canal}" selected>Canal ${c.canal} (no está en el receptor)</option>`;
+  const sel = chs.find((ch) => ch.index === c.canal);
+  const chHint = !chs.length ? `<p class="hint">Conecta el receptor para ver sus canales.</p>`
+    : sel && !sel.private ? `<p class="hint">Es un canal público (${esc(sel.why)}): lo verá cualquiera en la malla y puede acabar en los mapas de internet. Para una estación del barrio puede tener sentido; para datos de casa, mejor uno privado.</p>` : "";
+  const hop = S.lora?.hopLimit;
+  const hopOpts = [`<option value=""${c.saltos == null ? " selected" : ""}>Los del receptor${hop ? ` (${hop})` : ""}</option>`]
+    .concat(Array.from({ length: ESTACION_MAX_SALTOS }, (_, j) => j + 1).map((n) => `<option value="${n}"${c.saltos === n ? " selected" : ""}>${n}</option>`)).join("");
+  const quien = e.receptor ? esc(e.receptor) : "tu receptor";
+  return `<section class="blk" id="estBox" data-cfg="${esc(estGuardada())}"><h3>De MQTT a la malla</h3>
+      <p class="hint">Los datos de una estación que lleguen por MQTT (de Home Assistant, zigbee2mqtt…) salen a la malla como telemetría de ambiente de ${quien}, como si tuviera esos sensores, y se guardan como lecturas suyas: gráficas, alarmas e histórico. Uno de cada tipo: la telemetría no lleva nombres, solo un hueco para cada dato.</p>
+      <div class="set-row"><label class="sw" for="estOn"><input type="checkbox" id="estOn" ${c.activado ? "checked" : ""}><span class="sw-ui"></span><span>Mandarlos a la malla</span></label></div>
+      <div class="set-row"><label for="estCada">Cada</label><select id="estCada" class="inp sel">${Object.entries(EST_CADA).map(([k, t]) => `<option value="${k}"${Number(k) === c.cada ? " selected" : ""}>${t}</option>`).join("")}</select></div>
+      <div class="set-row"><label for="estCh">Por el canal</label><select id="estCh" class="inp sel">${chOpts || `<option value="">—</option>`}</select></div>
+      ${chHint}
+      <div class="set-row"><label for="estHop">Saltos</label><select id="estHop" class="inp sel">${hopOpts}</select></div>
+      <div id="estDatos">${c.datos.map((d, i) => estDatoHTML(d, i, c.datos)).join("")}</div>
+      <div class="btns">${c.datos.length < METRICAS_ESTACION.length ? `<button type="button" class="btn ghost" data-est-add>Añadir dato</button>` : ""}<button type="button" class="btn ghost" data-est-buscar>Buscar temas</button></div>
+      <p class="hint" id="estBusca">${estTemas.length ? `Encontrados ${estTemas.length}: al escribir en el tema (y en el campo) salen para elegir.` : ""}</p>
+      <datalist id="estTemas">${estTemasOpts()}</datalist>
+      <p class="form-err" id="estErr" role="alert" hidden></p>
+      <div class="btns"><button type="button" class="btn primary" data-est-save>Guardar</button>${e.datos.length ? `<button type="button" class="btn ghost" data-est-send>Enviar ahora</button>` : ""}</div>
+      <p class="hint" id="estEstado">${estEstadoHTML()}</p>
+      <details class="mq-adv"><summary>Cómo sacar los datos de Home Assistant</summary>
+        <p class="hint">Home Assistant no publica por MQTT sus sensores por su cuenta. Añade esto a configuration.yaml con los tuyos y reinícialo:</p>
+        <pre class="est-pre">mqtt_statestream:
+  base_topic: ha_estados
+  include:
+    entities:
+      - sensor.estacion_temperatura
+      - sensor.estacion_humedad</pre>
+        <p class="hint">Cada sensor sale en «ha_estados/sensor/…/state». Pulsa «Buscar temas» y elígelos. No incluyas los sensores «Vigía · …»: Vigía los rechaza, porque mandaría a la malla lo que ya viene de ella. Comprueba la unidad (viento en km/h, temperatura en °F…): Vigía la pasa a la de Meshtastic.</p>
+      </details>
+    </section>`;
+}
+/** Vuelve a pintar el apartado (sin cerrar Ajustes): al añadir o quitar datos, o al cambiar qué dato es. */
+function renderEstacion() {
+  const box = $("#estBox");
+  if (box) box.outerHTML = estacionSection();
+}
+const estGuardada = () => { const e = S.estacion; return e ? JSON.stringify([e.activado, e.cada, e.canal, e.saltos, e.datos, e.receptor]) : ""; };
+/**
+ * Lo que llega del servidor: si ha cambiado la configuración (desde otra pantalla) y aquí no se está cambiando nada,
+ * todo el apartado; si no, solo los valores y el estado (llegan a menudo y no deben cerrar lo desplegado).
+ */
+function patchEstacion() {
+  const box = $("#estBox");
+  if (!box) return;
+  if (!estBorrador && !box.contains(document.activeElement) && box.dataset.cfg !== estGuardada()) return renderEstacion();
+  const c = estCfg();
+  c.datos.forEach((d, i) => { const el = $(`#estV${i}`); if (el) el.innerHTML = estValorHTML(d); });
+  $("#estEstado").innerHTML = estEstadoHTML();
+}
+async function guardarEstacion() {
+  const c = estCfg();
+  const res = await orden({ orden: "estacion", cambio: c });
+  if (!res.ok) return showErr($("#estErr"), res.error || "No se pudo guardar.");
+  estBorrador = null;
+  toast(res.toast);
+  renderEstacion();
+}
+async function buscarTemasEstacion(btn) {
+  btn.disabled = true;
+  btn.textContent = "Buscando…";
+  const res = await orden({ orden: "estacionBuscar" });
+  btn.disabled = false;
+  btn.textContent = "Buscar temas";
+  if (!res.ok) return showErr($("#estErr"), res.error || "No se pudo buscar.");
+  estTemas = res.temas || [];
+  $("#estErr").hidden = true;
+  $("#estTemas").innerHTML = estTemasOpts();
+  estCfg().datos.forEach((d, i) => { const dl = $(`#estCampos${i}`); if (dl) dl.innerHTML = estCamposOpts(d.tema); });
+  $("#estBusca").textContent = estTemas.length ? `Encontrados ${estTemas.length}: al escribir en el tema (y en el campo) salen para elegir.` : "No ha llegado ningún tema con números. ¿Publica algo el broker? (Con Home Assistant, mira «Cómo sacar los datos».)";
+}
+/** Un cambio en un campo del apartado: va al borrador. */
+function editarEstacion(t) {
+  if (t.id === "estOn") return void (estEditar().activado = t.checked);
+  if (t.id === "estCada") return void (estEditar().cada = Number(t.value));
+  if (t.id === "estCh") return void (estEditar().canal = t.value === "" ? null : Number(t.value));
+  if (t.id === "estHop") return void (estEditar().saltos = t.value === "" ? null : Number(t.value));
+  const k = t.dataset.estK;
+  if (!k) return;
+  const d = estEditar().datos[Number(t.dataset.estI)];
+  if (!d) return;
+  d[k] = k === "caduca" ? Number(t.value) : t.value;
+  if (k === "metrica") { d.unidad = unidades(d.metrica)[0]; renderEstacion(); }
+  if (k === "tema") { const dl = $(`#estCampos${t.dataset.estI}`); if (dl) dl.innerHTML = estCamposOpts(d.tema.trim()); }
+}
 
 function meshSection() {
   const cfg = meshCfg();
@@ -1553,6 +1719,7 @@ function renderSettings() {
     </section>
     ${PREVIEW && !S.demo ? "" : meshSection()}
     ${SERVIDOR ? mqttSection() : ""}
+    ${SERVIDOR ? estacionSection() : ""}
     <section class="blk"><h3>Histórico</h3>
       <div class="set-row"><span id="histCount">Contando lecturas…</span><select id="setRet" class="inp sel" aria-label="Tiempo que se guardan las lecturas">${[7, 30, 90, 365].map((d) => `<option value="${d}"${S.settings.retentionDays === d ? " selected" : ""}>Guardar ${d} días</option>`).join("")}</select></div>
       <div class="btns">${PREVIEW ? "" : `<button class="btn ghost" data-export>Exportar CSV</button>`}<button class="btn danger-ghost" data-wipe>Borrar histórico</button></div>
@@ -1859,6 +2026,18 @@ document.addEventListener("click", async (ev) => {
   }
   if ("diag" in ds) { openSettings(); setTimeout(() => $("#diagBox")?.scrollIntoView({ block: "start" }), 50); return; }
   if ("mqttSave" in ds) return guardarMqtt();
+  if ("estSave" in ds) return guardarEstacion();
+  if ("estBuscar" in ds) return buscarTemasEstacion(t);
+  if ("estAdd" in ds) {
+    const c = estEditar();
+    const libre = METRICAS_ESTACION.find((m) => !c.datos.some((d) => d.metrica === m));
+    if (!libre) return;
+    c.datos.push({ metrica: libre, tema: "", campo: "", unidad: unidades(libre)[0], caduca: 0 });
+    renderEstacion();
+    return $(`#estDatos .est-d:last-child [data-est-k="metrica"]`)?.focus();
+  }
+  if ("estDel" in ds) { estEditar().datos.splice(Number(ds.estDel), 1); return renderEstacion(); }
+  if ("estSend" in ds) { const r = await orden({ orden: "estacionEnviar" }); return toast(r.error || r.toast); }
   if ("mqttNoclave" in ds) { const r = await orden({ orden: "mqtt", cambio: { clave: null } }); if (r.error) return toast(r.error); return toast("Contraseña quitada"); }
   if ("meshTest" in ds) {
     const res = SERVIDOR ? await orden({ orden: "pruebaMalla" }) : acciones.pruebaMalla();
@@ -1971,10 +2150,12 @@ document.addEventListener("input", (ev) => {
   if (ev.target.id === "meshQ") onMeshQuery(ev.target.value);
   const campo = MQTT_CAMPOS[ev.target.id];
   if (campo) mqttBorrador = { ...(mqttBorrador || {}), [campo]: ev.target.type === "checkbox" ? ev.target.checked : ev.target.value };
+  if (ev.target.closest?.("#estBox") && ev.target.matches("input:not([type=checkbox])")) editarEstacion(ev.target);
 });
 
 document.addEventListener("change", async (ev) => {
   const t = ev.target;
+  if (t.closest?.("#estBox")) return editarEstacion(t);
   if (t.id === "meshSort") { S.meshView.sort = t.value; S.meshExpanded = false; saveMeshView(); return renderMesh(); }
   if (t.id === "fence-r") return S.detail && setFenceRadius(S.detail.num, t);
   if (t.id === "tr-metric") return trendFormFill();
@@ -2032,7 +2213,7 @@ function aplicarPartes(p) {
     S.active = new Map(p.active.map((a) => [a.key, a]));
     if (prueba) S.active.set("test", prueba);
   }
-  for (const k of ["log", "channels", "myNode", "myUser", "lora", "traces", "meshLast", "link", "device", "trouble", "diag", "mqtt"]) if (k in p) S[k] = p[k];
+  for (const k of ["log", "channels", "myNode", "myUser", "lora", "traces", "meshLast", "link", "device", "trouble", "diag", "mqtt", "estacion"]) if (k in p) S[k] = p[k];
   if ("req" in p) S.req = new Map(p.req.map((r) => [askKey(r.num, r.type), r]));
   if ("settings" in p) Object.assign(S.settings, p.settings); // sonido y pantalla encendida siguen siendo de este aparato
   if ("recent" in p) S.recent = new Map(Object.entries(p.recent));
@@ -2053,7 +2234,8 @@ function refrescarAbiertos(p) {
   if (S.full && (p.nodes || p.rows || "active" in p)) refreshFull(S.full.num);
   if ($("#settings").open) {
     if ("meshLast" in p) patchMeshLast();
-    if ("mqtt" in p) patchMqttEstado();
+    if ("mqtt" in p) { patchMqttEstado(); patchEstacion(); } // el aviso de «MQTT apagado»
+    if ("estacion" in p) patchEstacion();
     if (("link" in p || "diag" in p || "settings" in p || "channels" in p || "trouble" in p) && !escribiendo("#settings input, #settings select")) renderSettings();
   }
   if (mapView && $("#map").open && (p.nodes || "traces" in p)) mapView.update();

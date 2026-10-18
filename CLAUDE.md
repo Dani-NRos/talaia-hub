@@ -41,9 +41,11 @@ codigo/                 raíz de npm workspaces: npm install, npm test, npm run 
     src/web.js sincro.js  la app servida en la red de casa y su API (SSE + órdenes), sin contraseña (decisión de Dani)
     src/mqtt.js         cliente MQTT general (MQTT.js): configuración desde Ajustes, guardada en SQLite, reconexión, LWT
     src/homeassistant.js  salida a Home Assistant por MQTT con autodescubrimiento (los temas, arriba del fichero)
+    src/estacion.js     de MQTT a la malla: datos de una estación que salen como telemetría del receptor y se guardan
+                        como lecturas suyas (lo común con la pantalla, en nucleo/src/estacion.js)
     instalar.sh sistema/  instalador (Node propio en /opt/vigia), servicio systemd y regla de udev
     test/nodo-falso.mjs nodo Meshtastic simulado (protobuf de verdad) por TCP o puerto virtual
-    test/mqtt.test.mjs  con un broker en memoria (aedes) y un «Home Assistant» espía
+    test/mqtt.test.mjs estacion.test.mjs  con un broker en memoria (aedes) y un «Home Assistant» de mentira
   herramientas/         comprobaciones con Playwright (capturas antes/después, nodo por cable simulado, servidor de
                         punta a punta con MQTT): ver herramientas/LEEME.md
   dist/app/             app compilada (no va al repo)
@@ -74,11 +76,23 @@ app instalada y lee y escribe los mismos datos.
   botón «Enterado» por cada alarma puesta, «Enterado todas» y un evento por alarma/resuelta/vista para notificar.
   Las alarmas y límites se cambian solo en Vigía.
 
+### De MQTT a la malla (Dani, 18 oct. 2026)
+
+- Para la estación meteorológica de su barrio (en la misma ubicación que el nodo): temperatura, humedad, presión,
+  lluvia, viento… salen por el DNN 5 como su telemetría de ambiente (protobuf `Telemetry`, `environmentMetrics`).
+- Cada 30 min por defecto (alineado al reloj); canal y saltos a elegir (el canal puede ser público: es su decisión).
+- Los valores se guardan también como **lecturas del receptor** (gráficas, alarmas, histórico), sin tocar «oído por
+  última vez» (no llegan por radio). Se guardan aunque el receptor esté desconectado.
+- Un dato por tipo (la telemetría no lleva nombres). Sin dirección del viento todavía: Vigía no la conoce como métrica.
+- Saltos distintos de los del receptor: la librería no deja ponerlos, el paquete se arma en `servidor/src/receptor.js`.
+
 ## Publicar
 
 - Se desarrolla en la rama `mapa`; se publica subiendo `mapa:main`. GitHub Pages sirve `main` desde la raíz.
 - **Copia de pruebas**: compilar y copiar `codigo/dist/app` a `beta/` **sin `sw.js`** (para no tocar la app
   instalada), con un `beta/README.md` que lo explique. Commit «… (en pruebas en /beta/)».
+- **Pruebas del servidor**: si la app normal no cambia (capturas IGUALES), se sube solo `mapa` y Dani instala con
+  `… instalar.sh | sudo bash -s -- --rama mapa`; cuando confirma, se publica la versión.
 - **Publicar una versión**: subir la versión en los `package.json` (`codigo/`, `nucleo/`, `app/`, `servidor/`) y
   `APP_VERSION` en `app.js`; compilar; copiar `codigo/dist/app/*` a la raíz; borrar `beta/`. Commit «Vigía Mesh X.Y: …».
 

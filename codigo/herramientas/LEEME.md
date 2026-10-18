@@ -11,7 +11,8 @@ Para comprobar cambios antes de publicar. Necesitan Playwright con Chromium (no 
   suavizado. Dice `IGUALES` o qué cambia.
 - **`pantalla-servidor.mjs <salida> [IP]`**: de punta a punta con el servidor de verdad (`main.js`), un nodo simulado
   por TCP y dos pantallas a la vez (vigilar, límite, alarma, «Enterado» compartido, petición, aviso por la malla,
-  MQTT configurado desde Ajustes con un broker y un Home Assistant de mentira, reinicio).
+  MQTT configurado desde Ajustes con un broker y un Home Assistant de mentira, la estación de MQTT a la malla,
+  reinicio).
 
 Para una refactorización que no debe verse: compilar la versión publicada (con `git worktree`) y la nueva, pasar
 `capturar.mjs` y `real.mjs` a las dos y `comparar.py`. Antes, pasarlos dos veces a la misma versión: si ya salen

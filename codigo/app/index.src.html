@@ -399,6 +399,15 @@ dialog::backdrop { background: rgb(8 14 12 / .5); }
 @media (max-width: 420px) { .mq-f { grid-template-columns: minmax(0, 1fr); gap: 4px; } .mq-f label { margin-top: 6px; } }
 .mq-adv summary { cursor: pointer; font-size: 14px; color: var(--ink-2); }
 #mqttNoclave[hidden] { display: none; }
+.est-d { display: grid; gap: 6px; padding: 10px 0; border-top: 1px solid var(--line); }
+.est-d:last-child { border-bottom: 1px solid var(--line); }
+.est-d .inp { font-size: 15px; }
+.est-r { display: flex; gap: 8px; align-items: center; min-width: 0; }
+.est-r > .inp:first-child { flex: 1 1 auto; }
+.est-r > .sel:not(:first-child) { flex: 0 0 auto; }
+.est-u { flex: 0 0 auto; min-width: 44px; color: var(--ink-2); font-size: 14px; }
+.est-d > .sel { width: 100%; }
+.est-pre { margin: 6px 0; padding: 8px 10px; border-radius: 9px; background: var(--surface-2); font: 12.5px/1.45 var(--f-mono); overflow-x: auto; }
 .inp-u .inp { width: 84px; text-align: right; }
 .inp-u span { font: 400 13px/1 var(--f-mono); color: var(--ink-2); }
 .off-row, .set-row { display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: 8px 12px; }
