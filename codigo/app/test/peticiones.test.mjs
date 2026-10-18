@@ -1,7 +1,7 @@
-// Pruebas de las peticiones a nodos: lectura de acuses/errores y captura del id del paquete. Ejecutar: npm test
+// Pruebas de las peticiones a nodos: lectura de acuses/errores, captura del id del paquete y traceroute. Ejecutar: npm test
 import test from "node:test";
 import assert from "node:assert/strict";
-import { routingErrorReason } from "../src/pb.js";
+import { routingErrorReason } from "@vigia/nucleo/pb.js";
 import { Receptor } from "../src/receptor.js";
 
 test("acuse y errores de enrutado", () => {
@@ -38,4 +38,24 @@ test("el id de la petición se conoce al enviarla, y la librería queda como est
   const no = rc.requestPosition(1);
   assert.equal(no.id, null);
   await assert.rejects(no.done);
+});
+
+const DNN4 = 0xaa62b264;
+
+test("el receptor manda el traceroute vacío, con acuse y respuesta, y da el id al momento", async () => {
+  class FakeMesh {
+    generateRandId() { return 987654321; }
+    async sendPacket(payload, port, dest, channel, wantAck, wantResponse) {
+      const id = this.generateRandId();
+      this.last = { payload: [...payload], port, dest, channel, wantAck, wantResponse };
+      return id;
+    }
+  }
+  const rc = new Receptor({});
+  rc.mesh = new FakeMesh();
+  rc.state = "ready";
+  const sent = rc.requestTraceroute(DNN4, 1);
+  assert.equal(sent.id, 987654321);
+  assert.equal(await sent.done, 987654321);
+  assert.deepEqual(rc.mesh.last, { payload: [], port: 70, dest: DNN4, channel: 1, wantAck: true, wantResponse: true });
 });

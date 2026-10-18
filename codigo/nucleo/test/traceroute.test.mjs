@@ -3,7 +3,6 @@ import test from "node:test";
 import assert from "node:assert/strict";
 import { decodeRouteDiscovery } from "../src/pb.js";
 import { readTrace, relays, snrQuality, loraSf, weakest, traceTimeout, UNKNOWN_NODE } from "../src/route.js";
-import { Receptor } from "../src/receptor.js";
 
 /* Codificador de prueba, como lo haría nanopb: campos repetidos empaquetados; int32 negativos en 10 bytes. */
 function varint(v, out) {
@@ -85,22 +84,4 @@ test("espera según los saltos", () => {
   assert.equal(traceTimeout(3), 120000);
   assert.equal(traceTimeout(10), 150000);
   assert.equal(traceTimeout(undefined), 100000);
-});
-
-test("el receptor manda el traceroute vacío, con acuse y respuesta, y da el id al momento", async () => {
-  class FakeMesh {
-    generateRandId() { return 987654321; }
-    async sendPacket(payload, port, dest, channel, wantAck, wantResponse) {
-      const id = this.generateRandId();
-      this.last = { payload: [...payload], port, dest, channel, wantAck, wantResponse };
-      return id;
-    }
-  }
-  const rc = new Receptor({});
-  rc.mesh = new FakeMesh();
-  rc.state = "ready";
-  const sent = rc.requestTraceroute(DNN4, 1);
-  assert.equal(sent.id, 987654321);
-  assert.equal(await sent.done, 987654321);
-  assert.deepEqual(rc.mesh.last, { payload: [], port: 70, dest: DNN4, channel: 1, wantAck: true, wantResponse: true });
 });

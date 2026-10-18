@@ -1,0 +1,18 @@
+{
+  "name": "@vigia/app",
+  "version": "1.13.0",
+  "private": true,
+  "description": "Vigía Mesh: la app web (PWA) por Bluetooth o cable USB",
+  "license": "GPL-3.0-only",
+  "type": "module",
+  "scripts": {
+    "build": "node build.mjs",
+    "test": "node --test test/*.test.mjs"
+  },
+  "dependencies": {
+    "@meshtastic/core": "^2.6.7",
+    "@vigia/nucleo": "*",
+    "esbuild": "^0.28.2",
+    "leaflet": "^1.9.4"
+  }
+}

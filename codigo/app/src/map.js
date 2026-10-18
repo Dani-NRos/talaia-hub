@@ -2,10 +2,10 @@
 // Leaflet va dentro de la app (sin CDN) para que abra sin internet; el fondo son teselas de OpenStreetMap.
 import { map as lmap, tileLayer, marker, divIcon, latLng, latLngBounds, control, Control, DomUtil, DomEvent, layerGroup, circleMarker, circle, polyline, point } from "leaflet/dist/leaflet-src.esm.js";
 import leafletCss from "leaflet/dist/leaflet.css";
-import { metricMeta, fmtWithUnit, fmtNum } from "./metrics.js";
-import { precisionM, fmtDist } from "./geo.js";
+import { metricMeta, fmtWithUnit, fmtNum } from "@vigia/nucleo/metrics.js";
+import { precisionM, fmtDist } from "@vigia/nucleo/geo.js";
 import { AGES, ageMs, metricCounts, defaultMetric, mapPoints, declutter, ageOpacity, pillText, scaleFor, inkFor } from "./mapdata.js";
-import { snrQuality } from "./route.js";
+import { snrQuality } from "@vigia/nucleo/route.js";
 
 const SPAIN = { center: [40.0, -3.7], zoom: 6 };
 

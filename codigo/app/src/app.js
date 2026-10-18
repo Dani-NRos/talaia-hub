@@ -1,15 +1,15 @@
-import { METRICS, extractMetrics, metricMeta, sortMetrics, fmtValue, fmtWithUnit, fmtNum, fmtLimit } from "./metrics.js";
+import { METRICS, extractMetrics, metricMeta, sortMetrics, fmtValue, fmtWithUnit, fmtNum, fmtLimit } from "@vigia/nucleo/metrics.js";
 import { createIdbStore, createMemStore } from "./store.js";
 import { createMapView } from "./map.js";
 import { Receptor } from "./receptor.js";
 import { buildDemo, DEMO_IDS } from "./demo.js";
 import { Protobuf } from "@meshtastic/core";
-import { encodeUser, routingErrorReason, decodeRouteDiscovery } from "./pb.js";
-import { readTrace, relays, snrQuality, loraSf, weakest, traceTimeout, UNKNOWN_NODE, PRESET_NAME } from "./route.js";
-import { distM, compass, precisionM, fmtDist, coordText, mapsUrl, SOURCE, nextPlace, placeFromPos } from "./geo.js";
-import { trendCheck, trendDefault, parseTrendRule } from "./trend.js";
+import { encodeUser, routingErrorReason, decodeRouteDiscovery } from "@vigia/nucleo/pb.js";
+import { readTrace, relays, snrQuality, loraSf, weakest, traceTimeout, UNKNOWN_NODE, PRESET_NAME } from "@vigia/nucleo/route.js";
+import { distM, compass, precisionM, fmtDist, coordText, mapsUrl, SOURCE, nextPlace, placeFromPos } from "@vigia/nucleo/geo.js";
+import { trendCheck, trendDefault, parseTrendRule } from "@vigia/nucleo/trend.js";
 import { searchNodes, highlight, tokens, FILTERS, SORTS } from "./meshsearch.js";
-import { newDelivery, deliveryStep } from "./delivery.js";
+import { newDelivery, deliveryStep } from "@vigia/nucleo/delivery.js";
 
 /* ───────────── utilidades ───────────── */
 const $ = (s, r = document) => r.querySelector(s);

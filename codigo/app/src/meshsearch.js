@@ -1,5 +1,5 @@
 // Buscador de «Resto de la malla»: texto, filtros y orden. Sin DOM, para poder probarlo con node --test.
-import { distM } from "./geo.js";
+import { distM } from "@vigia/nucleo/geo.js";
 
 const HOUR = 3600000;
 

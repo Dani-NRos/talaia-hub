@@ -1,4 +1,4 @@
-// Construye dos salidas desde index.src.html:
+// Construye dos salidas desde index.src.html, en codigo/dist/:
 //  dist/app/      → PWA instalable (index.html autocontenido + sw.js + manifest + iconos)
 //  dist/preview.html → fragmento para la vista previa como artifact (sin service worker)
 import { build } from "esbuild";
@@ -6,7 +6,7 @@ import fs from "node:fs";
 import path from "node:path";
 
 const root = path.dirname(new URL(import.meta.url).pathname);
-const out = path.join(root, "dist");
+const out = path.join(root, "..", "dist"); // codigo/dist, como antes de separar app y núcleo
 const app = path.join(out, "app");
 fs.rmSync(app, { recursive: true, force: true });
 fs.mkdirSync(app, { recursive: true });
