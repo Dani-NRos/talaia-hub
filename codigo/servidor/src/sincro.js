@@ -27,7 +27,7 @@ export const PARTES = {
   link: (S) => S.link,
   device: (S) => S.device,
   trouble: (S) => S.trouble ?? null,
-  diag: (S) => S.diag.slice(0, DIAG_MAX),
+  diag: (S) => S.diag.slice(0, DIAG_MAX).reverse(), // en la app va del más antiguo al más reciente
   settings: (S) => ajustes(S.settings),
   recent: (S) => recientes(S),
 };

@@ -7,6 +7,7 @@ import { relays, snrQuality, loraSf, weakest, UNKNOWN_NODE, PRESET_NAME } from "
 import { distM, compass, precisionM, fmtDist, coordText, mapsUrl, SOURCE } from "@vigia/nucleo/geo.js";
 import { trendDefault, parseTrendRule } from "@vigia/nucleo/trend.js";
 import { searchNodes, highlight, tokens, FILTERS, SORTS } from "./meshsearch.js";
+import { conectarServidor, crearStoreRemoto } from "./remoto.js";
 import { MIN, HOUR, DAY, isNum, hhmm, dShort, ago, stamp, trendDec, fmtTrend, trendVerb, hoursText, lastWindow } from "@vigia/nucleo/textos.js";
 import { crearAcciones } from "@vigia/nucleo/acciones.js";
 import { crearMotor, estadoInicial, MESH_DEFAULT, MESH_HOURLY, ASK, ASK_ALL, askKey, RE, INFO_SUPPRESS, seriesKey, trendKey, hexId } from "@vigia/nucleo/motor.js";
@@ -16,6 +17,8 @@ const $ = (s, r = document) => r.querySelector(s);
 const $$ = (s, r = document) => [...r.querySelectorAll(s)];
 const esc = (s) => String(s ?? "").replace(/[&<>"']/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[c]));
 const APP_VERSION = "1.13.1";
+// Abierta desde Vigía servidor: el estado es el del servidor y lo que se pulsa va a él como una orden.
+const SERVIDOR = typeof window !== "undefined" && !!window.__VIGIA_SERVIDOR;
 const REPO_URL = "https://github.com/Dani-NRos/vigia-mesh";
 const ISSUES_URL = `${REPO_URL}/issues`;
 
@@ -52,6 +55,7 @@ const S = {
   meshView: { filters: [], sort: "auto" }, // filtros y orden del buscador (se guardan)
   logExpanded: false,
   detail: null, // { num, range }
+  servidorOk: false, // modo «Servidor»: hay conexión con él
 };
 let receptor = null;
 let swReg = null;
@@ -70,9 +74,10 @@ const motor = crearMotor(S, {
   alarma: (al) => fireAlarm(al),
   toast: (msg) => toast(msg),
   diag: (e) => pushDiag(e),
-  guardar: (k) => SAVE[k]?.(),
+  // Con servidor, lo guarda él; aquí solo los ajustes de este aparato (sonido, pantalla encendida).
+  guardar: (k) => { if (!SERVIDOR || k === "settings") SAVE[k]?.(); },
   radio: {
-    listo: () => !!receptor?.mesh,
+    listo: () => (SERVIDOR ? S.servidorOk : !!receptor?.mesh),
     requestTelemetry: (...a) => receptor.requestTelemetry(...a),
     requestNodeInfo: (...a) => receptor.requestNodeInfo(...a),
     requestPosition: (...a) => receptor.requestPosition(...a),
@@ -85,8 +90,10 @@ const {
   ack, ackAll, unacked, alarmTitle, alarmDetail, addLog, canAsk, askVisible, askFailText, receptorUsesPki, keyNeeded,
   staleKeyFail, ask, resetAsks, hopName, meshCfg, pumpMesh,
 } = motor;
-// Lo que cambia el usuario (vigilar, límites, valla, ajustes…): lo mismo que hará el servidor con sus órdenes.
+// Lo que cambia el usuario (vigilar, límites, valla, ajustes…): lo mismo que hace el servidor con sus órdenes.
 const acciones = crearAcciones(motor);
+let servidor = null; // modo «Servidor»: la conexión con él
+const orden = (datos) => servidor.orden(datos);
 
 /* ───────────── persistencia (solo modo real) ───────────── */
 function saveCfg() { if (!S.demo) LS.set("vigia.cfg", S.cfg); }
@@ -287,25 +294,27 @@ function refreshPos(num) {
   }
 }
 
-function setFence(num) {
-  const res = acciones.fijarValla(num, parseNum($("#fence-r")?.value));
+async function setFence(num) {
+  const r = parseNum($("#fence-r")?.value);
+  const res = SERVIDOR ? await orden({ orden: "valla", num, radio: r }) : acciones.fijarValla(num, r);
   if (res.error) return toast(res.error);
   if (!res.ok) return;
   refreshPos(num);
   render();
   toast(res.toast);
 }
-function setFenceRadius(num, input) {
-  const res = acciones.radioValla(num, parseNum(input.value));
-  if (res.error) { input.value = res.radio; return toast(res.error); }
+async function setFenceRadius(num, input) {
+  const r = parseNum(input.value);
+  const res = SERVIDOR ? await orden({ orden: "radioValla", num, radio: r }) : acciones.radioValla(num, r);
+  if (res.error) { if (res.radio != null) input.value = res.radio; return toast(res.error); }
   if (!res.ok) return;
   input.blur();
   refreshPos(num);
   render();
   toast(res.toast);
 }
-function delFence(num) {
-  if (!acciones.quitarValla(num).ok) return;
+async function delFence(num) {
+  if (!(SERVIDOR ? await orden({ orden: "quitarValla", num }) : acciones.quitarValla(num)).ok) return;
   refreshPos(num);
   render();
 }
@@ -373,7 +382,7 @@ function meshSection() {
       <div class="set-row"><label class="sw" for="meshClear"><input type="checkbox" id="meshClear" ${cfg.onClear ? "checked" : ""}><span class="sw-ui"></span><span>Avisar también cuando se resuelve</span></label></div>
       <div class="btns"><button class="btn ghost" data-mesh-test>Enviar mensaje de prueba</button></div>
       <p class="hint" id="meshLast">${meshLastHTML()}</p>
-      <p class="hint">Sale un mensaje al saltar cada alarma de umbral, cambio rápido, sin señal o fuera de su sitio: en un canal lo leen todos los que lo tengan; a un nodo, solo él, y se da por entregado cuando ese nodo lo confirma (que un vecino lo repita no basta). Como mucho uno cada 8 s y ${MESH_HOURLY} por hora, para no saturar la malla. Solo con Vigía abierta y el receptor conectado. Los canales públicos están bloqueados porque lo leería cualquiera.</p>
+      <p class="hint">Sale un mensaje al saltar cada alarma de umbral, cambio rápido, sin señal o fuera de su sitio: en un canal lo leen todos los que lo tengan; a un nodo, solo él, y se da por entregado cuando ese nodo lo confirma (que un vecino lo repita no basta). Como mucho uno cada 8 s y ${MESH_HOURLY} por hora, para no saturar la malla. ${SERVIDOR ? "Los manda el servidor, aunque no haya ninguna pantalla abierta." : "Solo con Vigía abierta y el receptor conectado."} Los canales públicos están bloqueados porque lo leería cualquiera.</p>
     </section>`;
 }
 
@@ -579,6 +588,7 @@ function render() {
 const ICON = {
   bt: `<svg viewBox="0 0 24 24" aria-hidden="true"><path d="M7 7l10 10-5 4V3l5 4L7 17" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"/></svg>`,
   usb: `<svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 3v14M12 3l-2.5 3h5L12 3ZM12 17a2 2 0 1 0 0 4 2 2 0 0 0 0-4ZM12 14l-5-3V8M12 12l5-3V7" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"/><rect x="5.5" y="6.5" width="3" height="2" rx=".5" fill="currentColor"/><circle cx="17" cy="6" r="1.4" fill="currentColor"/></svg>`,
+  server: `<svg viewBox="0 0 24 24" aria-hidden="true"><rect x="4" y="4" width="16" height="6.5" rx="1.5" fill="none" stroke="currentColor" stroke-width="1.7"/><rect x="4" y="13.5" width="16" height="6.5" rx="1.5" fill="none" stroke="currentColor" stroke-width="1.7"/><circle cx="8" cy="7.25" r="1.1" fill="currentColor"/><circle cx="8" cy="16.75" r="1.1" fill="currentColor"/></svg>`,
   gear: `<svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 15.2a3.2 3.2 0 1 0 0-6.4 3.2 3.2 0 0 0 0 6.4Z" fill="none" stroke="currentColor" stroke-width="1.8"/><path d="M19.4 13.5a7.6 7.6 0 0 0 0-3l2-1.6-2-3.4-2.4.9a7.5 7.5 0 0 0-2.6-1.5L14 2.4h-4l-.4 2.5A7.5 7.5 0 0 0 7 6.4l-2.4-.9-2 3.4 2 1.6a7.6 7.6 0 0 0 0 3l-2 1.6 2 3.4 2.4-.9a7.5 7.5 0 0 0 2.6 1.5l.4 2.5h4l.4-2.5a7.5 7.5 0 0 0 2.6-1.5l2.4.9 2-3.4-2-1.6Z" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linejoin="round"/></svg>`,
   close: `<svg viewBox="0 0 24 24" aria-hidden="true"><path d="M6 6l12 12M18 6L6 18" stroke="currentColor" stroke-width="2" stroke-linecap="round"/></svg>`,
   chevron: `<svg viewBox="0 0 24 24" aria-hidden="true"><path d="M6 9l6 6 6-6" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/></svg>`,
@@ -599,6 +609,7 @@ const LINK_TEXT = {
 
 function renderTop() {
   const b = $("#linkBtn");
+  if (SERVIDOR) return renderTopServidor(b);
   const st = S.demo ? "demo" : S.link.state;
   b.dataset.state = st;
   let label = S.demo ? "Demo" : LINK_TEXT[st] || st;
@@ -612,6 +623,20 @@ function renderTop() {
   }
   b.innerHTML = `<span class="ld"></span>${!S.demo && linkKind() === "serial" ? ICON.usb : ICON.bt}<span class="lt">${esc(label)}</span>`;
   $("#demoBar").hidden = !S.demo;
+}
+
+/** Barra de arriba con servidor: primero, si hay conexión con él; después, cómo está su receptor. */
+function renderTopServidor(b) {
+  const st = !S.servidorOk ? "reconnecting" : S.link.state;
+  let label;
+  if (!S.servidorOk) label = "Sin conexión con el servidor";
+  else if (st === "ready") label = `${S.nodes.get(S.myNode)?.short || "Receptor"} conectado`;
+  else if (st === "configuring") label = S.link.extra?.packets ? `Leyendo el nodo · ${S.link.extra.packets}` : "Leyendo el nodo…";
+  else if (st === "reconnecting" || st === "connecting") label = S.trouble?.kind === "unplugged" ? "Receptor desenchufado" : "Receptor sin conexión";
+  else label = "Receptor parado";
+  b.dataset.state = st;
+  b.innerHTML = `<span class="ld"></span>${ICON.server}<span class="lt">${esc(label)}</span>`;
+  $("#demoBar").hidden = true;
 }
 
 function renderBoard() {
@@ -728,6 +753,7 @@ const TROUBLE_USB = {
 TROUBLE_USB.other = TROUBLE_USB.lost;
 
 function troubleHTML() {
+  if (SERVIDOR) return troubleServidorHTML();
   const tr = S.trouble;
   if (S.demo || !tr || S.otherWindow || S.link.state === "ready") return "";
   const urgent = tr.kind === "pairing" || tr.kind === "service";
@@ -738,6 +764,13 @@ function troubleHTML() {
   const steps = g.steps.map((x) => `<li>${esc(x.replace("{name}", name))}</li>`).join("");
   const retry = S.link.state === "idle" ? connectButtons() : `<button class="btn primary" data-retry>Reintentar ahora</button>`;
   return `<div class="trouble" role="status"><h2>${esc(g.title)}</h2><p>${esc(g.lead)} <span class="tr-n">${tr.count === 1 ? "1 intento" : `${tr.count} intentos seguidos`}.</span></p><ol>${steps}</ol><div class="btns">${retry}<button class="btn ghost" data-diag>Ver diagnóstico</button></div></div>`;
+}
+
+function troubleServidorHTML() {
+  if (!S.servidorOk) return `<div class="trouble" role="status"><h2>Sin conexión con el servidor</h2><p>Esta pantalla no llega al servidor de Vigía. Lo vuelve a intentar sola cada pocos segundos. Mientras tanto, el servidor sigue vigilando.</p><ol><li>Comprueba que este aparato está en la red de casa (o en Tailscale).</li><li>Si el servidor se ha reiniciado, espera un momento.</li></ol></div>`;
+  const tr = S.trouble;
+  if (!tr || S.link.state === "ready" || tr.count < 2) return "";
+  return `<div class="trouble" role="status"><h2>El servidor no conecta con su receptor</h2><p>${esc(tr.detail || tr.kind)}. ${esc(tr.consejo || "")} <span class="tr-n">${tr.count} intentos seguidos.</span></p><div class="btns"><button class="btn primary" data-retry>Reintentar ahora</button><button class="btn ghost" data-diag>Ver diagnóstico</button></div></div>`;
 }
 
 /* ───────────── diagnóstico de conexión ───────────── */
@@ -1124,7 +1157,7 @@ function renderLog() {
 }
 
 function renderFoot() {
-  const bits = ["Sin internet: los datos se guardan solo en este dispositivo."];
+  const bits = [SERVIDOR ? "Datos guardados en el servidor de Vigía, en tu red." : "Sin internet: los datos se guardan solo en este dispositivo."];
   if (wake) bits.push("Pantalla fija activada.");
   $("#foot").textContent = bits.join(" ");
   const v = $("#footVer");
@@ -1242,13 +1275,15 @@ function refreshDetailLive() {
   liveT = setTimeout(drawCharts, 400);
 }
 
-function saveRuleFromInput(inp) {
+async function saveRuleFromInput(inp) {
   const num = S.detail?.num;
   const w = S.cfg.watched[num];
   if (!w) return;
   const err = $("#ruleErr");
   if (inp.id === "r-off") {
-    const res = acciones.ponerSinSenal(num, parseNum(inp.value));
+    const v = parseNum(inp.value);
+    if (SERVIDOR && Number.isNaN(v)) { showErr(err, "Pon un número de minutos (1 o más) o déjalo vacío."); inp.focus(); return; }
+    const res = SERVIDOR ? await orden({ orden: "sinSenal", num, valor: v }) : acciones.ponerSinSenal(num, v);
     if (res.error) { showErr(err, res.error); inp.focus(); return; }
     err.hidden = true;
     render();
@@ -1258,7 +1293,7 @@ function saveRuleFromInput(inp) {
   const k = inp.dataset.rule, side = inp.dataset.side;
   const v = parseNum(inp.value);
   if (Number.isNaN(v)) { showErr(err, `“${inp.value}” no es un número. Usa coma o punto para los decimales.`); inp.focus(); return; }
-  const res = acciones.ponerLimite(num, k, side, v);
+  const res = SERVIDOR ? await orden({ orden: "limite", num, metrica: k, lado: side, valor: v }) : acciones.ponerLimite(num, k, side, v);
   if (res.error) { showErr(err, res.error); inp.focus(); return; }
   err.hidden = true;
   render();
@@ -1315,38 +1350,38 @@ function trendFormFill() {
   $("[data-trend-add]").textContent = cur ? "Guardar aviso" : "Añadir aviso";
   $("#trErr").hidden = true;
 }
-function addTrend(num) {
+async function addTrend(num) {
   const w = S.cfg.watched[num];
   if (!w) return;
   const k = $("#tr-metric").value, err = $("#trErr");
   const delta = parseNum($("#tr-delta").value), hours = parseNum($("#tr-hours").value);
   const { rule, error } = parseTrendRule($("#tr-dir").value, delta ?? NaN, hours ?? NaN);
   if (error) { showErr(err, error); return; }
-  const res = acciones.ponerTendencia(num, k, rule);
+  const res = SERVIDOR ? await orden({ orden: "tendencia", num, metrica: k, regla: rule }) : acciones.ponerTendencia(num, k, rule);
   if (res.error) { showErr(err, res.error); return; }
   refreshTrend(num, k);
   render();
   toast(res.toast);
 }
-function delTrend(num, k) {
-  const res = acciones.quitarTendencia(num, k);
+async function delTrend(num, k) {
+  const res = SERVIDOR ? await orden({ orden: "quitarTendencia", num, metrica: k }) : acciones.quitarTendencia(num, k);
   if (!res.ok) return;
   refreshTrend(num);
   render();
   toast(res.toast);
 }
 
-function watch(num) {
-  const res = acciones.vigilar(num);
-  if (!res.ok) return;
-  res.recientes.then(render);
+async function watch(num) {
+  const res = SERVIDOR ? await orden({ orden: "vigilar", num }) : acciones.vigilar(num);
+  if (!res.ok) { if (res.error) toast(res.error); return; }
+  res.recientes?.then(render);
   render();
   if (S.detail?.num === num && $("#detail").open) { renderDetail(); drawCharts(); }
   toast(res.toast);
 }
 
-function unwatch(num) {
-  acciones.dejarDeVigilar(num);
+async function unwatch(num) {
+  if (SERVIDOR) await orden({ orden: "dejar", num }); else acciones.dejarDeVigilar(num);
   // Lo de la pantalla (tarjeta contraída, orden) es de este aparato.
   delete S.ui.collapsed[num];
   S.ui.order = S.ui.order.filter((n) => n !== num);
@@ -1386,13 +1421,29 @@ function connectButtons() {
   return linkKind() === "serial" ? usb + bt : bt + usb;
 }
 
+function receptorServidorHTML() {
+  if (!S.servidorOk) return `<p class="warn-t">Sin conexión con el servidor de Vigía. Esta pantalla lo vuelve a intentar sola.</p>`;
+  const my = S.myNode != null ? S.nodes.get(S.myNode) : null;
+  const via = S.device?.kind === "tcp" ? `por la red${S.device.direccion ? ` (${S.device.direccion})` : ""}` : "por cable USB";
+  const txt = {
+    ready: `El servidor está conectado ${via} a ${my ? `${my.short} · ${my.long}` : "su nodo"}.`,
+    configuring: "El servidor está leyendo la base de datos de nodos de su receptor…",
+    connecting: "El servidor está conectando con su receptor…",
+    reconnecting: `El servidor no tiene conexión con su receptor${S.trouble?.detail ? `: ${S.trouble.detail}` : ""}. Lo vuelve a intentar solo.`,
+    idle: "El receptor del servidor está parado.",
+  }[S.link.state] || "";
+  return `<p>${esc(txt)}</p>${S.link.state === "reconnecting" ? `${S.trouble?.consejo ? `<p class="hint">${esc(S.trouble.consejo)}</p>` : ""}<div class="btns"><button class="btn primary" data-retry>Reintentar ahora</button></div>` : ""}
+    <p class="hint">Estás viendo Vigía desde el servidor: él tiene el receptor y vigila aunque cierres esta página. Los nodos vigilados, las alarmas, el «Enterado» y los avisos por la malla son los mismos en todos tus aparatos; el sonido y la pantalla encendida son de cada uno.</p>`;
+}
+
 function renderSettings() {
   const st = S.link.state;
   const dev = S.device || LS.get("vigia.device", null);
   const sup = btSupportMsg() && serialSupportMsg();
   const viaUsb = linkKind() === "serial";
   let rec = "";
-  if (sup) rec = `<p class="warn-t">${esc(btSupportMsg())}</p>`;
+  if (SERVIDOR) rec = receptorServidorHTML();
+  else if (sup) rec = `<p class="warn-t">${esc(btSupportMsg())}</p>`;
   else if (S.demo) rec = `<p>Estás en la demo. Sal de ella para conectar tu nodo.</p><div class="btns"><button class="btn primary" data-demo-off>Salir de la demo y conectar</button></div>`;
   else {
     const my = S.myNode != null ? S.nodes.get(S.myNode) : null;
@@ -1421,8 +1472,9 @@ function renderSettings() {
         ${canSerial() ? `<li><strong>Por cable: el puerto está ocupado.</strong> Solo un programa puede abrirlo: cierra la web de Meshtastic, el flasheador o cualquier monitor serie. Usa un cable de datos (algunos solo cargan).</li>` : ""}
       </ul></details>`;
   }
-  const notifState = !("Notification" in window) ? "none" : Notification.permission;
+  const notifState = !("Notification" in window) ? "none" : SERVIDOR && !window.isSecureContext ? "http" : Notification.permission;
   const notif = notifState === "granted" ? `<span class="okt">Activadas</span>`
+    : notifState === "http" ? `<span class="hint">El navegador solo las deja con https (llegarán con Tailscale)</span>`
     : notifState === "denied" ? `<span class="warn-t">Bloqueadas en los ajustes del navegador</span>`
     : notifState === "none" ? `<span class="hint">No disponibles aquí</span>`
     : `<button class="btn ghost" data-notif>Activar</button>`;
@@ -1434,7 +1486,7 @@ function renderSettings() {
       <div class="set-row"><label class="sw" for="setWake"><input type="checkbox" id="setWake" ${S.settings.wake ? "checked" : ""}><span class="sw-ui"></span><span>Mantener la pantalla encendida</span></label></div>
       <div class="set-row"><span>Notificaciones del sistema</span>${notif}</div>
       <div class="set-row"><label for="setOff">Sin señal, valor para nodos nuevos</label><span class="inp-u"><input id="setOff" class="inp" inputmode="numeric" autocomplete="off" value="${S.settings.defaultOfflineMin}"><span>min</span></span></div>
-      <p class="hint">Las alarmas solo saltan con la app abierta y en pantalla. Con el móvil bloqueado, Chrome congela la página; al volver, recoge lo que guardó el receptor y avisa de lo que se perdió.</p>
+      <p class="hint">${SERVIDOR ? "El servidor vigila siempre. Esta pantalla suena y avisa mientras está abierta; si das «Enterado» aquí, queda visto en todos tus aparatos." : "Las alarmas solo saltan con la app abierta y en pantalla. Con el móvil bloqueado, Chrome congela la página; al volver, recoge lo que guardó el receptor y avisa de lo que se perdió."}</p>
     </section>
     ${PREVIEW && !S.demo ? "" : meshSection()}
     <section class="blk"><h3>Histórico</h3>
@@ -1449,10 +1501,10 @@ function renderSettings() {
     <section class="blk" id="diagBox"><h3>Diagnóstico de conexión</h3>
       <p class="hint">Cada paso de la conexión queda apuntado aquí. Si falla, copia el diagnóstico: dice en qué paso se corta.</p>
       <pre class="diag" id="diagList">${esc(diagLines(40))}</pre>
-      <div class="btns"><button class="btn ghost" data-copy-diag>Copiar diagnóstico</button><button class="btn ghost" data-report>Avisar del fallo en GitHub</button><button class="btn ghost" data-clear-diag>Borrar</button></div>
+      <div class="btns"><button class="btn ghost" data-copy-diag>Copiar diagnóstico</button><button class="btn ghost" data-report>Avisar del fallo en GitHub</button>${SERVIDOR ? "" : `<button class="btn ghost" data-clear-diag>Borrar</button>`}</div>
       <p class="hint">«Avisar del fallo» abre un aviso nuevo en GitHub con el diagnóstico ya pegado. Necesita internet y una cuenta de GitHub, y el aviso es público: revisa el texto antes de enviarlo.</p>
     </section>`}
-    <section class="blk"><h3>Demostración</h3>${S.demo ? `<p>Los datos que ves son inventados y no se guardan.</p>${PREVIEW ? "" : `<button class="btn ghost" data-demo-off>Salir de la demo</button>`}` : `<p>Prueba el panel con nodos inventados. Tus datos reales no se tocan.</p><button class="btn ghost" data-demo-on>Ver la demo</button>`}</section>
+    ${SERVIDOR ? "" : `<section class="blk"><h3>Demostración</h3>${S.demo ? `<p>Los datos que ves son inventados y no se guardan.</p>${PREVIEW ? "" : `<button class="btn ghost" data-demo-off>Salir de la demo</button>`}` : `<p>Prueba el panel con nodos inventados. Tus datos reales no se tocan.</p><button class="btn ghost" data-demo-on>Ver la demo</button>`}</section>`}
     <section class="blk about"><h3>Acerca de</h3>
       <p><strong>Vigía Mesh ${APP_VERSION}</strong>. Panel de alarmas para nodos Meshtastic que funciona sin internet. Hecho por Dani-NRos.</p>
       <div class="btns"><a class="btn ghost" href="${REPO_URL}" target="_blank" rel="noopener">Código en GitHub</a><a class="btn ghost" href="${ISSUES_URL}" target="_blank" rel="noopener">Avisos y sugerencias</a></div>
@@ -1497,6 +1549,22 @@ async function exportCsv() {
   a.remove();
   setTimeout(() => URL.revokeObjectURL(a.href), 4000);
   toast(`${rows.length.toLocaleString("es-ES")} lecturas exportadas`);
+}
+
+/* ───────────── Enterado y peticiones: aquí o en el servidor ───────────── */
+function ackUI(key) {
+  if (!SERVIDOR || key === "test") return ack(key); // la alarma de prueba es solo de este aparato
+  orden({ orden: "ack", key });
+}
+function ackAllUI() {
+  if (!SERVIDOR) return ackAll();
+  if (S.active.has("test")) ack("test");
+  orden({ orden: "ackAll" });
+}
+async function askUI(num, type) {
+  if (!SERVIDOR) return ask(num, type);
+  const r = await orden({ orden: "pedir", num, tipo: type });
+  if (r.toast || r.error) toast(r.toast || r.error);
 }
 
 /* ───────────── receptor ───────────── */
@@ -1689,7 +1757,7 @@ document.addEventListener("click", async (ev) => {
     return;
   }
   const ds = t.dataset;
-  if ("ask" in ds) return ask(Number(ds.num), ds.ask);
+  if ("ask" in ds) return askUI(Number(ds.num), ds.ask);
   if ("mapFocus" in ds) return openMap(Number(ds.mapFocus));
   if ("cardToggle" in ds) return toggleCard(Number(ds.cardToggle));
   if ("cardsAll" in ds) return toggleAllCards();
@@ -1708,8 +1776,8 @@ document.addEventListener("click", async (ev) => {
   if ("fenceDel" in ds) return delFence(Number(ds.fenceDel));
   if ("trendAdd" in ds) return addTrend(Number(ds.trendAdd));
   if ("trendDel" in ds) return S.detail && delTrend(S.detail.num, ds.trendDel);
-  if ("ack" in ds) return ack(ds.ack);
-  if ("ackall" in ds) return ackAll();
+  if ("ack" in ds) return ackUI(ds.ack);
+  if ("ackall" in ds) return ackAllUI();
   if ("watch" in ds) return watch(Number(ds.watch));
   if ("close" in ds) return t.closest("dialog")?.close();
   if ("connect" in ds) { $("#settings").open && $("#settings").close(); return connectFlow(false); }
@@ -1717,7 +1785,7 @@ document.addEventListener("click", async (ev) => {
   if ("connectBt" in ds) { $("#settings").open && $("#settings").close(); return connectFlow(false, "ble"); }
   if ("connectUsb" in ds) { $("#settings").open && $("#settings").close(); return connectFlow(false, "serial"); }
   if ("connectUsbAll" in ds) { $("#settings").open && $("#settings").close(); return connectFlow(true, "serial"); }
-  if ("retry" in ds) return receptor?.retryNow();
+  if ("retry" in ds) return SERVIDOR ? orden({ orden: "reconectar" }) : receptor?.retryNow();
   if ("takeover" in ds) {
     if (!receptor) receptor = makeReceptor();
     if (!receptor.hasTarget) { S.otherWindow = null; render(); return connectFlow(false); }
@@ -1727,7 +1795,7 @@ document.addEventListener("click", async (ev) => {
   }
   if ("diag" in ds) { openSettings(); setTimeout(() => $("#diagBox")?.scrollIntoView({ block: "start" }), 50); return; }
   if ("meshTest" in ds) {
-    const res = acciones.pruebaMalla();
+    const res = SERVIDOR ? await orden({ orden: "pruebaMalla" }) : acciones.pruebaMalla();
     if (res.toast) toast(res.toast);
     return;
   }
@@ -1759,11 +1827,11 @@ document.addEventListener("click", async (ev) => {
   if ("demoOff" in ds) { $("#settings").open && $("#settings").close(); if (PREVIEW) return toast(btSupportMsg()); stopDemo(); return connectFlow(false); }
   if ("notif" in ds) { try { await Notification.requestPermission(); } catch { /* nada */ } renderSettings(); return; }
   if ("test" in ds) { unlockAudio(); raise("test", { kind: "test", num: null, t: Date.now() }); $("#settings").close(); return; }
-  if ("export" in ds) return exportCsv();
+  if ("export" in ds) return SERVIDOR ? location.assign("api/lecturas.csv") : exportCsv();
   if ("wipe" in ds) {
     if (Date.now() - wipeArmed > 4000) { wipeArmed = Date.now(); t.textContent = "Toca otra vez para borrar"; return; }
     wipeArmed = 0;
-    const res = await acciones.borrarHistorico();
+    const res = SERVIDOR ? await orden({ orden: "borrarHistorico" }) : await acciones.borrarHistorico();
     renderSettings();
     render();
     return toast(res.toast);
@@ -1782,7 +1850,7 @@ document.addEventListener("click", async (ev) => {
     return;
   }
   if ("range" in ds) { S.detail.range = ds.range; $$("#detail [data-range]").forEach((b) => b.setAttribute("aria-pressed", String(b.dataset.range === ds.range))); return drawCharts(); }
-  if (t.id === "linkBtn") { if (!S.demo && S.link.state === "idle" && !(linkKind() === "serial" ? serialSupportMsg() : btSupportMsg())) return connectFlow(false); return openSettings(); }
+  if (t.id === "linkBtn") { if (SERVIDOR) return openSettings(); if (!S.demo && S.link.state === "idle" && !(linkKind() === "serial" ? serialSupportMsg() : btSupportMsg())) return connectFlow(false); return openSettings(); }
   if (t.id === "setBtn") return openSettings();
   if (t.id === "mapBtn") return openMap();
   if (t.id === "meshMore") { S.meshExpanded = !S.meshExpanded; return renderMesh(); }
@@ -1835,7 +1903,7 @@ document.addEventListener("keydown", (ev) => {
 
 document.addEventListener("input", (ev) => { if (ev.target.id === "meshQ") onMeshQuery(ev.target.value); });
 
-document.addEventListener("change", (ev) => {
+document.addEventListener("change", async (ev) => {
   const t = ev.target;
   if (t.id === "meshSort") { S.meshView.sort = t.value; S.meshExpanded = false; saveMeshView(); return renderMesh(); }
   if (t.id === "fence-r") return S.detail && setFenceRadius(S.detail.num, t);
@@ -1845,22 +1913,26 @@ document.addEventListener("change", (ev) => {
   if (t.id === "setSound") { S.settings.sound = t.checked; saveSettings(); if (t.checked) { unlockAudio(); beep(); } return; }
   if (t.id === "setWake") { S.settings.wake = t.checked; saveSettings(); return applyWake(); }
   if (t.id === "setOff") {
-    const res = acciones.sinSenalPorDefecto(parseNum(t.value));
+    const v = parseNum(t.value);
+    const res = SERVIDOR ? await orden({ orden: "sinSenalDefecto", valor: Number.isNaN(v) ? null : v }) : acciones.sinSenalPorDefecto(v);
     if (res.error) { t.value = res.valor; return toast(res.error); }
     return toast(res.toast);
   }
   if (t.id === "meshOn" || t.id === "meshClear") {
-    const res = acciones.avisosMalla(t.id === "meshOn" ? { enabled: t.checked } : { onClear: t.checked });
+    const cambio = t.id === "meshOn" ? { enabled: t.checked } : { onClear: t.checked };
+    const res = SERVIDOR ? await orden({ orden: "malla", cambio }) : acciones.avisosMalla(cambio);
     if (res.toast) toast(res.toast);
     return;
   }
   if (t.id === "meshCh" || t.id === "meshNode") {
     const v = t.value === "" ? null : Number(t.value);
-    const res = acciones.avisosMalla(t.id === "meshCh" ? { channel: v } : { node: v });
+    const cambio = t.id === "meshCh" ? { channel: v } : { node: v };
+    const res = SERVIDOR ? await orden({ orden: "malla", cambio }) : acciones.avisosMalla(cambio);
     if (!res.ok) { t.value = ""; return toast(res.toast); }
     return renderSettings();
   }
   if (t.id === "setRet") {
+    if (SERVIDOR) { await orden({ orden: "retencion", dias: Number(t.value) }); return renderSettings(); }
     acciones.retencion(Number(t.value)).poda.then(renderSettings);
   }
 });
@@ -1871,8 +1943,91 @@ window.addEventListener("resize", () => { if (S.full) { clearTimeout(fullT); ful
 $("#detail").addEventListener("close", () => { if ($("#detail").open) return; S.detail = null; unwatchArmed = 0; });
 window.addEventListener("resize", () => { clearTimeout(liveT); liveT = setTimeout(drawCharts, 200); });
 
+/* ───────────── modo «Servidor» ───────────── */
+/** Lecturas nuevas del servidor: a las series de las últimas 26 h, como hace el motor al recibirlas. */
+function anadirReciente(r) {
+  const key = seriesKey(r.node, r.metric);
+  const arr = S.recent.get(key) || [];
+  const i = arr.findIndex((p) => p.t === r.t);
+  if (i >= 0) arr[i] = { t: r.t, v: r.v }; // ya venía en la foto
+  else arr.push({ t: r.t, v: r.v });
+  if (arr.length > 1 && arr[arr.length - 2].t > r.t) arr.sort((a, b) => a.t - b.t);
+  while (arr.length && arr[0].t < Date.now() - 26 * HOUR) arr.shift();
+  S.recent.set(key, arr);
+}
+function aplicarPartes(p) {
+  if ("cfg" in p) S.cfg = p.cfg;
+  if ("active" in p) {
+    const prueba = S.active.get("test"); // la alarma de prueba es solo de este aparato
+    S.active = new Map(p.active.map((a) => [a.key, a]));
+    if (prueba) S.active.set("test", prueba);
+  }
+  for (const k of ["log", "channels", "myNode", "myUser", "lora", "traces", "meshLast", "link", "device", "trouble", "diag"]) if (k in p) S[k] = p[k];
+  if ("req" in p) S.req = new Map(p.req.map((r) => [askKey(r.num, r.type), r]));
+  if ("settings" in p) Object.assign(S.settings, p.settings); // sonido y pantalla encendida siguen siendo de este aparato
+  if ("recent" in p) S.recent = new Map(Object.entries(p.recent));
+  if (p.nodes) for (const n of p.nodes) S.nodes.set(n.num, n);
+  if (p.rows) for (const r of p.rows) anadirReciente(r);
+}
+/** Refresca lo que esté abierto según lo que haya cambiado, sin pisar lo que se esté escribiendo. */
+function refrescarAbiertos(p) {
+  const escribiendo = (sel) => document.activeElement?.matches?.(sel);
+  const num = S.detail?.num;
+  if (num != null && $("#detail").open) {
+    if (("cfg" in p || "active" in p || "traces" in p) && !escribiendo("#detail input, #detail select")) { renderDetail(); drawCharts(); }
+    else {
+      if (p.nodes?.some((n) => n.num === num) || p.rows?.some((r) => r.node === num)) refreshDetailLive();
+      if ("req" in p || "traces" in p) { refreshAsk(num); refreshPos(num); }
+    }
+  }
+  if (S.full && (p.nodes || p.rows || "active" in p)) refreshFull(S.full.num);
+  if ($("#settings").open) {
+    if ("meshLast" in p) patchMeshLast();
+    if (("link" in p || "diag" in p || "settings" in p || "channels" in p || "trouble" in p) && !escribiendo("#settings input, #settings select")) renderSettings();
+  }
+  if (mapView && $("#map").open && (p.nodes || "traces" in p)) mapView.update();
+}
+function bootServidor() {
+  S.settings = { ...DEFAULT_SETTINGS, ...LS.get("vigia.settings", {}) };
+  S.ui = { collapsed: {}, order: [], ...(LS.get("vigia.cards", {}) || {}) };
+  S.meshView = { filters: [], sort: "auto", ...(LS.get("vigia.meshView", {}) || {}) };
+  S.link = { state: "connecting", extra: null };
+  render();
+  servidor = conectarServidor({
+    onConexion(ok) {
+      if (ok === S.servidorOk) return;
+      S.servidorOk = ok;
+      if (!ok) addLogLocal("Sin conexión con el servidor; reintentando…");
+      render();
+      if ($("#settings").open) renderSettings();
+    },
+    onEstado(foto) {
+      S.nodes = new Map(foto.nodes.map((n) => [n.num, n]));
+      aplicarPartes({ ...foto, nodes: null });
+      render();
+      refrescarAbiertos(foto);
+    },
+    onCambio(p) {
+      aplicarPartes(p);
+      render();
+      refrescarAbiertos(p);
+    },
+    onAlarma({ al }) { if (!al.acked) fireAlarm(al); },
+  });
+  S.store = crearStoreRemoto(orden);
+  applyWake();
+  // Service worker y notificaciones solo con https (Tailscale); por http en la red de casa, el navegador no los deja.
+  if (window.isSecureContext && "serviceWorker" in navigator) {
+    navigator.serviceWorker.register("./sw.js").then((r) => { swReg = r; }).catch(() => {});
+  }
+  setInterval(render, 15000); // «hace X min»
+}
+/** Una línea en el diagnóstico de esta pantalla (el del servidor viene con su estado). */
+function addLogLocal(msg) { S.diag = [...(S.diag || []), { t: Date.now(), msg }].slice(-60); }
+
 /* ───────────── arranque ───────────── */
 async function boot() {
+  if (SERVIDOR) return bootServidor();
   S.settings = { ...DEFAULT_SETTINGS, ...LS.get("vigia.settings", {}) };
   S.diag = LS.get("vigia.diag", []) || [];
   loadReal();

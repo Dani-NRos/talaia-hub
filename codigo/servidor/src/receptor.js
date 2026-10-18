@@ -71,7 +71,7 @@ export class ReceptorNodo extends ReceptorBase {
     this.closingP = null;
     if (this.kind === "tcp") {
       const { host, puerto = 4403 } = this.destino;
-      this.h.onDevice?.({ kind: "tcp", name: `${host}:${puerto}` });
+      this.h.onDevice?.({ kind: "tcp", name: `${host}:${puerto}`, direccion: `${host}:${puerto}` });
       return new EnlaceFlujo(() => (this.opts.abrirTcp || abrirTcp)(host, puerto), hooks);
     }
     const lista = (this.opts.listarPuertos || listarPuertos)();

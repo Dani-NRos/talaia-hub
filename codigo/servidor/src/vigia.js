@@ -122,6 +122,7 @@ export async function crearVigia(config, registro, opts = {}) {
     },
     onDevice(dev) { S.device = dev; },
     onReady() {
+      S.trouble = null;
       motor.resetClock();
       setTimeout(motor.pumpMesh, 1500);
       avisados = 0;
@@ -137,7 +138,7 @@ export async function crearVigia(config, registro, opts = {}) {
       motor.evalOffline();
     },
     onTrouble(info) {
-      S.trouble = info;
+      S.trouble = { ...info, consejo: CONSEJO[info.kind] || "" };
       // Al principio, cada fallo; luego, de vez en cuando, para no llenar el diario si el nodo está desenchufado.
       avisados++;
       if (avisados <= 3 || avisados % 20 === 0) {
