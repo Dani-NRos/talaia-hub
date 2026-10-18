@@ -122,6 +122,7 @@ export async function crearVigia(config, registro, opts = {}) {
       motor.clearAlarm("link", {});
       if (S.myNode != null) S.device = { ...S.device, name: motor.nodeName(S.myNode) };
       motor.addLog("info", `Receptor listo ${receptor.kind === "tcp" ? "por la red" : "por cable"}: ${S.myNode != null ? motor.nodeName(S.myNode) : S.device?.name || "nodo"}`);
+      registro.info(`Base de nodos: ${S.nodes.size.toLocaleString("es-ES")} nodos conocidos, ${Object.keys(S.cfg.watched).length} vigilados`);
       motor.evalOffline();
       eventos.emit("cambio");
     },
@@ -164,6 +165,16 @@ export async function crearVigia(config, registro, opts = {}) {
   }
   await podar();
   const podarId = setInterval(podar, 6 * HOUR);
+  // Resumen cada hora en el diario: para ver de un vistazo que sigue vivo y oyendo la malla.
+  async function resumen() {
+    const hace = Date.now() - HOUR;
+    const oidos = [...S.nodes.values()].filter((n) => n.lastHeard >= hace).length;
+    const lecturas = await almacen.lecturas.count(hace).catch(() => 0);
+    const activas = [...S.active.values()];
+    const estado = S.link.state === "ready" ? "conectado" : S.link.state === "idle" ? "parado" : "sin conexión, reintentando";
+    registro.info(`Resumen de la última hora: receptor ${estado}; ${oidos} nodos oídos; ${lecturas} lecturas guardadas; ${activas.length ? `${activas.length} alarmas activas (${activas.filter((a) => !a.acked).length} sin ver)` : "sin alarmas"}`);
+  }
+  const resumenId = setInterval(resumen, HOUR);
 
   return {
     S, motor, almacen, eventos,
@@ -178,6 +189,7 @@ export async function crearVigia(config, registro, opts = {}) {
       if (cerrado) return;
       clearInterval(offlineId);
       clearInterval(podarId);
+      clearInterval(resumenId);
       await receptor.disconnect();
       motor.resetAsks(); // peticiones a medias: sus temporizadores ya no deben tocar nada
       guardarNodos();

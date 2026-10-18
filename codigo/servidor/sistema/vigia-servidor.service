@@ -1,0 +1,36 @@
+[Unit]
+Description=Vigía servidor (telemetría y alarmas Meshtastic)
+Documentation=https://github.com/Dani-NRos/vigia-mesh
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+User=vigia
+Group=vigia
+SupplementaryGroups=dialout
+ExecStart=/opt/vigia/node/bin/node /opt/vigia/actual/servidor/src/main.js --config /etc/vigia/servidor.json
+WorkingDirectory=/var/lib/vigia
+# /var/lib/vigia, del usuario vigia: base de datos y estado.
+StateDirectory=vigia
+StateDirectoryMode=0750
+Environment=NODE_ENV=production
+# Si falla, vuelve a arrancar a los 5 s. Con la configuración mal escrita (salida 2) no insiste: hay que corregirla.
+Restart=on-failure
+RestartSec=5
+RestartPreventExitStatus=2
+TimeoutStopSec=15
+
+# Lo justo para leer su configuración, escribir sus datos y abrir el puerto serie.
+NoNewPrivileges=yes
+ProtectSystem=strict
+ProtectHome=yes
+PrivateTmp=yes
+ProtectKernelTunables=yes
+ProtectKernelModules=yes
+ProtectControlGroups=yes
+RestrictSUIDSGID=yes
+LockPersonality=yes
+
+[Install]
+WantedBy=multi-user.target

@@ -30,6 +30,7 @@ export function abrirAlmacen(ruta) {
     serie: db.prepare("SELECT t, v FROM lecturas WHERE nodo = ? AND metrica = ? AND t >= ? AND t <= ? ORDER BY t"),
     todas: db.prepare("SELECT nodo AS node, metrica AS metric, t, v FROM lecturas ORDER BY t"),
     cuenta: db.prepare("SELECT COUNT(*) AS n FROM lecturas"),
+    cuentaDesde: db.prepare("SELECT COUNT(*) AS n FROM lecturas WHERE t >= ?"),
     podar: db.prepare("DELETE FROM lecturas WHERE t < ?"),
     vaciar: db.prepare("DELETE FROM lecturas"),
     leerEstado: db.prepare("SELECT valor FROM estado WHERE clave = ?"),
@@ -54,7 +55,7 @@ export function abrirAlmacen(ruta) {
       return q.serie.all(node, metric, Math.floor(from), Math.min(to, Number.MAX_SAFE_INTEGER)).map((r) => ({ t: r.t, v: r.v }));
     },
     async all() { return q.todas.all().map((r) => ({ ...r })); },
-    async count() { return q.cuenta.get().n; },
+    async count(desde = null) { return (desde == null ? q.cuenta.get() : q.cuentaDesde.get(Math.floor(desde))).n; },
     async prune(before) { return Number(q.podar.run(Math.floor(before)).changes); },
     async clear() { q.vaciar.run(); },
   };
