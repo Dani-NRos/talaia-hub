@@ -25,6 +25,8 @@ BASE="/opt/vigia"
 ETC="/etc/vigia"
 DATOS="/var/lib/vigia"
 SERVICIO="vigia-servidor"
+# Descargas de Node: nodejs.org, o un espejo con la misma estructura (VIGIA_NODE_DIST=https://…/dist).
+NODE_DIST="${VIGIA_NODE_DIST:-https://nodejs.org/dist}"
 TCP="" PUERTO="" RECONFIGURAR=0 DESINSTALAR=0 BORRAR=0 CODIGO_LOCAL="" NODE_LOCAL="" SIN_SYSTEMD=0
 
 ayuda() {
@@ -103,9 +105,9 @@ if [ -n "$NODE_LOCAL" ]; then
   rm -rf "$BASE/node"; cp -a "$NODE_LOCAL" "$BASE/node"
   dice "Node $("$BASE/node/bin/node" --version) copiado de $NODE_LOCAL"
 else
-  SUMAS="$(curl -fsSL "https://nodejs.org/dist/latest-v$NODE_RAMA.x/SHASUMS256.txt")" || falla "no se pudo consultar nodejs.org (¿hay internet?)"
+  SUMAS="$(curl -fsSL "$NODE_DIST/latest-v$NODE_RAMA.x/SHASUMS256.txt")" || falla "no se pudo consultar $NODE_DIST (¿hay internet?)"
   LINEA="$(printf '%s\n' "$SUMAS" | grep -E " node-v[0-9.]+-linux-$NODE_ARQ\.tar\.xz$" | head -1)"
-  [ -n "$LINEA" ] || falla "nodejs.org no tiene Node $NODE_RAMA para linux-$NODE_ARQ"
+  [ -n "$LINEA" ] || falla "$NODE_DIST no tiene Node $NODE_RAMA para linux-$NODE_ARQ"
   FICHERO="${LINEA##* }"
   VERSION_NODE="$(printf '%s' "$FICHERO" | sed -E 's/^node-(v[0-9.]+)-.*/\1/')"
   ACTUAL="$([ -x "$BASE/node/bin/node" ] && "$BASE/node/bin/node" --version || true)"
@@ -114,7 +116,7 @@ else
   else
     dice "Descargando Node $VERSION_NODE ($NODE_ARQ)…"
     TMP="$(mktemp -d)"; trap 'rm -rf "$TMP"' EXIT
-    curl -fsSL -o "$TMP/$FICHERO" "https://nodejs.org/dist/$VERSION_NODE/$FICHERO"
+    curl -fsSL -o "$TMP/$FICHERO" "$NODE_DIST/$VERSION_NODE/$FICHERO"
     (cd "$TMP" && printf '%s\n' "$LINEA" | sha256sum -c --quiet -) || falla "la descarga de Node no coincide con su suma de comprobación"
     mkdir -p "$TMP/node" && tar -xJf "$TMP/$FICHERO" -C "$TMP/node" --strip-components=1
     rm -rf "$BASE/node" && mv "$TMP/node" "$BASE/node"
