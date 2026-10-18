@@ -33,7 +33,7 @@ Todos los datos se quedan en el dispositivo. La app no envía nada a ningún ser
 
 - **Navegador.** Chrome en Android, o Chrome/Edge en el ordenador. En iPhone no funciona porque Safari no tiene Bluetooth web.
 - **Receptor.** Un nodo Meshtastic en el mismo canal que los sensores, con Bluetooth activado o, en el ordenador, enchufado por USB con un cable de datos.
-- **Un solo cliente por vía.** Por Bluetooth, ningún otro móvil puede estar conectado al receptor a la vez. Por cable, ningún otro programa puede tener abierto su puerto (la web de Meshtastic, un monitor serie…).
+- **Un solo cliente por receptor.** Por Bluetooth, ningún otro móvil puede estar conectado al receptor a la vez. Por cable, ningún otro programa puede tener abierto su puerto (la web de Meshtastic, un monitor serie…). Y aunque el nodo deje conectar a la vez un móvil por Bluetooth y un ordenador por cable (o Home Assistant por WiFi), no lo hagas: el nodo reparte lo que recibe entre los que están conectados, y a cada uno le llega solo una parte de las lecturas. Si necesitas dos clientes, usa dos nodos.
 
 ## Instalación
 
@@ -43,7 +43,7 @@ Todos los datos se quedan en el dispositivo. La app no envía nada a ningún ser
 
 ## Uso
 
-1. **Conecta el receptor.** Pulsa **Conectar receptor** y elige tu nodo. En el ordenador puedes elegir **Por cable USB**: Chrome muestra los puertos de los nodos enchufados. Con cable no hay emparejamientos ni cortes, se reconecta sola al abrir la app y al volver a enchufarlo, y el nodo puede seguir conectado por Bluetooth a otro móvil. Si tu nodo no sale en la lista, Ajustes te deja ver todos los aparatos Bluetooth o todos los puertos serie.
+1. **Conecta el receptor.** Pulsa **Conectar receptor** y elige tu nodo. En el ordenador puedes elegir **Por cable USB**: Chrome muestra los puertos de los nodos enchufados. Con cable no hay emparejamientos ni cortes, y se reconecta sola al abrir la app y al volver a enchufarlo. Si tu nodo no sale en la lista, Ajustes te deja ver todos los aparatos Bluetooth o todos los puertos serie.
 2. **Elige qué vigilar.** En *Resto de la malla*, pulsa **Vigilar** en un nodo para fijarlo arriba.
 3. **Pon los límites.** Toca la tarjeta para fijar mínimo y máximo por métrica, los avisos de cambio rápido y los minutos sin señal que disparan la alarma.
 4. **Para usarlo como panel fijo,** activa Ajustes → *Mantener la pantalla encendida* y deja el móvil enchufado.
@@ -71,15 +71,21 @@ Los fallos y las sugerencias se recogen en los [avisos de GitHub](https://github
 
 ## Código fuente
 
-El código está en la carpeta [`codigo/`](codigo/). Para compilar:
+El código está en la carpeta [`codigo/`](codigo/), en dos partes:
+
+- [`codigo/nucleo/`](codigo/nucleo/): la lógica sin pantalla (alarmas, peticiones a nodos, rutas, avisos por la malla, tramas del puerto serie). La usará también el futuro servidor de Vigía.
+- [`codigo/app/`](codigo/app/): la app web (pantalla, Bluetooth, cable USB, mapa y demo).
+
+Para compilar y probar:
 
 ```
 cd codigo
 npm install
 npm run build
+npm test
 ```
 
-El resultado queda en `dist/app/`.
+La app compilada queda en `codigo/dist/app/`.
 
 ## Licencia
 
