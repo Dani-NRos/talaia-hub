@@ -8,10 +8,10 @@ import { distM, compass, precisionM, fmtDist, coordText, mapsUrl, SOURCE } from 
 import { trendDefault, parseTrendRule } from "@vigia/nucleo/trend.js";
 import { searchNodes, highlight, tokens, FILTERS, SORTS } from "./meshsearch.js";
 import { conectarServidor, crearStoreRemoto } from "./remoto.js";
-import { MIN, HOUR, DAY, isNum, hhmm, dShort, ago, stamp, trendDec, fmtTrend, trendVerb, hoursText, lastWindow } from "@vigia/nucleo/textos.js";
+import { MIN, HOUR, DAY, isNum, hhmm, dShort, ago, stamp, dur, trendDec, fmtTrend, trendVerb, hoursText, lastWindow } from "@vigia/nucleo/textos.js";
 import { crearAcciones } from "@vigia/nucleo/acciones.js";
-import { TIPOS, LISTA_TIPOS, TIPOS_PANEL, tipoMalla, unidades, adivinarTipo, unidadDe, textoValor, metasDe, MALLA_MAX_SALTOS } from "@vigia/nucleo/mqtt-datos.js";
-import { crearMotor, estadoInicial, MESH_DEFAULT, MESH_HOURLY, ASK, ASK_ALL, askKey, RE, INFO_SUPPRESS, seriesKey, trendKey, hexId } from "@vigia/nucleo/motor.js";
+import { TIPOS, LISTA_TIPOS, TIPOS_PANEL, NOMBRES_ESTADO, tipoMalla, esEstado, unidades, adivinarTipo, adivinarEstado, unidadDe, textoDato, metasDe, MALLA_MAX_SALTOS } from "@vigia/nucleo/mqtt-datos.js";
+import { crearMotor, estadoInicial, MESH_DEFAULT, MESH_HOURLY, ASK, ASK_ALL, askKey, RE, INFO_SUPPRESS, seriesKey, trendKey, estadoKey, hexId } from "@vigia/nucleo/motor.js";
 
 /* ───────────── utilidades ───────────── */
 const $ = (s, r = document) => r.querySelector(s);
@@ -490,9 +490,9 @@ function editarMqtt(t) {
 /* ───────────── Paneles del servidor: nombre, datos por MQTT y lo que sale a la malla ───────────── */
 // Cualquier panel (un nodo vigilado o uno sin nodo, de número negativo) se puede renombrar y llevar datos MQTT; los del
 // receptor pueden salir además a la malla como su telemetría (ver servidor/src/paneles.js).
-let datBorrador = null; // { num, datos }: los datos MQTT de un panel, cambiados y aún sin guardar
+let datBorrador = null; // { num, datos, conexion }: los datos MQTT de un panel, cambiados y aún sin guardar
 let mallaBorrador = null; // { activado, cada, canal, saltos }
-let temasHallados = []; // lo encontrado con «Buscar temas»: [{ broker, tema, campo, v, unidad? }]
+let temasHallados = []; // lo encontrado con «Buscar temas»: [{ broker, tema, campo, v, unidad?, estado?, conexion? }]
 let filtroTemas = "";
 const HALLADOS_VISTOS = 40; // de lo encontrado, cuántos se enseñan (filtrando se llega al resto)
 const MALLA_CADA_TXT = { 15: "15 minutos", 30: "30 minutos", 60: "1 hora", 180: "3 horas" };
@@ -527,11 +527,21 @@ function datosCfg(num) {
   const datos = (panelCfg(num)?.datos || []).map((d) => ({ ...d }));
   return datos.length ? datos : [datoNuevo(num)]; // sin datos, una fila vacía: que se vea dónde va el tema
 }
+/** El tema de conexión de un panel sin nodo (vacío si no tiene). */
+function conexionCfg(num) {
+  if (datBorrador?.num === num) return datBorrador.conexion;
+  const c = panelCfg(num)?.conexion;
+  return c ? { ...c } : { broker: brokerPorDefecto(), tema: "", campo: "", avisar: true };
+}
 function datosEditar(num) {
-  if (datBorrador?.num !== num) datBorrador = { num, datos: datosCfg(num) };
+  if (datBorrador?.num !== num) datBorrador = { num, datos: datosCfg(num), conexion: conexionCfg(num) };
   return datBorrador.datos;
 }
-const datoMismo = (a, b) => a && b && a.clave === b.clave && a.tipo === b.tipo && a.broker === b.broker && a.tema === b.tema && a.campo === b.campo && (a.unidad || "") === (b.unidad || "");
+function conexionEditar(num) {
+  datosEditar(num);
+  return datBorrador.conexion;
+}
+const datoMismo = (a, b) => a && b && a.clave === b.clave && a.tipo === b.tipo && a.broker === b.broker && a.tema === b.tema && a.campo === b.campo && (a.unidad || "") === (b.unidad || "") && !!a.invertir === !!b.invertir;
 const datoNuevo = (num, tipo = "temperature") => ({ nombre: "", tipo, broker: brokerPorDefecto(), tema: "", campo: "", unidad: unidades(tipo)[0] || "", caduca: 0, malla: false });
 /** El último valor de un dato, si es el que está guardado (si se está cambiando, aún no hay). */
 function datoValorHTML(num, d) {
@@ -542,13 +552,14 @@ function datoValorHTML(num, d) {
   const cuando = esc(ago(x.t));
   if (x.error) return `<span class="warn-t">${esc(x.error)}</span> · ${cuando}`;
   if (x.nulo) return `<span class="warn-t">No disponible</span> (el sensor no responde) · ${cuando}`;
-  return `<strong>${esc(textoValor(d.tipo, x.v, d.unidad))}</strong>${x.u ? ` (${esc(fmtNum(x.b, 1))} ${esc(x.u)})` : ""} · ${cuando}`;
+  return `<strong>${esc(textoDato(d, x.v))}</strong>${x.u ? ` (${esc(fmtNum(x.b, 1))} ${esc(x.u)})` : ""} · ${cuando}`;
 }
 function datoHTML(num, d, i) {
   const receptor = num === S.myNode;
   const tipos = LISTA_TIPOS.map((t) => `<option value="${t}"${t === d.tipo ? " selected" : ""}>${esc(TIPOS[t].label)}</option>`).join("");
   const us = unidades(d.tipo);
-  const unidad = d.tipo === "otro"
+  const estado = esEstado(d.tipo);
+  const unidad = estado ? "" : d.tipo === "otro"
     ? `<input class="inp dat-u" data-dat-i="${i}" data-dat-k="unidad" autocomplete="off" maxlength="12" placeholder="unidad" aria-label="Unidad" value="${esc(d.unidad || "")}">`
     : us.length > 1
       ? `<select class="inp sel" data-dat-i="${i}" data-dat-k="unidad" aria-label="Unidad en que llega">${us.map((u) => `<option${u === (d.unidad || us[0]) ? " selected" : ""}>${esc(u)}</option>`).join("")}</select>`
@@ -563,6 +574,8 @@ function datoHTML(num, d, i) {
       <select class="inp sel" data-dat-i="${i}" data-dat-k="broker" aria-label="Broker MQTT">${brokerOpts(d.broker)}</select>
       <input class="inp" data-dat-i="${i}" data-dat-k="tema" list="temasMqtt" autocomplete="off" spellcheck="false" placeholder="Tema MQTT, p. ej. tele/enchufe/SENSOR" aria-label="Tema MQTT" value="${esc(d.tema || "")}">
       <div class="est-r"><input class="inp" data-dat-i="${i}" data-dat-k="campo" list="camposMqtt${i}" autocomplete="off" spellcheck="false" placeholder="Campo, si llega un JSON" aria-label="Campo del JSON" value="${esc(d.campo || "")}">${unidad}</div>
+      ${estado ? `<div class="est-r"><select class="inp sel" data-dat-i="${i}" data-dat-k="nombres" aria-label="Cómo se llaman sus estados">${Object.entries(NOMBRES_ESTADO).map(([k, [on, off]]) => `<option value="${k}"${k === (d.nombres || "encendido") ? " selected" : ""}>${esc(on)} / ${esc(off)}</option>`).join("")}</select>
+        <label class="sw" for="datR${i}"><input type="checkbox" id="datR${i}" data-dat-i="${i}" data-dat-k="invertir" ${d.invertir ? "checked" : ""}><span class="sw-ui"></span><span>Al revés</span></label></div>` : ""}
       ${malla}
       <p class="hint" data-dat-v="${i}">${datoValorHTML(num, d)}</p>
       <datalist id="camposMqtt${i}">${camposOpts(d.tema)}</datalist>
@@ -575,18 +588,25 @@ function nombreHallado(x) {
   if (n.length > 44) n = `…${n.slice(-43)}`;
   return x.campo ? `${n} · ${x.campo}` : n;
 }
+/** Qué parece lo encontrado: un tipo de dato, un estado o la conexión del dispositivo. */
+const pareceTxt = (x, m) => (x.conexion ? "parece la conexión del dispositivo" : x.estado ? "parece un estado ON/OFF" : m ? `parece ${TIPOS[m].label.toLowerCase()}` : "");
 /** Lo encontrado al buscar, filtrado, con lo que parece cada uno y un botón para usarlo. */
 function halladosHTML(num) {
   if (!temasHallados.length) return "";
   const f = filtroTemas.trim().toLowerCase();
-  const lista = temasHallados.map((x, i) => ({ x, i, m: adivinarTipo(x.tema, x.campo) }))
+  const lista = temasHallados.map((x, i) => ({ x, i, m: x.estado ? "estado" : adivinarTipo(x.tema, x.campo) }))
     .filter(({ x }) => !f || `${x.tema} ${x.campo}`.toLowerCase().includes(f))
     .sort((a, b) => (a.m ? 0 : 1) - (b.m ? 0 : 1)); // primero lo que parece algo conocido
   const usados = new Set(datosCfg(num).map((d) => `${d.broker}\n${d.tema}\n${d.campo}`));
+  const con = num < 0 ? conexionCfg(num) : null;
+  if (con?.tema) usados.add(`${con.broker}\n${con.tema}\n${con.campo || ""}`);
   const varios = new Set(temasHallados.map((x) => x.broker)).size > 1;
+  const boton = (x, i) => (usados.has(`${x.broker}\n${x.tema}\n${x.campo}`) ? `<span class="hint">ya está</span>`
+    : x.conexion && num < 0 ? `<button type="button" class="mini" data-con-usar="${i}">Usar como conexión</button>`
+      : `<button type="button" class="mini" data-dat-usar="${i}">Usar</button>`);
   const filas = lista.slice(0, HALLADOS_VISTOS).map(({ x, i, m }) => `<li><div class="est-hn"><span class="est-ht" title="${esc(x.tema)}${x.campo ? ` · ${esc(x.campo)}` : ""}">${esc(nombreHallado(x))}</span>
-      <span class="hint">${esc(String(x.v))}${x.unidad ? ` ${esc(x.unidad)}` : ""}${m ? ` · parece ${esc(TIPOS[m].label.toLowerCase())}` : ""}${varios ? ` · en ${esc(nombreBroker(x.broker))}` : ""}</span></div>
-      ${usados.has(`${x.broker}\n${x.tema}\n${x.campo}`) ? `<span class="hint">ya está</span>` : `<button type="button" class="mini" data-dat-usar="${i}">Usar</button>`}</li>`).join("");
+      <span class="hint">${esc(String(x.v))}${x.unidad ? ` ${esc(x.unidad)}` : ""}${pareceTxt(x, m) ? ` · ${esc(pareceTxt(x, m))}` : ""}${varios ? ` · en ${esc(nombreBroker(x.broker))}` : ""}</span></div>
+      ${boton(x, i)}</li>`).join("");
   const mas = lista.length > HALLADOS_VISTOS ? `<p class="hint">Y ${lista.length - HALLADOS_VISTOS} más: escribe arriba para filtrar.</p>` : "";
   return `<input id="filtroTemas" class="inp" autocomplete="off" spellcheck="false" placeholder="Filtrar, p. ej. enchufe o temperature" aria-label="Filtrar lo encontrado" value="${esc(filtroTemas)}">
     ${lista.length ? `<ul class="est-hl">${filas}</ul>${mas}` : `<p class="hint">Nada con «${esc(filtroTemas)}».</p>`}`;
@@ -597,15 +617,39 @@ function temasOpts() {
   return [...por].map(([t, xs]) => `<option value="${esc(t)}" label="${esc((xs.length === 1 && !xs[0].campo ? String(xs[0].v) : `JSON: ${xs.map((x) => x.campo).join(", ")}`).slice(0, 80))}"></option>`).join("");
 }
 const camposOpts = (tema) => temasHallados.filter((x) => x.tema === tema && x.campo).map((x) => `<option value="${esc(x.campo)}" label="${esc(String(x.v))}"></option>`).join("");
-const datosFirma = (num) => JSON.stringify([panelCfg(num)?.datos || [], mqttBrokers().map((b) => [b.id, b.nombre]), num === S.myNode]);
+const datosFirma = (num) => JSON.stringify([panelCfg(num)?.datos || [], panelCfg(num)?.conexion || null, mqttBrokers().map((b) => [b.id, b.nombre]), num === S.myNode]);
+const ENCONTRADOS = (n) => `Encontrados ${n} con números o estados. Pulsa «Usar» en los que quieras.`;
+/** Lo último que dijo el tema de conexión (si es el guardado). */
+function conexionValorHTML(num) {
+  const c = conexionCfg(num), g = panelCfg(num)?.conexion;
+  if (!c.tema.trim()) return "";
+  if (!g || g.broker !== c.broker || g.tema !== c.tema.trim() || (g.campo || "") !== (c.campo || "").trim()) return "Guarda para ver lo que dice.";
+  const x = S.paneles?.conexion?.[num];
+  if (!x) return "Aún no ha dicho nada (no todos lo dejan guardado en el broker: espera a que se conecte o se desconecte).";
+  const cuando = esc(ago(x.t));
+  if (x.error) return `<span class="warn-t">${esc(x.error)}</span> · ${cuando}`;
+  if (x.nulo) return `<span class="warn-t">No disponible</span> · ${cuando}`;
+  return `${x.v ? `<strong class="okt">Conectado</strong>` : `<strong class="warn-t">Desconectado</strong>`} · ${cuando}`;
+}
+function conexionHTML(num) {
+  const c = conexionCfg(num);
+  return `<div class="con-b" id="conBox"><h4>Conexión del dispositivo</h4>
+      <p class="hint">Opcional: el tema donde dice si está conectado. Tasmota: tele/…/LWT; Shelly: …/online; zigbee2mqtt: zigbee2mqtt/…/availability (campo state). Así el panel sabe al momento si se desconecta.</p>
+      <select class="inp sel" data-con-k="broker" aria-label="Broker del tema de conexión">${brokerOpts(c.broker)}</select>
+      <div class="est-r"><input class="inp" data-con-k="tema" list="temasMqtt" autocomplete="off" spellcheck="false" placeholder="Tema, p. ej. tele/enchufe/LWT" aria-label="Tema de conexión" value="${esc(c.tema || "")}"><input class="inp con-c" data-con-k="campo" autocomplete="off" spellcheck="false" placeholder="Campo" aria-label="Campo del JSON de conexión" value="${esc(c.campo || "")}"></div>
+      <label class="sw" for="conAv"><input type="checkbox" id="conAv" data-con-k="avisar" ${c.avisar ? "checked" : ""}><span class="sw-ui"></span><span>Avisar si se desconecta</span></label>
+      <p class="hint" id="conV">${conexionValorHTML(num)}</p>
+    </div>`;
+}
 function datosSection(num) {
   const datos = datosCfg(num);
   const receptor = num === S.myNode;
   return `<section class="blk" id="datBox" data-cfg="${esc(datosFirma(num))}"><h3>Datos por MQTT</h3>
-      <p class="hint">${num < 0 ? "Lo que publica el dispositivo en un broker MQTT." : "Datos de otros dispositivos que quieras ver en este panel, junto a los del nodo."} Cada uno se guarda como una lectura más (una por minuto como mucho), con sus gráficas y sus alarmas.${receptor ? " Los marcados «A la malla» salen además como telemetría de este receptor (abajo, cada cuánto)." : ""}</p>
+      <p class="hint">${num < 0 ? "Lo que publica el dispositivo en un broker MQTT." : "Datos de otros dispositivos que quieras ver en este panel, junto a los del nodo."} Números (una lectura por minuto como mucho) y estados ON/OFF (cada cambio), con sus gráficas y sus alarmas.${receptor ? " Los marcados «A la malla» salen además como telemetría de este receptor (abajo, cada cuánto)." : ""}</p>
       <div id="datLista">${datos.map((d, i) => datoHTML(num, d, i)).join("")}</div>
+      ${num < 0 ? conexionHTML(num) : ""}
       <div class="btns"><button type="button" class="btn ghost" data-dat-add>Añadir dato</button><button type="button" class="btn ghost" data-dat-buscar>Buscar temas</button></div>
-      <p class="hint" id="datBusca">${temasHallados.length ? `Encontrados ${temasHallados.length} con números. Pulsa «Usar» en los que quieras.` : "«Buscar temas» enseña lo que publican los brokers con números, para elegirlo sin escribir el tema."}</p>
+      <p class="hint" id="datBusca">${temasHallados.length ? ENCONTRADOS(temasHallados.length) : "«Buscar temas» enseña lo que publican los brokers con números o estados (ON/OFF), para elegirlo sin escribir el tema."}</p>
       <div id="datHallados" class="est-h">${halladosHTML(num)}</div>
       <datalist id="temasMqtt">${temasOpts()}</datalist>
       <p class="form-err" id="datErr" role="alert" hidden></p>
@@ -632,21 +676,40 @@ function datUsar(num, i) {
   const x = temasHallados[i];
   if (!x) return;
   const datos = datosEditar(num);
-  const tipo = adivinarTipo(x.tema, x.campo) || "otro";
+  const tipo = x.estado ? "estado" : adivinarTipo(x.tema, x.campo) || "otro";
   let d = datos.find((y) => !y.tema.trim());
   if (!d) { d = datoNuevo(num, tipo); datos.push(d); }
+  if (tipo === "estado") {
+    Object.assign(d, { tipo, broker: x.broker, tema: x.tema, campo: x.campo, unidad: "", malla: false, ...adivinarEstado(x.tema, x.campo) });
+    renderDatos(num);
+    const [on, off] = NOMBRES_ESTADO[d.nombres];
+    return toast(`Añadido como estado «${on} / ${off}»${d.invertir ? ", al revés (en zigbee2mqtt, «contact» es true con la puerta cerrada)" : ""}. Cámbialo en su fila si no es así.`);
+  }
   const us = unidades(tipo);
   const unidad = tipo === "otro" ? x.unidad || "" : unidadDe(tipo, x.unidad) || (us.includes("km/h") ? "km/h" : us[0]); // el viento en Home Assistant suele ir en km/h
   // En el receptor, a la malla si cabe y no hay ya otro de ese tipo.
   const malla = num === S.myNode && tipoMalla(tipo) && !datos.some((y) => y !== d && y.malla && y.tipo === tipo);
   Object.assign(d, { tipo, broker: x.broker, tema: x.tema, campo: x.campo, unidad, malla });
+  delete d.nombres;
+  delete d.invertir;
   renderDatos(num);
   const ojo = !x.unidad && tipo !== "otro" && unidad !== us[0] ? ` en ${unidad}: comprueba que llega en esa unidad` : "";
   toast(tipo === "otro" ? "Añadido como «Otro número»: elige qué es en su fila." : `Añadido como «${TIPOS[tipo].label}»${ojo}.`);
 }
+/** Pone un tema encontrado como el de conexión del panel. */
+function conUsar(num, i) {
+  const x = temasHallados[i];
+  if (!x) return;
+  Object.assign(conexionEditar(num), { broker: x.broker, tema: x.tema, campo: x.campo });
+  renderDatos(num);
+  toast("Puesto como tema de conexión. Guarda los datos para usarlo.");
+}
 async function guardarDatos(num) {
-  const datos = datosCfg(num).filter((d) => d.tema.trim()).map((d) => ({ ...(d.clave ? { clave: d.clave } : {}), nombre: d.nombre || "", tipo: d.tipo, broker: d.broker || "", tema: d.tema, campo: d.campo || "", unidad: d.unidad || "", caduca: Number(d.caduca || 0), malla: !!d.malla }));
-  const res = await orden({ orden: "datosPanel", num, datos });
+  const datos = datosCfg(num).filter((d) => d.tema.trim()).map((d) => ({ ...(d.clave ? { clave: d.clave } : {}), nombre: d.nombre || "", tipo: d.tipo, broker: d.broker || "", tema: d.tema, campo: d.campo || "", unidad: d.unidad || "", caduca: Number(d.caduca || 0), malla: !!d.malla,
+    ...(esEstado(d.tipo) ? { nombres: d.nombres || "encendido", invertir: !!d.invertir } : {}) }));
+  const c = num < 0 ? conexionCfg(num) : null;
+  const conexion = c?.tema.trim() ? { broker: c.broker || "", tema: c.tema.trim(), campo: (c.campo || "").trim(), avisar: !!c.avisar } : null;
+  const res = await orden({ orden: "datosPanel", num, datos, ...(num < 0 ? { conexion } : {}) });
   if (!res.ok) return showErr($("#datErr"), res.error || "No se pudo guardar.");
   datBorrador = null;
   toast(res.toast);
@@ -663,7 +726,7 @@ async function buscarTemas(btn, num) {
   $("#datErr").hidden = true;
   $("#temasMqtt").innerHTML = temasOpts();
   datosCfg(num).forEach((d, i) => { const dl = $(`#camposMqtt${i}`); if (dl) dl.innerHTML = camposOpts(d.tema); });
-  $("#datBusca").textContent = temasHallados.length ? `Encontrados ${temasHallados.length} con números. Pulsa «Usar» en los que quieras.` : "No ha llegado ningún tema con números. ¿Publica algo el broker? (Con Home Assistant, mira «Cómo sacar los datos».)";
+  $("#datBusca").textContent = temasHallados.length ? ENCONTRADOS(temasHallados.length) : "No ha llegado ningún tema con números ni estados. ¿Publica algo el broker? (Con Home Assistant, mira «Cómo sacar los datos».)";
   $("#datHallados").innerHTML = halladosHTML(num);
 }
 /** Un cambio en un dato: al borrador. */
@@ -671,14 +734,23 @@ function editarDato(num, t) {
   const k = t.dataset.datK;
   const d = datosEditar(num)[Number(t.dataset.datI)];
   if (!k || !d) return;
-  d[k] = k === "caduca" ? Number(t.value) : k === "malla" ? t.checked : t.value;
+  d[k] = k === "caduca" ? Number(t.value) : k === "malla" || k === "invertir" ? t.checked : t.value;
   if (k === "tipo") {
     d.unidad = unidades(d.tipo)[0] || "";
     if (!(num === S.myNode && tipoMalla(d.tipo))) d.malla = false;
+    if (esEstado(d.tipo)) { d.nombres ||= "encendido"; d.invertir = !!d.invertir; }
     renderDatos(num);
   }
   if (k === "malla") renderDatos(num);
   if (k === "tema") { const dl = $(`#camposMqtt${t.dataset.datI}`); if (dl) dl.innerHTML = camposOpts(d.tema.trim()); }
+}
+
+/** Un cambio en el tema de conexión: al borrador. */
+function editarConexion(num, t) {
+  const k = t.dataset.conK;
+  const c = conexionEditar(num);
+  if (!k) return;
+  c[k] = k === "avisar" ? t.checked : t.value;
 }
 
 /* ── a la malla (panel del receptor) ── */
@@ -754,7 +826,11 @@ function patchPaneles() {
   const dat = $("#datBox");
   if (dat) {
     if (!datBorrador && !dat.contains(document.activeElement) && dat.dataset.cfg !== datosFirma(num)) renderDatos(num);
-    else datosCfg(num).forEach((d, i) => { const el = dat.querySelector(`[data-dat-v="${i}"]`); if (el) el.innerHTML = datoValorHTML(num, d); });
+    else {
+      datosCfg(num).forEach((d, i) => { const el = dat.querySelector(`[data-dat-v="${i}"]`); if (el) el.innerHTML = datoValorHTML(num, d); });
+      const cv = $("#conV");
+      if (cv) cv.innerHTML = conexionValorHTML(num);
+    }
   }
   const mal = $("#mallaBox");
   if (mal) {
@@ -975,6 +1051,61 @@ function chartSVG(series, metric, rule, from, to, W, H = 132) {
   const out = (isNum(rule?.max) && last.v > rule.max) || (isNum(rule?.min) && last.v < rule.min);
   const dot = `<circle class="end-ring${out ? " bad" : ""}" cx="${x(last.t).toFixed(1)}" cy="${y(last.v).toFixed(1)}" r="6"/><circle class="end${out ? " bad" : ""}" cx="${x(last.t).toFixed(1)}" cy="${y(last.v).toFixed(1)}" r="3.2"/>`;
   return `<svg class="chart-svg" width="${W}" height="${H}" viewBox="0 0 ${W} ${H}" role="img" aria-label="${esc(m.label)}">${g}${area}${line}${thr}${dot}</svg>`;
+}
+
+/* ── estados ON/OFF (servidor): una barra de tiempo en vez de una línea ── */
+/**
+ * Tramos de un estado entre from y to: [{ v, a, b }]. Cada lectura vale hasta la siguiente; la última, hasta ahora.
+ * cur: el valor de ahora con su «desde» (los estados que no cambian no tienen lecturas recientes).
+ */
+function tramosEstado(series, from, to, cur) {
+  const pts = [...series];
+  if (cur?.desde != null) pts.push({ t: cur.desde, v: cur.v });
+  pts.sort((a, b) => a.t - b.t);
+  const out = [];
+  let v = null, a = from;
+  for (const p of pts) {
+    if (p.t > to) break;
+    if (p.t <= from) { v = p.v; continue; }
+    if (v === null) { v = p.v; a = p.t; continue; }
+    if (p.v !== v) { out.push({ v, a, b: p.t }); v = p.v; a = p.t; }
+  }
+  if (v !== null) out.push({ v, a, b: Math.min(to, Date.now()) });
+  return out;
+}
+/** «Encendido 3 h 20 min» en ese periodo. */
+function resumenEstado(metric, tramos) {
+  const on = tramos.filter((x) => x.v).reduce((s, x) => s + x.b - x.a, 0);
+  return tramos.length ? `${metricMeta(metric).estados[0]} en total: ${on && on < MIN ? "menos de 1 min" : dur(on)}` : "";
+}
+function estadoSVG(tramos, metric, from, to, W, H = 64) {
+  if (!tramos.length) return `<p class="empty-chart">Sin lecturas en este periodo.</p>`;
+  const m = metricMeta(metric);
+  const pl = 8, pr = 12, pt = 6, pb = 22;
+  const x = (t) => pl + ((t - from) / (to - from)) * (W - pl - pr);
+  let g = "";
+  const span = to - from;
+  const xs = span <= 2 * DAY ? (W > 700 ? 3 * HOUR : 6 * HOUR) : span <= 8 * DAY ? DAY : 7 * DAY;
+  const first = new Date(from);
+  first.setMinutes(0, 0, 0);
+  if (xs >= DAY) first.setHours(0);
+  else first.setHours(Math.ceil(first.getHours() / 6) * 6);
+  for (let t = first.getTime(); t <= to; t += xs) {
+    if (t < from) continue;
+    const xx = x(t).toFixed(1);
+    const lab = xs === 7 * DAY ? dShort.format(new Date(t)) : xs === DAY ? wday.format(new Date(t)) : hhmm.format(new Date(t));
+    g += `<line class="grid v" x1="${xx}" x2="${xx}" y1="${pt}" y2="${H - pb}"/><text class="tick" x="${xx}" y="${H - 6}" text-anchor="middle">${lab}</text>`;
+  }
+  const bars = tramos.map((s) => `<rect class="eb ${s.v ? "on" : "off"}" x="${x(s.a).toFixed(1)}" y="${pt}" width="${Math.max(1, x(s.b) - x(s.a)).toFixed(1)}" height="${H - pt - pb}"><title>${esc(m.estados[s.v ? 0 : 1])}: ${esc(stamp(s.a))} – ${esc(stamp(s.b))}</title></rect>`).join("");
+  return `<svg class="chart-svg est-svg" width="${W}" height="${H}" viewBox="0 0 ${W} ${H}" role="img" aria-label="${esc(m.label)}">${bars}${g}</svg>
+    <p class="est-ley"><span class="eb-k on"></span>${esc(m.estados[0])} <span class="eb-k off"></span>${esc(m.estados[1])}</p>`;
+}
+function sparkEstadoHTML(series, metric, cur) {
+  const W = 300, H = 46, now = Date.now(), from = now - DAY;
+  const tramos = tramosEstado(series, from, now, cur);
+  if (!tramos.length) return `<div class="spark spark-empty"><span>Aún sin histórico</span></div>`;
+  const x = (t) => ((t - from) / (now - from)) * W;
+  return `<div class="spark"><svg viewBox="0 0 ${W} ${H}" preserveAspectRatio="none" aria-hidden="true">${tramos.map((s) => `<rect class="eb ${s.v ? "on" : "off"}" x="${x(s.a).toFixed(1)}" y="8" width="${Math.max(0.5, x(s.b) - x(s.a)).toFixed(1)}" height="${H - 16}"/>`).join("")}</svg></div>`;
 }
 
 /** Mini gráfica de la tarjeta: se estira al ancho, el punto final va en HTML. */
@@ -1250,15 +1381,20 @@ function issueUrl() {
 function nodeState(num) {
   const al = [...S.active.values()].filter((a) => a.num === num);
   if (al.some((a) => a.kind === "moved")) return ["crit", "Fuera de sitio"];
-  if (al.some((a) => a.kind === "high" || a.kind === "low" || a.kind === "trend")) return ["crit", "Alarma"];
-  if (al.some((a) => a.kind === "offline")) return ["off", num < 0 ? "Sin datos" : "Sin señal"];
+  if (al.some((a) => a.kind === "high" || a.kind === "low" || a.kind === "trend" || a.kind === "estado")) return ["crit", "Alarma"];
   const n = S.nodes.get(num);
+  if (al.some((a) => a.kind === "conexion") || n?.conectado === false) return ["off", "Sin conexión"]; // lo dice el dispositivo
+  if (al.some((a) => a.kind === "offline")) return ["off", num < 0 ? "Sin datos" : "Sin señal"];
   if (!n || !n.lastHeard) return ["none", "Sin datos"];
   return ["ok", "Normal"];
 }
 
 /** Cuándo se oyó por última vez (en un panel sin nodo, cuándo llegó su último dato por MQTT). */
-const vistoTxt = (n) => (n.num < 0 ? (n.lastHeard ? `último dato ${ago(n.lastHeard)}` : "sin datos todavía") : n.lastHeard ? `visto ${ago(n.lastHeard)}` : "sin señal registrada");
+const vistoTxt = (n) => (n.num < 0
+  ? [n.conectado === false ? `desconectado ${ago(n.conectadoT)}` : "", n.lastHeard ? `último dato ${ago(n.lastHeard)}` : "sin datos todavía"].filter(Boolean).join(" · ")
+  : n.lastHeard ? `visto ${ago(n.lastHeard)}` : "sin señal registrada");
+/** Lo que se ve de la alarma de un estado: «avisa: Abierta +10 min». */
+const estadoReglaTxt = (k, r) => (r ? `avisa: ${metricMeta(k).estados[r.cuando ? 0 : 1]}${r.min ? ` +${dur(r.min * MIN)}` : ""}` : "");
 function metaLine(n) {
   const bits = [vistoTxt(n)];
   if (isNum(n.hops)) bits.push(n.hops === 0 ? "directo" : `${n.hops} ${n.hops === 1 ? "salto" : "saltos"}`);
@@ -1325,15 +1461,21 @@ function renderCards() {
     const readings = keys.map((k) => {
       const m = metricMeta(k), r = (w.rules || {})[k] || {};
       const v = n.metrics[k].v;
+      if (m.estados) { // un estado ON/OFF: su nombre, y su aviso o desde cuándo está así
+        const bad = S.active.has(estadoKey(num, k));
+        const lim = estadoReglaTxt(k, r.estado) || (n.metrics[k].desde ? `desde las ${hhmm.format(new Date(n.metrics[k].desde))}` : "");
+        return `<div class="rd${bad ? " bad" : ""}"><span class="rd-l">${esc(m.label)}</span><span class="rd-v est">${esc(fmtValue(k, v))}</span><span class="rd-lim">${esc(lim) || "&nbsp;"}</span></div>`;
+      }
       const bad = (isNum(r.max) && v > r.max) || (isNum(r.min) && v < r.min) || S.active.has(trendKey(num, k));
       const lim = [isNum(r.min) ? `mín ${fmtLimit(k, r.min)}` : "", isNum(r.max) ? `máx ${fmtLimit(k, r.max)}` : "", r.trend ? trendShort(k, r.trend) : ""].filter(Boolean).join(" · ");
       const unit = k === "batteryLevel" && v > 100 ? "" : m.unit;
       return `<div class="rd${bad ? " bad" : ""}"><span class="rd-l">${esc(m.label)}</span><span class="rd-v">${fmtValue(k, v)}${unit ? `<small>${esc(unit)}</small>` : ""}</span><span class="rd-lim">${lim || "&nbsp;"}</span></div>`;
     }).join("");
-    const sparkMetric = ["temperature", "batteryLevel", "relativeHumidity"].find((k) => n.metrics[k]) || keys[0];
+    const sparkMetric = ["temperature", "batteryLevel", "relativeHumidity"].find((k) => n.metrics[k]) || keys.find((k) => !metricMeta(k).estados) || keys[0];
     const fullBtn = `<button type="button" class="mini full-btn" data-full="${num}" title="Ver este nodo a pantalla completa">${ICON.expand}Pantalla completa</button>`;
+    const sparkSer = S.recent.get(seriesKey(num, sparkMetric)) || [];
     const spark = sparkMetric
-      ? `<div class="spark-wrap"><div class="spark-top"><span class="spark-cap">${esc(metricMeta(sparkMetric).label)} · 24 h</span>${fullBtn}</div>${sparkHTML(S.recent.get(seriesKey(num, sparkMetric)) || [], sparkMetric, (w.rules || {})[sparkMetric])}</div>`
+      ? `<div class="spark-wrap"><div class="spark-top"><span class="spark-cap">${esc(metricMeta(sparkMetric).label)} · 24 h</span>${fullBtn}</div>${metricMeta(sparkMetric).estados ? sparkEstadoHTML(sparkSer, sparkMetric, n.metrics[sparkMetric]) : sparkHTML(sparkSer, sparkMetric, (w.rules || {})[sparkMetric])}</div>`
       : `<div class="spark-top">${fullBtn}</div>`;
     return `<article class="card st-${st}" data-open="${num}">
       ${cardHead(num, n, st, stLabel, false)}
@@ -1440,13 +1582,14 @@ function closeFull() {
 function fullTiles(num) {
   const n = node(num), w = S.cfg.watched[num] || {};
   const keys = sortMetrics(Object.keys(n.metrics).filter((k) => !metricMeta(k).minor));
-  if (!keys.length) return `<p class="hint">Este nodo aún no ha mandado telemetría.</p>`;
+  if (!keys.length) return `<p class="hint">${num < 0 ? "Aún no ha llegado ningún dato." : "Este nodo aún no ha mandado telemetría."}</p>`;
   return keys.map((k) => {
     const m = metricMeta(k), r = (w.rules || {})[k] || {}, cur = n.metrics[k];
-    const bad = (isNum(r.max) && cur.v > r.max) || (isNum(r.min) && cur.v < r.min) || S.active.has(trendKey(num, k));
-    const lim = [isNum(r.min) ? `mín ${fmtLimit(k, r.min)}` : "", isNum(r.max) ? `máx ${fmtLimit(k, r.max)}` : "", r.trend ? trendShort(k, r.trend) : ""].filter(Boolean).join(" · ");
+    const bad = (isNum(r.max) && cur.v > r.max) || (isNum(r.min) && cur.v < r.min) || S.active.has(trendKey(num, k)) || S.active.has(estadoKey(num, k));
+    const lim = m.estados ? estadoReglaTxt(k, r.estado) || (cur.desde ? `desde las ${hhmm.format(new Date(cur.desde))}` : "")
+      : [isNum(r.min) ? `mín ${fmtLimit(k, r.min)}` : "", isNum(r.max) ? `máx ${fmtLimit(k, r.max)}` : "", r.trend ? trendShort(k, r.trend) : ""].filter(Boolean).join(" · ");
     const unit = k === "batteryLevel" && cur.v > 100 ? "" : m.unit;
-    return `<div class="nv-tile${bad ? " bad" : ""}"><span class="nv-l">${esc(m.label)}</span><span class="nv-v">${fmtValue(k, cur.v)}${unit ? `<small>${esc(unit)}</small>` : ""}</span><span class="nv-s">${lim ? `<span class="nv-lim">${esc(lim)}</span>` : ""}<span data-fmm="${k}"></span><span>${esc(ago(cur.t))}</span></span></div>`;
+    return `<div class="nv-tile${bad ? " bad" : ""}"><span class="nv-l">${esc(m.label)}</span><span class="nv-v${m.estados ? " est" : ""}">${esc(fmtValue(k, cur.v))}${unit ? `<small>${esc(unit)}</small>` : ""}</span><span class="nv-s">${lim ? `<span class="nv-lim">${esc(lim)}</span>` : ""}<span data-fmm="${k}"></span><span>${esc(ago(cur.t))}</span></span></div>`;
   }).join("");
 }
 function renderFull() {
@@ -1497,10 +1640,17 @@ async function drawFullCharts() {
   const H = Math.round(Math.max(150, Math.min(300, (innerHeight - 330) / Math.max(1, Math.ceil(figs.length / (innerWidth >= 900 ? 2 : 1))))));
   for (const fig of figs) {
     const k = fig.dataset.m;
-    const ser = await S.store.series(num, k, from, to);
+    const est = !!metricMeta(k).estados;
+    const ser = await S.store.series(num, k, est ? from - 2 * HOUR : from, to); // un estado: también el de antes
     if (!S.full || S.full.num !== num) return;
     const box = $(".chart-box", fig);
     const W = Math.max(260, Math.floor(box.clientWidth || 600));
+    if (est) {
+      const tr = tramosEstado(ser, from, to, S.nodes.get(num)?.metrics?.[k]);
+      box.innerHTML = estadoSVG(tr, k, from, to, W, Math.min(H, 90));
+      $(`[data-fmm2="${k}"]`, fig).textContent = resumenEstado(k, tr);
+      continue;
+    }
     box.innerHTML = chartSVG(ser, k, rules[k], from, to, W, H);
     const vals = ser.map((p) => p.v).filter((v) => !(k === "batteryLevel" && v > 100));
     const mm = vals.length ? `mín ${fmtNum(Math.min(...vals), metricMeta(k).dec)} · máx ${fmtNum(Math.max(...vals), metricMeta(k).dec)}` : "";
@@ -1659,7 +1809,7 @@ function renderDetail() {
   }
   if (w) {
     const off = isNum(w.offlineMin) ? w.offlineMin : S.settings.defaultOfflineMin;
-    const rows = keys.filter((k) => !metricMeta(k).minor).map((k) => {
+    const rows = keys.filter((k) => !metricMeta(k).minor && !metricMeta(k).estados).map((k) => {
       const m = metricMeta(k), r = (w.rules || {})[k] || {};
       const cur = n.metrics[k];
       return `<tr><th scope="row">${esc(m.label)}${m.unit ? ` <small>${esc(m.unit)}</small>` : ""}</th><td class="now" data-now="${k}">${cur ? fmtValue(k, cur.v) : "—"}</td>
@@ -1668,9 +1818,10 @@ function renderDetail() {
     }).join("");
     body += `<section class="blk"><h3>Alarmas de este ${sinNodo ? "panel" : "nodo"}</h3>
       <div class="off-row"><label for="r-off">${sinNodo ? "Avisar si no llega ningún dato en más de" : "Avisar si no da señal en más de"}</label><span class="inp-u"><input id="r-off" class="inp" inputmode="numeric" autocomplete="off" value="${off || ""}" placeholder="no"><span>min</span></span></div>
-      <p class="hint">${sinNodo ? "Hay dispositivos que solo publican cuando algo cambia: ponlo solo si el tuyo publica cada poco (Tasmota, cada 5 min; Shelly, cada minuto). Vacío desactiva este aviso." : "Por defecto la telemetría sale cada 30 min. Deja margen para dos envíos perdidos; vacío desactiva este aviso."}</p>
+      <p class="hint">${sinNodo ? "Hay dispositivos que solo publican cuando algo cambia: ponlo solo si el tuyo publica cada poco (Tasmota, cada 5 min; Shelly, cada minuto). Vacío desactiva este aviso." : "Por defecto la telemetría sale cada 30 min. Deja margen para dos envíos perdidos; vacío desactiva este aviso."}${sinNodo && panelCfg(num)?.conexion?.avisar ? " Y avisa en cuanto el dispositivo diga que se ha desconectado (su tema de conexión, en «Datos por MQTT»)." : ""}</p>
       ${rows ? `<div class="tbl"><table class="thr-t"><thead><tr><th scope="col">Métrica</th><th scope="col">Ahora</th><th scope="col">Mín.</th><th scope="col">Máx.</th></tr></thead><tbody>${rows}</tbody></table></div>
       <p class="hint">Escribe el límite y sal de la casilla para guardarlo. Vacía la casilla para quitarlo.</p>` : `<p class="hint">${sinNodo ? "Cuando lleguen sus datos aparecerán aquí para ponerles límites." : "Cuando este nodo mande telemetría aparecerán aquí sus métricas para ponerles límites."}</p>`}
+      ${estadosAlarmaHTML(num, keys)}
       <p class="form-err" id="ruleErr" role="alert" hidden></p>
       <div class="trend-box" id="trendBox">${trendBlock(num)}</div></section>`;
   } else {
@@ -1697,10 +1848,17 @@ async function drawCharts() {
   const rules = S.cfg.watched[num]?.rules || {};
   for (const fig of $$("#chartList .chart")) {
     const k = fig.dataset.m;
-    const ser = await S.store.series(num, k, from, to);
+    const est = !!metricMeta(k).estados;
+    const ser = await S.store.series(num, k, est ? from - 2 * HOUR : from, to); // un estado: también el de antes
     if (!S.detail || S.detail.num !== num) return;
     const box = $(".chart-box", fig);
     const W = Math.max(240, Math.floor(box.clientWidth || 320));
+    if (est) {
+      const tr = tramosEstado(ser, from, to, S.nodes.get(num)?.metrics?.[k]);
+      box.innerHTML = estadoSVG(tr, k, from, to, W);
+      $(`[data-mm="${k}"]`, fig).textContent = resumenEstado(k, tr);
+      continue;
+    }
     box.innerHTML = chartSVG(ser, k, rules[k], from, to, W);
     const vals = ser.map((p) => p.v).filter((v) => !(k === "batteryLevel" && v > 100));
     $(`[data-mm="${k}"]`, fig).textContent = vals.length ? `mín ${fmtNum(Math.min(...vals), metricMeta(k).dec)} · máx ${fmtNum(Math.max(...vals), metricMeta(k).dec)}` : "";
@@ -1754,10 +1912,39 @@ async function saveRuleFromInput(inp) {
 }
 function showErr(el, msg) { el.textContent = msg; el.hidden = false; }
 
+/** Alarmas de los estados ON/OFF de la ficha: cuándo avisar y, si se quiere, durante cuánto tiempo. */
+function estadosAlarmaHTML(num, keys) {
+  const w = S.cfg.watched[num], n = S.nodes.get(num);
+  const ks = keys.filter((k) => metricMeta(k).estados);
+  if (!ks.length) return "";
+  return `<div class="est-al">${ks.map((k) => {
+    const m = metricMeta(k), r = w?.rules?.[k]?.estado, cur = n?.metrics?.[k];
+    const opt = (v) => `<option value="${v}"${r?.cuando === v ? " selected" : ""}>Avisar cuando: ${esc(m.estados[v ? 0 : 1])}</option>`;
+    return `<div class="est-al-r${S.active.has(estadoKey(num, k)) ? " bad" : ""}"><span class="est-al-n">${esc(m.label)} <b data-now="${k}">${cur ? esc(fmtValue(k, cur.v)) : "—"}</b></span>
+      <select class="inp sel" data-est-cuando="${k}" aria-label="Cuándo avisar de ${esc(m.label)}"><option value=""${r ? "" : " selected"}>No avisar</option>${opt(1)}${opt(0)}</select>
+      <span class="inp-u"><span>más de</span><input class="inp" data-est-min="${k}" inputmode="numeric" autocomplete="off" placeholder="0" value="${r?.min || ""}" aria-label="Minutos que tiene que durar para avisar de ${esc(m.label)}"><span>min</span></span></div>`;
+  }).join("")}</div>
+    <p class="hint">Con minutos, avisa solo si sigue así ese tiempo (una puerta abierta más de 10 min); sin ellos, al momento.</p>`;
+}
+/** Guarda la alarma de un estado (la fila entera: cuándo y minutos). */
+async function guardarEstado(el) {
+  const num = S.detail?.num;
+  const k = el.dataset.estCuando || el.dataset.estMin;
+  const sel = $(`#detail [data-est-cuando="${k}"]`), inp = $(`#detail [data-est-min="${k}"]`);
+  const err = $("#ruleErr");
+  const min = parseNum(inp.value);
+  if (Number.isNaN(min)) { showErr(err, "Pon los minutos como un número o déjalo vacío."); inp.focus(); return; }
+  const cuando = sel.value === "" ? null : Number(sel.value);
+  const res = await orden({ orden: "alarmaEstado", num, metrica: k, cuando, minutos: min === null ? null : Math.round(min) });
+  if (res.error) { showErr(err, res.error); return; }
+  err.hidden = true;
+  if (res.toast) toast(res.toast);
+}
+
 /* ── cambio rápido: bloque de la ficha ── */
 function trendMetrics(num) {
   const n = S.nodes.get(num), w = S.cfg.watched[num];
-  return sortMetrics(new Set([...Object.keys(n?.metrics || {}), ...Object.keys(w?.rules || {})])).filter((k) => !metricMeta(k).minor);
+  return sortMetrics(new Set([...Object.keys(n?.metrics || {}), ...Object.keys(w?.rules || {})])).filter((k) => !metricMeta(k).minor && !metricMeta(k).estados);
 }
 /** sel: métrica que queda elegida en el formulario (la que se acaba de guardar). */
 function trendBlock(num, sel = null) {
@@ -2272,8 +2459,9 @@ document.addEventListener("click", async (ev) => {
     $("#pnErr").hidden = true;
     return toast(r.toast);
   }
-  if (S.detail && ("datAdd" in ds || "datDel" in ds || "datUsar" in ds || "datBuscar" in ds || "datSave" in ds)) {
+  if (S.detail && ("datAdd" in ds || "datDel" in ds || "datUsar" in ds || "datBuscar" in ds || "datSave" in ds || "conUsar" in ds)) {
     const num = S.detail.num;
+    if ("conUsar" in ds) return conUsar(num, Number(ds.conUsar));
     if ("datSave" in ds) return guardarDatos(num);
     if ("datBuscar" in ds) return buscarTemas(t, num);
     if ("datUsar" in ds) return datUsar(num, Number(ds.datUsar));
@@ -2411,11 +2599,13 @@ document.addEventListener("input", (ev) => {
     box.append(...[...tmp.children].filter((el) => el.id !== "filtroTemas"));
     return;
   }
+  if (S.detail && ev.target.closest?.("#conBox") && ev.target.matches("input:not([type=checkbox])[data-con-k]")) editarConexion(S.detail.num, ev.target);
   if (S.detail && ev.target.closest?.("#datBox") && ev.target.matches("input:not([type=checkbox])[data-dat-k]")) editarDato(S.detail.num, ev.target);
 });
 
 document.addEventListener("change", async (ev) => {
   const t = ev.target;
+  if (t.closest?.("#conBox")) return S.detail && t.dataset.conK && editarConexion(S.detail.num, t);
   if (t.closest?.("#datBox")) return S.detail && t.dataset.datK && editarDato(S.detail.num, t);
   if (t.closest?.("#mallaBox")) return editarMalla(t);
   if (t.closest?.("#nomBox")) {
@@ -2429,6 +2619,7 @@ document.addEventListener("change", async (ev) => {
   if (t.id === "fence-r") return S.detail && setFenceRadius(S.detail.num, t);
   if (t.id === "tr-metric") return trendFormFill();
   if (t.closest(".tr-form")) return; // se guarda con el botón
+  if (t.matches("[data-est-cuando], [data-est-min]")) return guardarEstado(t);
   if (t.matches("#detail .inp")) return saveRuleFromInput(t);
   if (t.id === "setSound") { S.settings.sound = t.checked; saveSettings(); if (t.checked) { unlockAudio(); beep(); } return; }
   if (t.id === "setWake") { S.settings.wake = t.checked; saveSettings(); return applyWake(); }

@@ -4,9 +4,10 @@ import test from "node:test";
 import assert from "node:assert/strict";
 import {
   leerValor, convertir, comprobarDatos, comprobarMalla, proximoEnvio, textoValores, unidades, unidadDe, adivinarTipo,
-  metasDe, esClaveMqtt, MALLA_DEFECTO, TIPOS, LISTA_TIPOS,
+  metasDe, esClaveMqtt, MALLA_DEFECTO, TIPOS, LISTA_TIPOS, leerEstado, pareceEstado, adivinarEstado, pareceConexion,
+  comprobarConexion, textoDato,
 } from "../src/mqtt-datos.js";
-import { metricMeta, registrarMetricas, fmtWithUnit } from "../src/metrics.js";
+import { metricMeta, registrarMetricas, fmtWithUnit, fmtValue } from "../src/metrics.js";
 
 test("leer el valor: número suelto (Home Assistant) o campo de un JSON (zigbee2mqtt, Tasmota, Shelly)", () => {
   assert.deepEqual(leerValor("21.4"), { v: 21.4 });
@@ -138,4 +139,58 @@ test("horario: en punto y a las y media (cada 30 min), contando desde la mediano
   assert.equal(proximoEnvio(h(23, 59, 59), 30), h(24, 0));
   assert.equal(proximoEnvio(h(10, 1), 15), h(10, 15));
   assert.equal(proximoEnvio(h(10, 1), 180), h(12, 0));
+});
+
+test("estados ON/OFF: Tasmota, Shelly, zigbee2mqtt, Home Assistant; al revés; no disponible", () => {
+  for (const x of ["ON", "on", "true", "1", "open", "online", "detected"]) assert.deepEqual(leerEstado(x), { v: 1 }, x);
+  for (const x of ["OFF", "off", "false", "0", "closed", "offline", "clear"]) assert.deepEqual(leerEstado(x), { v: 0 }, x);
+  assert.deepEqual(leerEstado("unavailable"), { nulo: true });
+  assert.match(leerEstado("21.5").error, /no es un estado ON\/OFF/);
+  assert.match(leerEstado('{"POWER":"ON"}').error, /indica el campo/);
+  assert.deepEqual(leerEstado('{"POWER":"ON"}', "POWER"), { v: 1 }); // Tasmota
+  assert.deepEqual(leerEstado('{"output":false}', "output"), { v: 0 }); // Shelly Plus
+  assert.deepEqual(leerEstado('{"contact":true}', "contact", true), { v: 0 }); // zigbee2mqtt: hay contacto = cerrada
+  assert.deepEqual(leerEstado('{"state":"OFF"}', "state", true), { v: 1 });
+  assert.deepEqual(leerEstado('{"water_leak":null}', "water_leak"), { nulo: true });
+  assert.match(leerEstado('{"a":{"b":2}}', "a").error, /no es un estado/);
+  assert.match(leerEstado('{"a":2}', "a").error, /«2» no es un estado/);
+  assert.ok(pareceEstado("ON") && pareceEstado(false) && pareceEstado("closed"));
+  assert.ok(!pareceEstado("1") && !pareceEstado("21") && !pareceEstado("hola"));
+});
+
+test("estados ON/OFF: nombres, qué parece cada tema, configuración y cómo se enseñan", () => {
+  assert.deepEqual(adivinarEstado("zigbee2mqtt/Puerta garaje", "contact"), { nombres: "abierta", invertir: true });
+  assert.deepEqual(adivinarEstado("ha_estados/binary_sensor/puerta_entrada/state"), { nombres: "abierta", invertir: false });
+  assert.deepEqual(adivinarEstado("zigbee2mqtt/Fregadero", "water_leak"), { nombres: "agua", invertir: false });
+  assert.deepEqual(adivinarEstado("zigbee2mqtt/Pasillo", "occupancy"), { nombres: "movimiento", invertir: false });
+  assert.deepEqual(adivinarEstado("stat/enchufe/POWER"), { nombres: "encendido", invertir: false });
+  assert.ok(pareceConexion("tele/enchufe/LWT", "", "Online"));
+  assert.ok(pareceConexion("shellies/shellyplug-s-1/online", "", "false"));
+  assert.ok(pareceConexion("zigbee2mqtt/Puerta/availability", "state", "online"));
+  assert.ok(!pareceConexion("stat/enchufe/POWER", "", "ON"));
+  const base = { broker: "b1", tema: "zigbee2mqtt/Puerta", campo: "contact" };
+  const r = comprobarDatos([{ ...base, tipo: "estado", nombre: "Puerta", nombres: "abierta", invertir: true, unidad: "x" }]);
+  assert.deepEqual(r.datos[0], { nombre: "Puerta", tipo: "estado", ...base, unidad: "", caduca: 0, malla: false, nombres: "abierta", invertir: true });
+  assert.equal(comprobarDatos([{ ...base, tipo: "estado" }]).datos[0].nombres, "encendido");
+  assert.match(comprobarDatos([{ ...base, tipo: "estado", nombres: "raro" }]).error, /cómo se llaman los estados/);
+  assert.match(comprobarDatos([{ ...base, tipo: "estado", malla: true }], { receptor: true }).error, /no tiene hueco/);
+  assert.equal("nombres" in comprobarDatos([{ ...base, tipo: "temperature", nombres: "abierta" }]).datos[0], false);
+  // Se enseña con sus nombres, en la pantalla y en los textos.
+  const d = { clave: "mq7", tipo: "estado", nombre: "Puerta", nombres: "abierta" };
+  registrarMetricas(metasDe({ "-1": { datos: [d] } }));
+  assert.equal(fmtValue("mq7", 1), "Abierta");
+  assert.equal(fmtWithUnit("mq7", 0), "Cerrada");
+  assert.equal(textoDato(d, 0), "Cerrada");
+  assert.equal(textoDato({ tipo: "power" }, 1250), "1250 W");
+  registrarMetricas({});
+});
+
+test("tema de conexión de un panel: opcional; se comprueba como un tema", () => {
+  assert.deepEqual(comprobarConexion(null), { conexion: null });
+  assert.deepEqual(comprobarConexion({ broker: "b1", tema: " " }), { conexion: null });
+  assert.deepEqual(comprobarConexion({ broker: "b1", tema: "tele/enchufe/LWT", avisar: 1 }), { conexion: { broker: "b1", tema: "tele/enchufe/LWT", campo: "", avisar: true } });
+  assert.match(comprobarConexion({ broker: "b1", tema: "tele/+/LWT" }).error, /«\+» ni «#»/);
+  assert.match(comprobarConexion({ broker: "", tema: "tele/enchufe/LWT" }).error, /Elige el broker/);
+  assert.match(comprobarConexion({ broker: "b9", tema: "x" }, { brokers: new Set(["b1"]) }).error, /ya no está/);
+  assert.match(comprobarConexion({ broker: "b1", tema: "vigia/estado" }, { temaProhibido: () => "es de Vigía." }).error, /es de Vigía/);
 });

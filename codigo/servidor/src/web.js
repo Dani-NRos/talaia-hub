@@ -96,16 +96,26 @@ function crearOrdenes(vigia) {
     quitarPanel: ({ num }) => { exigir(esPanel(num), "num"); return vigia.paneles.quitarPanel(num); },
     renombrar: ({ num, nombre }) => { exigir(esPanel(num), "num"); exigir(typeof nombre === "string", "nombre"); return vigia.paneles.renombrar(num, nombre); },
     tipoPanel: ({ num, tipo }) => { exigir(esPanel(num), "num"); exigir(typeof tipo === "string", "tipo"); return vigia.paneles.tipoPanel(num, tipo); },
-    datosPanel: ({ num, datos }) => {
+    datosPanel: ({ num, datos, conexion }) => {
       exigir(esPanel(num), "num");
       exigir(Array.isArray(datos) && datos.length <= 40, "datos");
       for (const d of datos) {
-        exigir(d && typeof d === "object" && Object.keys(d).every((k) => ["clave", "nombre", "tipo", "broker", "tema", "campo", "unidad", "caduca", "malla"].includes(k)), "dato");
-        for (const k of ["clave", "nombre", "tipo", "broker", "tema", "campo", "unidad"]) if (k in d) exigir(typeof d[k] === "string", `dato.${k}`);
+        exigir(d && typeof d === "object" && Object.keys(d).every((k) => ["clave", "nombre", "tipo", "broker", "tema", "campo", "unidad", "caduca", "malla", "nombres", "invertir"].includes(k)), "dato");
+        for (const k of ["clave", "nombre", "tipo", "broker", "tema", "campo", "unidad", "nombres"]) if (k in d) exigir(typeof d[k] === "string", `dato.${k}`);
         if ("caduca" in d) exigir(Number.isInteger(d.caduca), "dato.caduca");
-        if ("malla" in d) exigir(typeof d.malla === "boolean", "dato.malla");
+        for (const k of ["malla", "invertir"]) if (k in d) exigir(typeof d[k] === "boolean", `dato.${k}`);
       }
-      return vigia.paneles.guardarDatos(num, datos);
+      if (conexion != null) {
+        exigir(typeof conexion === "object" && Object.keys(conexion).every((k) => ["broker", "tema", "campo", "avisar"].includes(k)), "conexion");
+        for (const k of ["broker", "tema", "campo"]) if (k in conexion) exigir(typeof conexion[k] === "string", `conexion.${k}`);
+        if ("avisar" in conexion) exigir(typeof conexion.avisar === "boolean", "conexion.avisar");
+      }
+      return vigia.paneles.guardarDatos(num, datos, conexion);
+    },
+    alarmaEstado: ({ num, metrica, cuando, minutos }) => {
+      exigir(esPanel(num), "num"); exigir(esMetrica(metrica), "metrica");
+      exigir(cuando === null || cuando === 0 || cuando === 1, "cuando"); exigir(esValor(minutos), "minutos");
+      return acciones.ponerEstado(num, metrica, cuando, minutos);
     },
     envioMalla: ({ cambio }) => {
       exigir(cambio && typeof cambio === "object" && !Array.isArray(cambio), "cambio");

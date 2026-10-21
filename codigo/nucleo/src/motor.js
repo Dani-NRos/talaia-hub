@@ -27,7 +27,7 @@
 //    en las últimas 12 h.
 
 import { Protobuf } from "@meshtastic/core";
-import { extractMetrics, metricMeta, fmtWithUnit, fmtNum, fmtLimit } from "./metrics.js";
+import { extractMetrics, metricMeta, fmtValue, fmtWithUnit, fmtNum, fmtLimit } from "./metrics.js";
 import { encodeUser, routingErrorReason, decodeRouteDiscovery } from "./pb.js";
 import { readTrace, relays, traceTimeout, UNKNOWN_NODE } from "./route.js";
 import { distM, compass, fmtDist, coordText, nextPlace, placeFromPos } from "./geo.js";
@@ -69,6 +69,8 @@ export const MESH_CONFIRM = 90000;
 
 export const seriesKey = (num, metric) => `${num}|${metric}`;
 export const trendKey = (num, k) => `${num}|${k}|trend`;
+export const estadoKey = (num, k) => `${num}|${k}|estado`; // alarma de un dato ON/OFF (servidor)
+export const conexionKey = (num) => `${num}||conexion`; // un panel sin nodo cuyo dispositivo se ha desconectado
 export const hexId = (num) => `!${(num >>> 0).toString(16).padStart(8, "0")}`;
 /** Alarma de un dato MQTT (de un panel sin nodo o de un dato MQTT en el de un nodo): no va a Home Assistant. */
 export const esAlarmaMqtt = (al) => al.num < 0 || esClaveMqtt(al.metric || "");
@@ -151,7 +153,8 @@ export function crearMotor(S, g = {}) {
     for (const [k, v] of Object.entries(metrics)) {
       const prev = n.metrics[k];
       const newer = !prev || t >= prev.t;
-      if (newer) n.metrics[k] = { v, t };
+      // «desde»: cuándo pasó a ese valor (los estados ON/OFF del servidor: «abierta más de 10 min»).
+      if (newer) n.metrics[k] = prev?.desde != null && prev.v === v ? { v, t, desde: prev.desde } : { v, t };
       rows.push({ node: num, metric: k, t, v });
       const key = seriesKey(num, k);
       const arr = S.recent.get(key) || [];
@@ -159,7 +162,7 @@ export function crearMotor(S, g = {}) {
       if (arr.length > 1 && arr[arr.length - 2].t > t) arr.sort((a, b) => a.t - b.t);
       while (arr.length && arr[0].t < Date.now() - 26 * HOUR) arr.shift();
       S.recent.set(key, arr);
-      if (newer) { evalThreshold(num, k, v, t, opts); evalTrend(num, k, opts); }
+      if (newer) { evalThreshold(num, k, v, t, opts); evalTrend(num, k, opts); evalEstado(num, k, opts); }
     }
     if (opts.env || opts.kind === "environmentMetrics") n.hasEnv = true;
     if (opts.store !== false) S.store.add(rows);
@@ -184,11 +187,11 @@ export function crearMotor(S, g = {}) {
   function evalNode(num, opts = {}) {
     const n = S.nodes.get(num);
     if (n) for (const [k, m] of Object.entries(n.metrics)) evalThreshold(num, k, m.v, m.t, opts);
-    for (const k of Object.keys(S.cfg.watched[num]?.rules || {})) evalTrend(num, k, opts);
+    for (const k of Object.keys(S.cfg.watched[num]?.rules || {})) { evalTrend(num, k, opts); evalEstado(num, k, opts); }
     // métricas con regla pero que ya no tienen dato: nada que evaluar
     for (const key of [...S.active.keys()]) {
       const a = S.active.get(key);
-      if (a.num === num && (a.kind === "high" || a.kind === "low" || a.kind === "trend") && !isWatched(num)) clearAlarm(key, { silent: true });
+      if (a.num === num && (a.kind === "high" || a.kind === "low" || a.kind === "trend" || a.kind === "estado") && !isWatched(num)) clearAlarm(key, { silent: true });
     }
     evalOffline(opts);
     evalFence(num, { silent: opts.silent });
@@ -221,6 +224,30 @@ export function crearMotor(S, g = {}) {
     if (!r) return;
     if (r.fire) raise(key, { num, metric: k, kind: "trend", dir: rule.dir, value: r.change, limit: rule.delta, hours: rule.hours, from: r.from, to: r.to, t: r.to.t }, opts);
     else if (S.active.has(key) && (r.clear || opts.strict)) clearAlarm(key, { v: r.to.v, t: r.to.t });
+  }
+
+  /* ───────────── estados ON/OFF (datos MQTT del servidor) ───────────── */
+  // Regla: rules[k].estado = { cuando: 1 | 0, min: minutos que tiene que durar (0: al momento) }.
+  /** strict: al cambiar la regla, lo que ya no la cumple se cierra sin aviso (no es que haya cambiado el estado). */
+  function evalEstado(num, k, opts = {}) {
+    const key = estadoKey(num, k);
+    const r = S.cfg.watched[num]?.rules?.[k]?.estado;
+    const m = S.nodes.get(num)?.metrics?.[k];
+    if (!r || !m) return clearAlarm(key, { silent: true });
+    const desde = m.desde ?? m.t;
+    const lim = (r.min || 0) * MIN;
+    if (m.v === r.cuando && Date.now() - desde >= lim) {
+      raise(key, { num, metric: k, kind: "estado", value: m.v, limit: r.min || 0, desde, t: desde + lim }, opts);
+    } else if (S.active.has(key)) {
+      if (m.v === r.cuando || opts.strict) clearAlarm(key, { silent: true }); // la regla ha cambiado, no el estado
+      else clearAlarm(key, { v: m.v, t: m.t });
+    }
+  }
+  /** Los que tienen que durar un tiempo («abierta más de 10 min»): se miran cada poco. */
+  function evalEstados() {
+    for (const [numStr, w] of Object.entries(S.cfg.watched)) {
+      for (const [k, r] of Object.entries(w.rules || {})) if (r.estado) evalEstado(Number(numStr), k);
+    }
   }
 
   /* ───────────── valla antirrobo ───────────── */
@@ -353,7 +380,9 @@ export function crearMotor(S, g = {}) {
     const name = nodeName(al.num);
     if (al.kind === "offline") return `${name} · ${sinNodo(al.num) ? "Sin datos" : "Sin señal"} más de ${dur(al.limit * MIN)}`;
     if (al.kind === "moved") return `${name} · Fuera de su sitio`;
+    if (al.kind === "conexion") return `${name} · Sin conexión`;
     const m = metricMeta(al.metric);
+    if (al.kind === "estado") return `${name} · ${m.label}: ${fmtValue(al.metric, al.value)}${al.limit ? ` más de ${dur(al.limit * MIN)}` : ""}`;
     if (al.kind === "trend") {
       const sign = al.dir === "down" ? "−" : "+";
       return `${name} · ${m.label} ${al.dir === "down" ? "bajando" : "subiendo"} rápido (${sign}${fmtTrend(al.metric, al.value, trendDec(al.metric, al.value))} en ${dur(al.to.t - al.from.t)})`;
@@ -364,6 +393,8 @@ export function crearMotor(S, g = {}) {
     if (al.kind === "link") return `Reintentando la conexión${S.device?.kind === "serial" ? " por cable" : S.device?.kind === "tcp" ? " por la red" : " Bluetooth"}. Las alarmas de nodo sin señal quedan en pausa.`;
     if (al.kind === "test") return "Así suena y se ve un aviso. Pulsa Enterado para callarlo.";
     if (al.kind === "offline") return `Último dato ${ago(al.value)} (${stamp(al.value)}).`;
+    if (al.kind === "conexion") return `El dispositivo dice que se ha desconectado (${stamp(al.value)}).`;
+    if (al.kind === "estado") return `${fmtValue(al.metric, al.value)} desde ${stamp(al.desde)}.`;
     if (al.kind === "moved") {
       const n = S.nodes.get(al.num), f = S.cfg.watched[al.num]?.fence;
       const dir = n?.pos && f ? ` al ${compass(f, n.pos)}` : "";
@@ -381,7 +412,9 @@ export function crearMotor(S, g = {}) {
     const name = nodeName(al.num);
     if (al.kind === "offline") return `${name} · ${sinNodo(al.num) ? "Vuelven a llegar datos" : "Vuelve a dar señal"}`;
     if (al.kind === "moved") return `${name} · De vuelta en su sitio${isNum(info.v) ? ` (a ${fmtDist(info.v)})` : ""}`;
+    if (al.kind === "conexion") return `${name} · Conectado otra vez`;
     const m = metricMeta(al.metric);
+    if (al.kind === "estado") return `${name} · ${m.label}: ${isNum(info.v) ? fmtValue(al.metric, info.v) : "ya no avisa"}${isNum(info.t) ? ` (tras ${dur(info.t - al.desde)})` : ""}`;
     if (al.kind === "trend") return `${name} · ${m.label} ya no ${trendVerb(al.dir)} tan rápido${isNum(info.v) ? ` (${fmtWithUnit(al.metric, info.v)})` : ""}`;
     return `${name} · ${m.label} de vuelta en rango${isNum(info.v) ? ` (${fmtWithUnit(al.metric, info.v)})` : ""}`;
   }
@@ -633,11 +666,15 @@ export function crearMotor(S, g = {}) {
     if (kind === "clear") {
       if (al.kind === "offline") return `✓ Vigía: ${name} ${sinNodo(al.num) ? "vuelve a mandar datos" : "vuelve a dar señal"} · ${now}`;
       if (al.kind === "moved") return `✓ Vigía: ${name} de vuelta en su sitio · ${now}`;
+      if (al.kind === "conexion") return `✓ Vigía: ${name} conectado otra vez · ${now}`;
+      if (al.kind === "estado") return `✓ Vigía: ${name} · ${metricMeta(al.metric).label}: ${isNum(info?.v) ? fmtValue(al.metric, info.v) : "ya no avisa"} · ${now}`;
       if (al.kind === "trend") return `✓ Vigía: ${name} · ${metricMeta(al.metric).label} ya no ${trendVerb(al.dir)} tan rápido · ${now}`;
       return `✓ Vigía: ${name} · ${metricMeta(al.metric).label} de vuelta en rango${isNum(info?.v) ? ` (${fmtWithUnit(al.metric, info.v)})` : ""} · ${now}`;
     }
     const late = al.late ? " (con retraso)" : "";
     if (al.kind === "offline") return `⚠ Vigía: ${name} ${sinNodo(al.num) ? "sin datos" : "sin señal"} desde las ${hhmm.format(new Date(al.value))} · ${now}`;
+    if (al.kind === "conexion") return `⚠ Vigía: ${name} sin conexión desde las ${hhmm.format(new Date(al.value))} · ${now}${late}`;
+    if (al.kind === "estado") return `⚠ Vigía: ${name} · ${metricMeta(al.metric).label}: ${fmtValue(al.metric, al.value)} desde las ${hhmm.format(new Date(al.desde))} · ${now}${late}`;
     if (al.kind === "moved") {
       const n = S.nodes.get(al.num), f = S.cfg.watched[al.num]?.fence;
       const where = n?.pos ? ` · ${coordText(n.pos)}` : "";
@@ -911,7 +948,7 @@ export function crearMotor(S, g = {}) {
     // nodos
     node, nodeName, isWatched, touch,
     // lecturas y alarmas
-    ingest, evalThreshold, evalNode, linkKnown, trendSeries, trendNow, evalTrend, evalFence, setPosition,
+    ingest, evalThreshold, evalNode, linkKnown, trendSeries, trendNow, evalTrend, evalEstado, evalEstados, evalFence, setPosition,
     setFence, setFenceRadius, delFence, evalOffline, raise, clearAlarm, ack, ackAll, unacked,
     alarmTitle, alarmDetail, clearText, addLog,
     // peticiones a nodos y rutas

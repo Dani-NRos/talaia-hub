@@ -3,7 +3,10 @@
 import test from "node:test";
 import assert from "node:assert/strict";
 import { Protobuf } from "@meshtastic/core";
-import { crearMotor, estadoInicial, RE, askKey, trendKey, MESH_HOURLY } from "../src/motor.js";
+import { crearMotor, estadoInicial, RE, askKey, trendKey, estadoKey, conexionKey, MESH_HOURLY } from "../src/motor.js";
+import { crearAcciones } from "../src/acciones.js";
+import { registrarMetricas } from "../src/metrics.js";
+import { metaDato } from "../src/mqtt-datos.js";
 
 const PORT = Protobuf.Portnums.PortNum;
 const T0 = Date.UTC(2026, 9, 18, 7, 0, 0); // 09:00 en Madrid
@@ -133,6 +136,57 @@ test("cambio rápido: la presión baja 4 hPa en 3 h y salta, aunque no toque nin
   assert.ok(al, "debería saltar");
   assert.equal(al.kind, "trend");
   assert.match(motor.alarmTitle(al), /Presión bajando rápido \(−4,0 hPa en 3 h\)/);
+});
+
+test("estado ON/OFF (servidor): «abierta más de 10 min», «desde» se mantiene, se cierra al cerrarse; cambiar la regla no avisa", (t) => {
+  registrarMetricas({ mq1: metaDato({ tipo: "estado", nombre: "Puerta", nombres: "abierta" }), mq2: metaDato({ tipo: "power" }) });
+  t.after(() => registrarMetricas({}));
+  const P = -1;
+  const { S, motor, ev } = montar(t, { watched: { [P]: vigilado({ mq1: { estado: { cuando: 1, min: 10 } } }, { offlineMin: 0 }) } });
+  const acciones = crearAcciones(motor);
+  const n = Object.assign(motor.node(P), { long: "Garaje", short: "ZIGB" });
+  // Como lo hace el servidor al llegar un estado: el valor y desde cuándo lo tiene.
+  const llega = (v) => { const p = n.metrics.mq1; n.metrics.mq1 = { v, t: Date.now(), desde: p && p.v === v ? p.desde : Date.now() }; motor.evalEstado(P, "mq1"); };
+  const key = estadoKey(P, "mq1");
+  llega(1);
+  t.mock.timers.tick(9 * MIN);
+  llega(1); // sigue abierta (el dispositivo lo repite): no cuenta desde ahora
+  motor.evalEstados();
+  assert.equal(S.active.size, 0);
+  t.mock.timers.tick(MIN);
+  motor.evalEstados();
+  const al = S.active.get(key);
+  assert.ok(al, "abierta 10 min: salta");
+  assert.equal(ev.alarmas.length, 1);
+  assert.equal(motor.alarmTitle(al), "Garaje · Puerta: Abierta más de 10 min");
+  assert.match(motor.alarmDetail(al), /^Abierta desde /);
+  assert.match(motor.meshText("raise", al), /^⚠ Vigía: Garaje · Puerta: Abierta desde las \d\d:\d\d · /);
+  assert.equal(S.log[0].mqtt, true); // no va a Home Assistant
+  // La lectura que guarda el servidor no le quita el «desde».
+  motor.ingest(P, { mq1: 1 }, Date.now());
+  assert.equal(n.metrics.mq1.desde, T0);
+  llega(0);
+  assert.ok(!S.active.has(key));
+  assert.equal(S.log[0].text, "Garaje · Puerta: Cerrada (tras 10 min)");
+  assert.match(motor.meshText("clear", al, { v: 0 }), /^✓ Vigía: Garaje · Puerta: Cerrada · /);
+  // Al momento, cuando esté cerrada.
+  assert.equal(acciones.ponerEstado(P, "mq1", 0, null).toast, "Avisará con «Cerrada»");
+  assert.equal(motor.alarmTitle(S.active.get(key)), "Garaje · Puerta: Cerrada");
+  // Cambiar la regla no es que cambie el estado: se cierra sin aviso.
+  const antes = S.log.length;
+  assert.equal(acciones.ponerEstado(P, "mq1", 1, 30).toast, "Avisará con «Abierta» durante más de 30 min");
+  assert.ok(!S.active.has(key));
+  assert.equal(S.log.length, antes);
+  assert.deepEqual(S.cfg.watched[P].rules.mq1, { estado: { cuando: 1, min: 30 } });
+  assert.match(acciones.ponerEstado(P, "mq1", 1, 1.5).error, /número entero/);
+  assert.equal(acciones.ponerEstado(P, "mq2", 1, 0).ok, false); // un número no tiene estados
+  assert.equal(acciones.ponerEstado(P, "mq1", null, null).toast, "Aviso quitado");
+  assert.equal(S.cfg.watched[P].rules.mq1, undefined);
+  // Sin conexión (el tema de conexión del dispositivo).
+  const c = { key: conexionKey(P), num: P, kind: "conexion", value: T0 };
+  assert.equal(motor.alarmTitle(c), "Garaje · Sin conexión");
+  assert.equal(motor.clearText(c, {}), "Garaje · Conectado otra vez");
+  assert.match(motor.meshText("raise", c), /^⚠ Vigía: Garaje sin conexión desde las /);
 });
 
 test("valla antirrobo: hacen falta dos posiciones fuera; se cierra al volver dentro del 80 % del radio", (t) => {

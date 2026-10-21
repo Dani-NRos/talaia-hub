@@ -16,6 +16,7 @@ import { abrirAlmacen } from "../src/almacen.js";
 import { instantanea } from "../src/sincro.js";
 import { telemetriaAmbiente } from "../src/paneles.js";
 import { metricMeta, fmtWithUnit } from "@vigia/nucleo/metrics.js";
+import { conexionKey, estadoKey } from "@vigia/nucleo/motor.js";
 import { NodoFalso, hasta, ME, CASETA, PORT } from "./nodo-falso.mjs";
 
 const M = Protobuf.Mesh, TEL = Protobuf.Telemetry;
@@ -136,6 +137,70 @@ test("panel sin nodo (un Tasmota): sus datos, al momento; lecturas, alarmas e hi
   assert.equal(S.nodes.has(num), false);
   assert.equal(S.active.has(`${num}|mq3|high`), false);
   assert.equal((await S.store.series(num, "mq3", 0)).length, 0);
+});
+
+test("estados ON/OFF y conexión: un enchufe Tasmota con su LWT y una puerta de Zigbee al revés", async (t) => {
+  const puerto = await broker(t);
+  const dispositivo = await cliente(t, puerto);
+  const { vigia } = await montar(t, puerto);
+  const { S, paneles, acciones, motor } = vigia;
+  const { num } = paneles.crearPanel({ nombre: "Taller", tipo: "tasmota" });
+  await dispositivo.publicar("tele/enchufe/LWT", "Offline");
+  await dispositivo.publicar("stat/enchufe/POWER", "ON");
+  await dispositivo.publicar("zigbee2mqtt/Puerta", { contact: true, battery: 90 });
+  const datos = [
+    { tipo: "estado", nombre: "Enchufe", broker: "b1", tema: "stat/enchufe/POWER" },
+    { tipo: "estado", nombre: "Puerta", nombres: "abierta", invertir: true, broker: "b1", tema: "zigbee2mqtt/Puerta", campo: "contact" },
+  ];
+  assert.match(paneles.guardarDatos(num, datos, { broker: "b1", tema: "vigia/estado" }).error, /publica Vigía/);
+  assert.equal(paneles.guardarDatos(num, datos, { broker: "b1", tema: "tele/enchufe/LWT", avisar: true }).ok, true);
+  const n = S.nodes.get(num);
+  await hasta(() => n.metrics.mq1?.v === 1 && n.metrics.mq2?.v === 0 && n.conectado === false, 3000, "estados y conexión");
+  assert.equal(fmtWithUnit("mq1", 1), "Encendido");
+  assert.equal(fmtWithUnit("mq2", 0), "Cerrada"); // contact: true es cerrada
+  // Sin conexión: al momento, con su alarma; y al volver.
+  await hasta(() => S.active.has(conexionKey(num)), 3000, "sin conexión");
+  assert.equal(motor.alarmTitle(S.active.get(conexionKey(num))), "Taller · Sin conexión");
+  await hasta(() => S.paneles.conexion[num]?.v === 0, 3000, "a las pantallas (como mucho cada segundo)");
+  await dispositivo.publicar("tele/enchufe/LWT", "Online");
+  await hasta(() => !S.active.has(conexionKey(num)), 3000, "conectado");
+  assert.equal(S.log[0].text, "Taller · Conectado otra vez");
+  assert.equal(n.conectado, true);
+  // Cada cambio, una lectura al momento; el mismo estado repetido, no.
+  const sleep = () => new Promise((r) => setTimeout(r, 30));
+  await dispositivo.publicar("stat/enchufe/POWER", "OFF");
+  await hasta(() => n.metrics.mq1.v === 0, 3000, "apagado");
+  const desde = n.metrics.mq1.desde;
+  await sleep();
+  await dispositivo.publicar("stat/enchufe/POWER", "OFF");
+  await sleep();
+  assert.equal(n.metrics.mq1.desde, desde, "repetido: sigue apagado desde antes");
+  // Alarma «cuando esté apagado», al momento.
+  assert.equal(acciones.ponerEstado(num, "mq1", 0, 0).ok, true);
+  assert.equal(motor.alarmTitle(S.active.get(estadoKey(num, "mq1"))), "Taller · Enchufe: Apagado");
+  await dispositivo.publicar("stat/enchufe/POWER", "ON");
+  await hasta(() => !S.active.has(estadoKey(num, "mq1")), 3000, "encendido otra vez");
+  assert.match(S.log[0].text, /^Taller · Enchufe: Encendido \(tras /);
+  assert.deepEqual((await S.store.series(num, "mq1", 0)).map((x) => x.v), [1, 0, 1]);
+  // Buscar temas: los estados y la conexión también salen.
+  const { temas } = await paneles.buscarTemas();
+  const de = (tema, campo = "") => temas.find((x) => x.tema === tema && x.campo === campo);
+  assert.equal(de("tele/enchufe/LWT").conexion, true);
+  assert.equal(de("stat/enchufe/POWER").estado, true);
+  assert.deepEqual(de("zigbee2mqtt/Puerta", "contact"), { broker: "b1", tema: "zigbee2mqtt/Puerta", campo: "contact", v: "true", estado: true });
+  assert.equal(de("zigbee2mqtt/Puerta", "battery").v, 90);
+  // Un estado que pasa a número es otro dato (su histórico no vale): clave nueva.
+  const ahora = S.paneles.paneles[num].datos;
+  assert.equal(paneles.guardarDatos(num, [{ ...ahora[0] }, { ...ahora[1], tipo: "batteryLevel", campo: "battery" }]).ok, true);
+  assert.deepEqual(S.paneles.paneles[num].datos.map((d) => d.clave), ["mq1", "mq3"]);
+  assert.equal((await S.store.series(num, "mq2", 0)).length, 0);
+  // Sin el tema de conexión ya no se sabe si está conectado.
+  assert.equal(paneles.guardarDatos(num, S.paneles.paneles[num].datos, null).ok, true);
+  assert.equal(n.conectado, undefined);
+  assert.equal(S.paneles.paneles[num].conexion, undefined);
+  // El de un nodo no lleva tema de conexión.
+  acciones.vigilar(CASETA);
+  assert.match(paneles.guardarDatos(CASETA, [], { broker: "b1", tema: "tele/x/LWT" }).error, /paneles sin nodo/);
 });
 
 test("al parar, lo que esperaba su minuto se guarda como lectura", async (t) => {

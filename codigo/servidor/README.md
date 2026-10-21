@@ -218,6 +218,19 @@ alarmas (también avisos por la malla) e histórico, como un nodo. Solo en el se
   pone uno en la lista: adivina qué es por el nombre (temperature, humidity, Power…) y, si Home Assistant publica la
   unidad, la elige; si no, el viento queda en km/h, lo normal en Home Assistant. Compruébalo.
 - **Lecturas**: el valor se ve y salta la alarma al momento; en el histórico se guarda uno por minuto como mucho.
+- **Estados ON/OFF** (*Estado ON/OFF* en el tipo): un enchufe, un relé, una puerta, un detector de agua… Vigía
+  entiende `ON`/`OFF`, `on`/`off`, `true`/`false`, `1`/`0`, `open`/`closed`, `online`/`offline` y un JSON con
+  cualquiera de ellos (`{"POWER":"ON"}` de Tasmota, `{"output":true}` de Shelly, `{"contact":false}` de
+  zigbee2mqtt). Se eligen sus nombres (*Encendido / Apagado*, *Abierta / Cerrada*, *Hay agua / Seco*…) y, si el
+  dispositivo lo dice al revés, *Al revés*: el `contact` de zigbee2mqtt es `true` con la puerta **cerrada** (al usarlo
+  desde *Buscar temas* ya se marca). Cada cambio se guarda al momento en el histórico (si no cambia, uno por hora) y
+  su gráfica es una barra de tiempo con lo que estuvo encendido.
+- **Alarma de un estado**, en la ficha: *Avisar cuando: Abierta* (o *Cerrada*), al momento o solo si sigue así más de
+  unos minutos (una puerta abierta más de 10 min, una bomba encendida más de 1 h). Se resuelve al cambiar.
+- **Conexión del dispositivo** (paneles sin nodo, opcional): el tema donde dice si está conectado. Tasmota:
+  `tele/…/LWT` (`Online`/`Offline`); Shelly: `…/online` (`true`/`false`); zigbee2mqtt: `zigbee2mqtt/…/availability`
+  (campo `state`). Con él, el panel dice *Sin conexión* al momento y, con *Avisar si se desconecta*, salta su alarma
+  (y su aviso por la malla, si están activados). *Buscar temas* lo reconoce y ofrece *Usar como conexión*.
 - **Nombre**: todos los paneles se pueden renombrar. El de un nodo es solo para Vigía (tablero, alarmas, avisos por
   la malla y Home Assistant): su nombre de Meshtastic se queda como información y, con el nombre vacío, vuelve a él.
 - **Sin datos**: en un panel sin nodo, la alarma «no llega ningún dato en más de…» viene apagada, porque hay
@@ -225,7 +238,8 @@ alarmas (también avisos por la malla) e histórico, como un nodo. Solo en el se
 - **Quitar panel** (al final de su ficha) lo borra con su histórico. Al quitar un dato, se borra también el suyo.
 
 La ubicación y el mapa siguen siendo solo de los nodos Meshtastic. A Home Assistant no van los datos MQTT ni sus
-alarmas: si los quieres allí, Home Assistant puede leerlos del broker donde se publican.
+alarmas: si los quieres allí, Home Assistant puede leerlos del broker donde se publican. (El sensor *último aviso por
+la malla* sí enseña el texto del último mensaje que salió por la malla, sea de lo que sea.)
 
 ## A la malla (el panel del receptor)
 

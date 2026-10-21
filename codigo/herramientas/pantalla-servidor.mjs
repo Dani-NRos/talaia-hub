@@ -413,6 +413,63 @@ await paso("panel nuevo sin nodo (Tasmota): sus datos, una alarma y nada a Home 
   if (sv.activas !== 1) throw new Error(`Home Assistant cuenta ${sv.activas} alarmas activas, no 1 (la del huerto)`);
 });
 
+await paso("estados ON/OFF y conexión en el panel del enchufe: «Usar», al revés, alarma «cuando: Apagado» y «Sin conexión»", async () => {
+  await ha.publishAsync("stat/enchufe/POWER", "ON", { retain: true });
+  await ha.publishAsync("tele/enchufe/LWT", "Online", { retain: true });
+  await ha.publishAsync("zigbee2mqtt/Puerta taller", JSON.stringify({ contact: true, battery: 80 }), { retain: true });
+  await pc.click("#cards .name-btn:text('Enchufe del taller')");
+  await sleep(300);
+  await pc.click("[data-dat-buscar]");
+  await esperarTexto(pc, /Encontrados \d+ con números o estados/, "temas encontrados");
+  await pc.fill("#filtroTemas", "enchufe");
+  await esperarTexto(pc, /POWER\s*ON · parece un estado ON\/OFF/, "el estado del enchufe");
+  await esperarTexto(pc, /LWT\s*Online · parece la conexión del dispositivo/, "su conexión");
+  const usar = usarEn(pc);
+  await usar("stat/enchufe/POWER");
+  await pc.locator('#datHallados li:has(.est-ht[title="tele/enchufe/LWT"]) [data-con-usar]').click();
+  await sleep(150);
+  await pc.fill("#filtroTemas", "Puerta");
+  await sleep(150);
+  await usar("zigbee2mqtt/Puerta taller", "contact");
+  if ((await fila(pc, 2, "tipo").inputValue()) !== "estado" || (await fila(pc, 3, "nombres").inputValue()) !== "abierta" || !(await fila(pc, 3, "invertir").isChecked())) throw new Error("los estados no quedaron bien");
+  if ((await pc.inputValue('#conBox [data-con-k="tema"]')) !== "tele/enchufe/LWT") throw new Error("el tema de conexión");
+  await pc.click("[data-dat-save]");
+  await esperarTexto(pc, /Hay dos «Estado ON\/OFF»/, "nombres repetidos");
+  await fila(pc, 2, "nombre").fill("Enchufe");
+  await fila(pc, 3, "nombre").fill("Puerta");
+  await pc.click("[data-dat-save]");
+  await esperarTexto(pc, /Encendido · ahora mismo/, "el estado en la ficha");
+  await esperarTexto(pc, /Cerrada · ahora mismo/, "la puerta, al revés");
+  await esperarTexto(pc, /Conectado · ahora mismo/, "conectado");
+  const st = await estado();
+  const num = Number(Object.keys(st.paneles.paneles).find((k) => st.paneles.paneles[k].nombre === "Enchufe del taller"));
+  const k = st.paneles.paneles[num].datos.find((d) => d.nombre === "Enchufe").clave;
+  await fotoApartado(pc, "#datBox", "datos-estados");
+  // Alarma cuando esté apagado, al momento.
+  await pc.selectOption(`#detail [data-est-cuando="${k}"]`, "0");
+  await esperarTexto(pc, /Avisará con «Apagado»/, "aviso guardado");
+  await ha.publishAsync("stat/enchufe/POWER", "OFF", { retain: true });
+  await esperarTexto(movil, /Enchufe del taller · Enchufe: Apagado/, "la alarma en el móvil");
+  await fotoApartado(pc, "#detail .sheet-b", "panel-estados");
+  await pc.locator("#chartList").scrollIntoViewIfNeeded();
+  await sleep(600);
+  await pc.locator("#chartList").screenshot({ path: path.join(out, "graficas-estados.png") });
+  // El dispositivo se desconecta: lo dice su LWT.
+  await ha.publishAsync("tele/enchufe/LWT", "Offline", { retain: true });
+  await esperarTexto(movil, /Enchufe del taller · Sin conexión/, "sin conexión en el móvil");
+  await esperarTexto(movil, /Enchufe del taller\s*desconectado ahora mismo/i, "en la tarjeta");
+  await foto(movil, "movil-estados");
+  await ha.publishAsync("tele/enchufe/LWT", "Online", { retain: true });
+  await ha.publishAsync("stat/enchufe/POWER", "ON", { retain: true });
+  await esperarTexto(movil, /Enchufe del taller · Conectado otra vez/, "conectado otra vez");
+  await pc.keyboard.press("Escape");
+  // A Home Assistant no va nada del panel: solo el texto del último aviso por la malla, que es lo que salió por ella.
+  const fugas = [...visto].filter(([tema, c]) => c.includes("Enchufe del taller") && tema !== "vigia/servidor/estado").map(([tema]) => tema);
+  if (fugas.length) throw new Error(`el panel sin nodo (o su alarma) ha ido a Home Assistant: ${fugas}`);
+  const sv = JSON.parse(visto.get("vigia/servidor/estado"));
+  if (JSON.stringify({ ...sv, aviso: null }).includes("Enchufe del taller")) throw new Error("el panel sin nodo está en el estado del servidor");
+});
+
 await paso("gráfica: serie desde el servidor", async () => {
   const r = await (await fetch(`${URL0}api/serie?nodo=${CASETA}&metrica=temperature&desde=0`)).json();
   if (r.length < 4) throw new Error(`serie con ${r.length} puntos`);

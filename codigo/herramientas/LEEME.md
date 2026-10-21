@@ -13,6 +13,7 @@ Para comprobar cambios antes de publicar. Necesitan Playwright con Chromium (no 
   por TCP y dos pantallas a la vez (vigilar, límite, alarma, «Enterado» compartido, petición, aviso por la malla,
   MQTT configurado desde Ajustes con un broker y un Home Assistant de mentira, el Mosquitto de este equipo con un
   usuario, datos MQTT en el panel del receptor que salen a la malla, renombrar, un panel sin nodo con su alarma,
+  estados ON/OFF con su alarma y el tema de conexión (LWT),
   reinicio y quitar el panel). Hace falta Mosquitto instalado.
 
 Para una refactorización que no debe verse: compilar la versión publicada (con `git worktree`) y la nueva, pasar

@@ -8,7 +8,7 @@ import { metricMeta, fmtLimit } from "./metrics.js";
 import { fmtDist } from "./geo.js";
 import { parseTrendRule } from "./trend.js";
 import { MIN, HOUR, isNum, dur, trendVerb, hoursText } from "./textos.js";
-import { seriesKey, trendKey } from "./motor.js";
+import { seriesKey, trendKey, estadoKey } from "./motor.js";
 
 export function crearAcciones(motor) {
   const { S } = motor;
@@ -66,7 +66,7 @@ export function crearAcciones(motor) {
     const r = { ...(w.rules[k] || {}) };
     if (v === null) delete r[side]; else r[side] = v;
     if (isNum(r.min) && isNum(r.max) && r.min >= r.max) return { ok: false, error: `En ${metricMeta(k).label.toLowerCase()} el mínimo tiene que ser menor que el máximo.` };
-    if (isNum(r.min) || isNum(r.max) || r.trend) w.rules[k] = r; else delete w.rules[k];
+    if (isNum(r.min) || isNum(r.max) || r.trend || r.estado) w.rules[k] = r; else delete w.rules[k];
     saveCfg();
     const cur = S.nodes.get(num)?.metrics[k];
     if (cur) motor.evalThreshold(num, k, cur.v, cur.t);
@@ -87,6 +87,27 @@ export function crearAcciones(motor) {
     motor.addLog("info", `${motor.nodeName(num)} · Aviso de cambio rápido: ${metricMeta(k).label} si ${trendVerb(ok.dir)} ${fmtLimit(k, ok.delta, true)} o más en ${hoursText(ok.hours)}`, num);
     motor.evalTrend(num, k, { strict: true });
     return { ok: true, toast: had ? "Aviso de cambio rápido actualizado" : "Aviso de cambio rápido añadido" };
+  }
+
+  /**
+   * Alarma de un dato ON/OFF (servidor): cuando: 1 (ON) | 0 (OFF) | null (no avisar); min: minutos que tiene que
+   * durar ese estado para avisar (0 o null: al momento).
+   */
+  function ponerEstado(num, k, cuando, min) {
+    const w = S.cfg.watched[num];
+    const m = metricMeta(k);
+    if (!w || !m.estados) return { ok: false };
+    if (cuando !== null && cuando !== 0 && cuando !== 1) return { ok: false };
+    const minutos = min == null ? 0 : min;
+    if (!(Number.isInteger(minutos) && minutos >= 0 && minutos <= 7 * 24 * 60)) return { ok: false, error: "Pon los minutos como un número entero (hasta una semana) o déjalo vacío." };
+    w.rules = w.rules || {};
+    const r = { ...(w.rules[k] || {}) };
+    if (cuando === null) delete r.estado; else r.estado = { cuando, min: minutos };
+    if (Object.keys(r).length) w.rules[k] = r; else delete w.rules[k];
+    saveCfg();
+    motor.evalEstado(num, k, { strict: true });
+    if (cuando === null) { motor.clearAlarm(estadoKey(num, k), { silent: true }); return { ok: true, toast: "Aviso quitado" }; }
+    return { ok: true, toast: `Avisará con «${m.estados[cuando ? 0 : 1]}»${minutos ? ` durante más de ${dur(minutos * MIN)}` : ""}` };
   }
 
   function quitarTendencia(num, k) {
@@ -173,7 +194,7 @@ export function crearAcciones(motor) {
   }
 
   return {
-    cargarRecientes, vigilar, dejarDeVigilar, ponerSinSenal, ponerLimite, ponerTendencia, quitarTendencia,
+    cargarRecientes, vigilar, dejarDeVigilar, ponerSinSenal, ponerLimite, ponerTendencia, quitarTendencia, ponerEstado,
     fijarValla, radioValla, quitarValla, sinSenalPorDefecto, retencion, avisosMalla, pruebaMalla, borrarHistorico,
   };
 }

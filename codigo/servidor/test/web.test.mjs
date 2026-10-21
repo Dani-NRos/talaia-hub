@@ -146,6 +146,16 @@ test("órdenes de los paneles: crear uno sin nodo (con su número), renombrar, l
   assert.match(r.json.error, /broker/);
   r = await orden(base, { orden: "limite", num: -1, metrica: "mq1", lado: "max", valor: 40 });
   assert.equal(r.status, 200);
+  r = await orden(base, { orden: "datosPanel", num: -1, datos: [], conexion: { broker: "nadie", tema: "tele/enchufe/LWT", avisar: true } });
+  assert.match(r.json.error, /broker/);
+  r = await orden(base, { orden: "datosPanel", num: -1, datos: [], conexion: { tema: "x", clave: "y" } });
+  assert.equal(r.status, 400);
+  r = await orden(base, { orden: "datosPanel", num: -1, datos: [{ tipo: "estado", invertir: "sí" }] });
+  assert.equal(r.status, 400);
+  r = await orden(base, { orden: "alarmaEstado", num: -1, metrica: "mq1", cuando: 2, minutos: 0 });
+  assert.equal(r.status, 400);
+  r = await orden(base, { orden: "alarmaEstado", num: -1, metrica: "mq1", cuando: 1, minutos: null });
+  assert.equal(r.json.ok, false); // no es un dato ON/OFF
   r = await orden(base, { orden: "quitarPanel", num: -1 });
   assert.equal(r.json.ok, true);
   assert.equal(vigia.S.nodes.has(-1), false);

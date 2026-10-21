@@ -3,6 +3,10 @@
 // y se guarda como una lectura más de ese panel con su propia clave («mq3»): gráficas, alarmas e histórico como las de
 // un nodo. Los del panel del receptor pueden salir además a la malla como telemetría suya («Mandar a la malla»).
 //
+// Además de números, estados ON/OFF (un enchufe, una puerta, un detector de agua): se guardan como 1 y 0 y se enseñan
+// con los nombres que se elijan («Abierta»/«Cerrada»). Y, en un panel sin nodo, el tema donde el dispositivo dice si
+// está conectado (el LWT de Tasmota, el «online» de Shelly, el «availability» de zigbee2mqtt).
+//
 // Aquí, lo que comparten el servidor (que los recibe) y la pantalla (que los configura): los tipos, sus unidades, cómo
 // se lee un valor, qué dato parece cada tema y cómo se comprueba la configuración. Sin dependencias.
 import { fmtNum } from "./metrics.js";
@@ -35,12 +39,28 @@ export const TIPOS = {
   distance:           { label: "Distancia",     unit: "mm",    dec: 0, hyst: 5,    otras: { cm: X10, m: X1000 }, rango: [0, 1e7], malla: true },
   weight:             { label: "Peso",          unit: "kg",    dec: 2, hyst: 0.05, otras: { g: MIL }, rango: [0, 1e5], malla: true },
   signal:             { label: "Señal",         unit: "dBm",   dec: 0, hyst: 3,    rango: [-150, 30] },
+  estado:             { label: "Estado ON/OFF", unit: "",      dec: 0, hyst: 0, binario: true }, // 1 y 0, con nombres
   otro:               { label: "Otro número",   unit: "",      dec: 2, hyst: 0 }, // unidad libre, sin convertir
 };
 export const LISTA_TIPOS = Object.keys(TIPOS);
 export const tipoMalla = (t) => !!TIPOS[t]?.malla;
+export const esEstado = (t) => !!TIPOS[t]?.binario;
 /** Unidades en que puede llegar un tipo: la primera es la de Vigía. «otro»: ninguna fija (la escribe el usuario). */
 export const unidades = (t) => (t === "otro" ? [] : [TIPOS[t].unit, ...Object.keys(TIPOS[t].otras || {})]);
+
+/** Cómo se llaman los dos estados (ON, OFF) de un dato ON/OFF. */
+export const NOMBRES_ESTADO = {
+  encendido: ["Encendido", "Apagado"],
+  abierta: ["Abierta", "Cerrada"],
+  abierto: ["Abierto", "Cerrado"],
+  agua: ["Hay agua", "Seco"],
+  movimiento: ["Movimiento", "Sin movimiento"],
+  si: ["Sí", "No"],
+  on: ["ON", "OFF"],
+};
+export const nombresEstado = (clave) => NOMBRES_ESTADO[clave] || NOMBRES_ESTADO.encendido;
+/** El nombre de un estado: 1 → «Abierta», 0 → «Cerrada». */
+export const textoEstado = (clave, v) => nombresEstado(clave)[v ? 0 : 1];
 
 /** Qué es un panel sin nodo: solo para la etiqueta (y, más adelante, para proponer temas). */
 export const TIPOS_PANEL = {
@@ -60,7 +80,9 @@ export const nombreDato = (d) => d.nombre || TIPOS[d.tipo]?.label || "Dato";
 /** Lo que necesita la pantalla para enseñar un dato como una métrica más (nombre, unidad, decimales). */
 export function metaDato(d, i = 0) {
   const t = TIPOS[d.tipo] || TIPOS.otro;
-  return { label: nombreDato(d), unit: d.tipo === "otro" ? d.unidad || "" : t.unit, dec: t.dec, hyst: t.hyst, order: 100 + i, tipo: d.tipo };
+  const m = { label: nombreDato(d), unit: d.tipo === "otro" ? d.unidad || "" : t.unit, dec: t.dec, hyst: t.hyst, order: 100 + i, tipo: d.tipo };
+  if (t.binario) m.estados = nombresEstado(d.nombres); // así se enseña el valor: «Abierta» en vez de 1
+  return m;
 }
 /** De la configuración de los paneles, la de todas sus métricas MQTT: { mq1: { label, unit… } }. */
 export function metasDe(paneles) {
@@ -116,6 +138,27 @@ export function unidadDe(tipo, txt) {
   return unidades(tipo).find((x) => x.toLowerCase() === u.toLowerCase()) || null;
 }
 
+/**
+ * Para un estado encontrado en el broker: qué nombres le van por el tema o el campo y si va al revés. El «contact» de
+ * zigbee2mqtt es true cuando la puerta está cerrada (hay contacto): al revés. El de Home Assistant («on»: abierta), no.
+ */
+export function adivinarEstado(tema, campo = "") {
+  const txt = limpio(campo ? String(campo).split(".").at(-1) : String(tema).split("/").filter((p) => p && p !== "state").at(-1));
+  if (/^contact$/.test(txt)) return { nombres: "abierta", invertir: true };
+  if (/door|puerta|window|ventana|contact|garage|garaje|gate|portal/.test(txt)) return { nombres: "abierta", invertir: false };
+  if (/leak|water|agua|flood|inunda|moist/.test(txt)) return { nombres: "agua", invertir: false };
+  if (/occupan|motion|presen|movim|pir/.test(txt)) return { nombres: "movimiento", invertir: false };
+  return { nombres: "encendido", invertir: false };
+}
+
+/** ¿Es el tema donde un dispositivo dice si está conectado? (Tasmota: …/LWT; Shelly: …/online; zigbee2mqtt: …/availability) */
+export function pareceConexion(tema, campo = "", texto = "") {
+  const x = String(texto).trim().toLowerCase();
+  if (/^(online|offline|connected|disconnected)$/.test(x)) return true;
+  const ultimo = String(tema).toLowerCase().split("/").filter(Boolean).at(-1) || "";
+  return /^(lwt|online|availability|available|status|connected)$/.test(ultimo) && /^(true|false|1|0|on|off)$/.test(x) && !campo;
+}
+
 const NO_DISPONIBLE = /^(unavailable|unknown|none|null|nan|)$/i;
 
 /**
@@ -144,12 +187,46 @@ export function leerValor(carga, campo = "") {
   return Number.isFinite(n) ? { v: n } : { error: `«${x.slice(0, 30)}» no es un número` };
 }
 
+const ES_ON = /^(on|true|1|yes|si|sí|open|opened|abierto|abierta|online|connected|conectado|detected|wet|occupied|motion|active|high|encendido|power_on|running)$/i;
+const ES_OFF = /^(off|false|0|no|closed|close|cerrado|cerrada|offline|disconnected|desconectado|clear|dry|unoccupied|inactive|low|apagado|power_off|stopped)$/i;
+
+/**
+ * Un estado ON/OFF de un mensaje MQTT (sin campo, el mensaje entero: «ON», «on», «true», «1», «open», «online»…; con
+ * campo, el de ese JSON, que también puede ser true/false o 1/0). invertir: el dispositivo dice ON cuando es OFF.
+ * Devuelve { v: 1 | 0 }, { nulo: true } o { error }.
+ */
+export function leerEstado(carga, campo = "", invertir = false) {
+  let x = String(carga ?? "").trim();
+  if (campo) {
+    let j;
+    try { j = JSON.parse(x); } catch { return { error: "no llega un JSON" }; }
+    for (const k of campo.split(".")) {
+      if (j == null || typeof j !== "object" || Array.isArray(j) || !(k in j)) return { error: `el JSON no trae «${campo}»` };
+      j = j[k];
+    }
+    if (j == null) return { nulo: true };
+    if (typeof j === "boolean") return { v: j !== invertir ? 1 : 0 };
+    if (typeof j !== "string" && typeof j !== "number") return { error: `«${campo}» no es un estado ON/OFF` };
+    x = String(j).trim();
+  }
+  if (NO_DISPONIBLE.test(x)) return { nulo: true };
+  if (!campo && /^[{[]/.test(x)) return { error: "llega un JSON: indica el campo" };
+  const on = ES_ON.test(x), off = !on && ES_OFF.test(x);
+  if (!on && !off) return { error: `«${x.slice(0, 30)}» no es un estado ON/OFF` };
+  return { v: on !== invertir ? 1 : 0 };
+}
+/** ¿Parece un estado (y no un número)? Para buscar temas. */
+export const pareceEstado = (x) => typeof x === "boolean" || (typeof x === "string" && !/^-?\d/.test(x.trim()) && (ES_ON.test(x.trim()) || ES_OFF.test(x.trim())));
+
 /** Un valor con su unidad, para los textos: «21,4 °C». */
 export function textoValor(tipo, v, unidad = null) {
   const t = TIPOS[tipo] || TIPOS.otro;
   const u = tipo === "otro" ? unidad || "" : t.unit;
   return u ? `${fmtNum(v, t.dec)} ${u}` : fmtNum(v, t.dec);
 }
+
+/** El valor de un dato, para los textos: «21,4 °C» o, si es un estado, «Abierta». */
+export const textoDato = (d, v) => (esEstado(d.tipo) ? textoEstado(d.nombres, v) : textoValor(d.tipo, v, d.unidad));
 
 /** Pasa un valor a la unidad de Vigía y comprueba que sea posible. Devuelve { v } o { error }. */
 export function convertir(tipo, unidad, v) {
@@ -224,7 +301,13 @@ export function comprobarDatos(lista, { temaProhibido = () => null, brokers = nu
     const prohibido = temaProhibido(tema);
     if (prohibido) return { error: `«${visto}»: ${prohibido}` };
     let unidad = String(d.unidad ?? "").trim();
-    if (tipo === "otro") {
+    const extra = {};
+    if (esEstado(tipo)) {
+      unidad = "";
+      const nombres = d.nombres ?? "encendido";
+      if (!NOMBRES_ESTADO[nombres]) return { error: `Elige cómo se llaman los estados de «${visto}».` };
+      Object.assign(extra, { nombres, invertir: !!d.invertir });
+    } else if (tipo === "otro") {
       if (unidad.length > 12) return { error: `La unidad de «${visto}» es demasiado larga (hasta 12 letras).` };
     } else {
       unidad ||= unidades(tipo)[0];
@@ -239,7 +322,28 @@ export function comprobarDatos(lista, { temaProhibido = () => null, brokers = nu
       if (aLaMalla.has(tipo)) return { error: `Dos datos de ${TIPOS[tipo].label.toLowerCase()} van a la malla: la telemetría solo tiene un hueco para cada tipo.` };
       aLaMalla.add(tipo);
     }
-    datos.push({ ...(d.clave ? { clave: d.clave } : {}), nombre, tipo, broker, tema, campo, unidad, caduca, malla });
+    datos.push({ ...(d.clave ? { clave: d.clave } : {}), nombre, tipo, broker, tema, campo, unidad, caduca, malla, ...extra });
   }
   return { datos };
+}
+
+/**
+ * Comprueba el tema de conexión de un panel sin nodo: { broker, tema, campo, avisar } o null (sin él).
+ * Devuelve { conexion } (null si no hay tema) o { error }.
+ */
+export function comprobarConexion(c, { temaProhibido = () => null, brokers = null } = {}) {
+  if (c == null) return { conexion: null };
+  if (typeof c !== "object") return { error: "El tema de conexión no es válido." };
+  const tema = String(c.tema ?? "").trim();
+  if (!tema) return { conexion: null };
+  const campo = String(c.campo ?? "").trim();
+  if (/[+#\0]/.test(tema)) return { error: "El tema de conexión no puede llevar «+» ni «#»: tiene que ser uno concreto." };
+  if (tema.length > 250 || campo.length > 100) return { error: "El tema o el campo de la conexión es demasiado largo." };
+  if (campo && campo.split(".").some((p) => !p)) return { error: "El campo de la conexión no es válido (por ejemplo, state)." };
+  const broker = String(c.broker ?? "").trim();
+  if (!broker) return { error: "Elige el broker del tema de conexión." };
+  if (brokers && !brokers.has(broker)) return { error: "El broker del tema de conexión ya no está en la lista." };
+  const prohibido = temaProhibido(tema);
+  if (prohibido) return { error: `Tema de conexión: ${prohibido}` };
+  return { conexion: { broker, tema, campo, avisar: !!c.avisar } };
 }

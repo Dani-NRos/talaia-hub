@@ -7,23 +7,28 @@
 //  - Los paneles sin nodo son números negativos (ningún nodo Meshtastic los tiene): un nodo «de mentira» en S.nodes,
 //    vigilado, que reutiliza todo lo del motor. «Sin datos» usa la hora del último dato (apagado por defecto).
 //  - Los datos del panel del receptor marcados «a la malla» salen cada cierto tiempo como su telemetría de ambiente.
+//  - Estados ON/OFF (tipo «estado»): se guardan como 1 y 0, cada cambio al momento (y, si no cambia, uno por hora); el
+//    motor sabe desde cuándo está cada uno («desde») para avisar de «abierta más de 10 min».
+//  - Un panel sin nodo puede tener un tema de conexión (el LWT de Tasmota, el «online» de Shelly…): «Sin conexión» en
+//    el panel al momento y, si se pide, su alarma.
 //
 // Configuración en SQLite («paneles»); lo que ven las pantallas, en S.paneles (parte «paneles»). Lo de la 1.16 (la
 // estación, en Ajustes) se migra al panel del receptor: ver migrarEstacion.
 import { create, toBinary } from "@bufbuild/protobuf";
 import { Protobuf } from "@meshtastic/core";
 import {
-  comprobarDatos, comprobarMalla, leerValor, convertir, unidades, textoValores, proximoEnvio, metasDe, nombreDato,
-  TIPOS_PANEL, MALLA_DEFECTO, TIPOS,
+  comprobarDatos, comprobarMalla, comprobarConexion, leerValor, leerEstado, pareceEstado, pareceConexion, convertir,
+  unidades, textoValores, proximoEnvio, metasDe, nombreDato, esEstado, TIPOS_PANEL, MALLA_DEFECTO, TIPOS,
 } from "@vigia/nucleo/mqtt-datos.js";
 import { registrarMetricas } from "@vigia/nucleo/metrics.js";
-import { RE, trendKey } from "@vigia/nucleo/motor.js";
+import { RE, trendKey, conexionKey } from "@vigia/nucleo/motor.js";
 import { hhmm } from "@vigia/nucleo/textos.js";
 
 const BUSCAR_MS = 3000; // al buscar temas, cuánto se escucha cada broker
 const BUSCAR_MAX = 2000; // un broker con mucho retenido (Home Assistant, zigbee2mqtt…) tiene cientos
 const A_MANO_MS = 60000; // entre dos «Enviar ahora»
 const LECTURA_MS = 60000; // cada dato se guarda como lectura como mucho una vez por minuto
+const ESTADO_MS = 3600000; // un estado, al cambiar; si no cambia, como mucho una vez por hora
 
 /** Un Telemetry con la telemetría de ambiente, codificado. valores: { tipo: número } en unidades de Meshtastic. */
 export function telemetriaAmbiente(valores, segundos) {
@@ -34,12 +39,13 @@ export function telemetriaAmbiente(valores, segundos) {
   return toBinary(TEL.TelemetrySchema, tel);
 }
 
-/** Los números de un JSON, con su ruta («temperature», «ENERGY.Power»), hasta 3 niveles. */
+/** Los números y los estados ON/OFF de un JSON, con su ruta («temperature», «ENERGY.Power», «contact»), hasta 3 niveles. */
 function numerosDe(obj, ruta = "", out = [], nivel = 0) {
   if (nivel > 3 || !obj || typeof obj !== "object" || Array.isArray(obj)) return out;
   for (const [k, v] of Object.entries(obj)) {
     const r = ruta ? `${ruta}.${k}` : k;
     if (typeof v === "number" && Number.isFinite(v)) out.push({ campo: r, v });
+    else if (pareceEstado(v)) out.push({ campo: r, v: String(v), estado: true });
     else if (typeof v === "object") numerosDe(v, r, out, nivel + 1);
   }
   return out;
@@ -95,6 +101,8 @@ export function crearPaneles({ S, motor, eventos, almacen, registro, receptor, b
   const quitar = new Map(); // id del broker → cómo quitar sus suscripciones
   const pendientes = new Map(); // clave → { num, v, t, timer }: lectura por guardar (una por minuto)
   const guardadoT = new Map(); // clave → cuándo se guardó la última
+  const guardadoV = new Map(); // clave → el último valor guardado (para los estados: cada cambio se guarda)
+  const conexionV = new Map(); // num del panel → lo último de su tema de conexión: { v: 1 | 0, t } | { error, t } | { nulo, t }
   let timer = null, proximo = null, contarT = null, vivo = true;
   let ultimo = almacen.leer("mallaUltimo", null), ultimoFallo = null, aMano = 0;
 
@@ -154,6 +162,7 @@ export function crearPaneles({ S, motor, eventos, almacen, registro, receptor, b
       paneles: cfg.paneles,
       valores: Object.fromEntries(valores),
       malla: { ...cfg.malla, proximo, ultimo, previo: { texto: textoValores(previo.vals), faltan: previo.faltan } },
+      conexion: Object.fromEntries(conexionV),
     };
     eventos.emit("parte", "paneles");
   }
@@ -163,8 +172,12 @@ export function crearPaneles({ S, motor, eventos, almacen, registro, receptor, b
   /* ── lo que llega por MQTT ── */
   function recibido(broker, tema, carga) {
     const t = Date.now();
+    for (const [k, p] of Object.entries(cfg.paneles)) {
+      if (p.conexion?.broker === broker && p.conexion.tema === tema) recibidaConexion(Number(k), carga, t);
+    }
     for (const { num, d } of porClave.values()) {
       if (d.broker !== broker || d.tema !== tema) continue;
+      if (esEstado(d.tipo)) { recibidoEstado(num, d, carga, t); continue; }
       const r = leerValor(carga, d.campo);
       if (r.error || r.nulo) { valores.set(d.clave, { ...r, t }); continue; }
       const c = convertir(d.tipo, d.unidad, r.v);
@@ -186,11 +199,65 @@ export function crearPaneles({ S, motor, eventos, almacen, registro, receptor, b
   }
   let cambioNodos = false;
 
-  /** Una lectura por minuto y dato: la primera, al momento; las que llegan antes, se queda la última para el final. */
-  function lectura(num, clave, v, t) {
+  /** Un estado ON/OFF: al momento en el panel, con desde cuándo lo tiene, y su alarma. */
+  function recibidoEstado(num, d, carga, t) {
+    const r = leerEstado(carga, d.campo, d.invertir);
+    if (r.v == null) { valores.set(d.clave, { ...r, t }); return; }
+    valores.set(d.clave, { v: r.v, t });
+    if (S.cfg.watched[num]) {
+      const n = motor.node(num);
+      const p = n.metrics[d.clave];
+      n.metrics[d.clave] = { v: r.v, t, desde: p && p.v === r.v ? (p.desde ?? p.t) : t };
+      if (num < 0) motor.touch(num, t);
+      motor.evalEstado(num, d.clave);
+      cambioNodos = true;
+    }
+    lectura(num, d.clave, r.v, t, true);
+  }
+
+  /** Lo que dice el tema de conexión de un panel sin nodo («Online», «Offline», true…). */
+  function recibidaConexion(num, carga, t) {
+    const c = panel(num)?.conexion;
+    if (!c) return;
+    const r = leerEstado(carga, c.campo);
+    if (r.v == null) { conexionV.set(num, { ...r, t }); return; }
+    conexionV.set(num, { v: r.v, t });
+    const n = motor.node(num);
+    if (n.conectado !== (r.v === 1)) {
+      n.conectado = r.v === 1;
+      n.conectadoT = t;
+      cambioNodos = true;
+    }
+    evalConexion(num);
+  }
+  /** «Sin conexión»: si el panel lo pide y el dispositivo dice que se ha desconectado. */
+  function evalConexion(num) {
+    const c = panel(num)?.conexion, n = S.nodes.get(num), key = conexionKey(num);
+    if (c?.avisar && S.cfg.watched[num] && n?.conectado === false) motor.raise(key, { num, kind: "conexion", value: n.conectadoT, t: n.conectadoT });
+    else if (c?.avisar && n?.conectado === true) motor.clearAlarm(key, { t: n.conectadoT });
+    else motor.clearAlarm(key, { silent: true });
+  }
+  /** Sin tema de conexión (o con otro): ya no se sabe si está conectado. */
+  function olvidarConexion(num) {
+    conexionV.delete(num);
+    const n = S.nodes.get(num);
+    if (n) { delete n.conectado; delete n.conectadoT; }
+    motor.clearAlarm(conexionKey(num), { silent: true });
+  }
+
+  /**
+   * Una lectura por minuto y dato: la primera, al momento; las que llegan antes, se queda la última para el final.
+   * Un estado: cada cambio, al momento; si no cambia, uno por hora (así la gráfica sabe que sigue igual).
+   */
+  function lectura(num, clave, v, t, estado = false) {
     const p = pendientes.get(clave);
+    if (estado && guardadoV.get(clave) !== v) {
+      if (p) { clearTimeout(p.timer); pendientes.delete(clave); }
+      // Dos cambios en el mismo milisegundo serían la misma lectura (y se perdería el segundo): uno más tarde.
+      return guardarLectura(num, clave, v, Math.max(t, (guardadoT.get(clave) || 0) + 1));
+    }
     if (p) { Object.assign(p, { num, v, t }); return; }
-    const espera = (guardadoT.get(clave) || 0) + LECTURA_MS - t;
+    const espera = (guardadoT.get(clave) || 0) + (estado ? ESTADO_MS : LECTURA_MS) - t;
     if (espera <= 0) return guardarLectura(num, clave, v, t);
     const q = { num, v, t, timer: null };
     q.timer = setTimeout(() => { pendientes.delete(clave); guardarLectura(q.num, clave, q.v, q.t); }, espera);
@@ -200,6 +267,7 @@ export function crearPaneles({ S, motor, eventos, almacen, registro, receptor, b
   function guardarLectura(num, clave, v, t) {
     if (!vivo || !S.cfg.watched[num] || porClave.get(clave)?.num !== num) return;
     guardadoT.set(clave, t);
+    guardadoV.set(clave, v);
     // En un panel sin nodo, que llegue un dato es «dar señal»; en el de un nodo, no (eso es la radio).
     motor.ingest(num, { [clave]: v }, t, { touch: num < 0 });
   }
@@ -210,6 +278,7 @@ export function crearPaneles({ S, motor, eventos, almacen, registro, receptor, b
       if (solo && id !== solo) continue;
       for (const q of quitar.get(id) || []) q();
       const temas = new Set([...porClave.values()].filter(({ d }) => d.broker === id).map(({ d }) => d.tema));
+      for (const p of Object.values(cfg.paneles)) if (p.conexion?.broker === id) temas.add(p.conexion.tema);
       quitar.set(id, [...temas].map((tema) => con.suscribir(tema, (t, carga) => recibido(id, tema, carga))));
     }
   }
@@ -276,9 +345,15 @@ export function crearPaneles({ S, motor, eventos, almacen, registro, receptor, b
       if (vistos.size >= BUSCAR_MAX || temaProhibido(tema) || /\/config$/.test(tema) || /(^|\/)bridge\//.test(tema)) return;
       const r = leerValor(carga);
       if (r.v != null) return vistos.set(`${tema}\n`, { broker, tema, campo: "", v: r.v });
+      const txt = carga.toString().trim();
+      // Un estado («ON», «true», «open»…) o la conexión del dispositivo («Online»).
+      if (pareceEstado(txt)) return vistos.set(`${tema}\n`, { broker, tema, campo: "", v: txt, estado: true, ...(pareceConexion(tema, "", txt) ? { conexion: true } : {}) });
       let j;
-      try { j = JSON.parse(carga.toString()); } catch { return; }
-      for (const x of numerosDe(j)) vistos.set(`${tema}\n${x.campo}`, { broker, tema, ...x });
+      try { j = JSON.parse(txt); } catch { return; }
+      for (const x of numerosDe(j)) {
+        if (x.estado && pareceConexion(tema, x.campo, x.v)) x.conexion = true;
+        vistos.set(`${tema}\n${x.campo}`, { broker, tema, ...x });
+      }
     });
     await new Promise((r) => setTimeout(r, BUSCAR_MS));
     soltar();
@@ -323,7 +398,8 @@ export function crearPaneles({ S, motor, eventos, almacen, registro, receptor, b
       };
     },
     /** Qué datos usan ese broker (para no quitarlo). */
-    usos: (id) => [...porClave.values()].filter(({ d }) => d.broker === id).map(({ num, d }) => `${nombrePanel(num)} (${nombreDato(d)})`),
+    usos: (id) => [...porClave.values()].filter(({ d }) => d.broker === id).map(({ num, d }) => `${nombrePanel(num)} (${nombreDato(d)})`)
+      .concat(Object.entries(cfg.paneles).filter(([, p]) => p.conexion?.broker === id).map(([k]) => `${nombrePanel(Number(k))} (conexión)`)),
     arrancar() {
       const n = porClave.size;
       if (n) registro.info(`Paneles: ${n} datos por MQTT${cfg.malla.activado ? `; a la malla cada ${cfg.malla.cada} min por el canal ${cfg.malla.canal}` : ""}`);
@@ -353,6 +429,7 @@ export function crearPaneles({ S, motor, eventos, almacen, registro, receptor, b
       const p = panel(num);
       if (num >= 0 || !p) return { ok: false, error: "Ese panel no se puede quitar (los de los nodos se dejan de vigilar)." };
       for (const d of p.datos) olvidarDato(num, d.clave);
+      olvidarConexion(num);
       delete cfg.paneles[num];
       guardar();
       for (const k of [...S.active.keys()]) if (S.active.get(k).num === num) motor.clearAlarm(k, { silent: true });
@@ -399,23 +476,42 @@ export function crearPaneles({ S, motor, eventos, almacen, registro, receptor, b
       contar();
       return { ok: true };
     },
-    /** Los datos MQTT de un panel (los que no estén, se quitan con su histórico). */
-    guardarDatos(num, lista) {
+    /**
+     * Los datos MQTT de un panel (los que no estén, se quitan con su histórico) y, en uno sin nodo, su tema de
+     * conexión ({ broker, tema, campo, avisar } o null; sin darlo, se queda el que tenga).
+     */
+    guardarDatos(num, lista, conexion) {
       if (!S.cfg.watched[num]) return { ok: false, error: "Ese panel ya no está." };
-      const r = comprobarDatos(lista, { temaProhibido, brokers: new Set(brokers().map((b) => b.id)), receptor: num === S.myNode });
+      const ids = new Set(brokers().map((b) => b.id));
+      const r = comprobarDatos(lista, { temaProhibido, brokers: ids, receptor: num === S.myNode });
       if (r.error) return { ok: false, error: r.error };
+      let con;
+      if (conexion !== undefined) {
+        if (num >= 0 && conexion?.tema) return { ok: false, error: "El tema de conexión es de los paneles sin nodo (el nodo ya dice si tiene señal)." };
+        const c = comprobarConexion(conexion, { temaProhibido, brokers: ids });
+        if (c.error) return { ok: false, error: c.error };
+        con = c.conexion;
+      }
       const antes = panel(num)?.datos || [];
       const suyas = new Set(antes.map((d) => d.clave));
       for (const d of r.datos) {
-        // Una clave que no es de este panel (o que ya se usa en esta lista) es un dato nuevo.
-        if (!d.clave || !suyas.has(d.clave)) d.clave = `mq${cfg.siguiente.dato++}`;
+        const a = d.clave && suyas.has(d.clave) ? antes.find((x) => x.clave === d.clave) : null;
+        // Un dato nuevo, una clave repetida en la lista o un número que pasa a estado (o al revés: su histórico ya no
+        // vale para él): clave nueva, y lo de la vieja se quita.
+        if (!a || esEstado(a.tipo) !== esEstado(d.tipo)) { d.clave = `mq${cfg.siguiente.dato++}`; continue; }
         suyas.delete(d.clave);
-        const a = antes.find((x) => x.clave === d.clave);
-        if (a && (a.broker !== d.broker || a.tema !== d.tema || a.campo !== d.campo || a.unidad !== d.unidad || a.tipo !== d.tipo)) valores.delete(d.clave);
+        if (a.broker !== d.broker || a.tema !== d.tema || a.campo !== d.campo || a.unidad !== d.unidad || a.tipo !== d.tipo || !!a.invertir !== !!d.invertir) valores.delete(d.clave);
       }
       for (const clave of suyas) olvidarDato(num, clave); // los que se han quitado
       cfg.paneles[num] ||= { datos: [] };
       cfg.paneles[num].datos = r.datos;
+      if (con !== undefined) {
+        const v = cfg.paneles[num].conexion;
+        if (!con || !v || v.broker !== con.broker || v.tema !== con.tema || v.campo !== con.campo) olvidarConexion(num);
+        if (con) cfg.paneles[num].conexion = con;
+        else delete cfg.paneles[num].conexion;
+        evalConexion(num);
+      }
       guardar();
       aplicar();
       suscribirse();
@@ -435,13 +531,16 @@ export function crearPaneles({ S, motor, eventos, almacen, registro, receptor, b
       programar();
       return { ok: true, toast: malla.activado ? `Guardado. Próximo envío a las ${hhmm.format(new Date(proximo))}.` : "Guardado. No se manda nada a la malla." };
     },
-    /** Escucha los brokers conectados unos segundos y devuelve los temas con números: { ok, temas: [{ broker, tema, campo, v, unidad? }] }. */
+    /**
+     * Escucha los brokers conectados unos segundos y devuelve los temas con números o estados:
+     * { ok, temas: [{ broker, tema, campo, v, unidad?, estado?, conexion? }] }.
+     */
     async buscarTemas() {
       const conectadas = [...conexiones].filter(([, c]) => c.conectada);
       if (!conectadas.length) return { ok: false, error: "Primero conecta algún broker MQTT (en Ajustes → MQTT)." };
       const porBroker = await Promise.all(conectadas.map(([id, c]) => buscarEn(id, c)));
       const temas = porBroker.flat().sort((a, b) => a.tema.localeCompare(b.tema) || a.campo.localeCompare(b.campo) || a.broker.localeCompare(b.broker));
-      return { ok: true, temas, toast: temas.length ? `${temas.length} con números` : "No ha llegado ningún tema con números" };
+      return { ok: true, temas, toast: temas.length ? `${temas.length} con números o estados` : "No ha llegado ningún tema con números o estados" };
     },
     /** Manda ya a la malla lo que haya (sin esperar al siguiente envío). */
     enviarAhora() {

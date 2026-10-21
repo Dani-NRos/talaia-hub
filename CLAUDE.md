@@ -118,6 +118,12 @@ con Tasmota/ESPHome, Zigbee por zigbee2mqtt, ESPHome, Home Assistant…).
   `tipoPanel`) vigilado con «sin datos» apagado; el nombre de Vigía de un nodo va en `n.alias` (el de Meshtastic sigue
   en `n.long`). Las alarmas de datos MQTT no van a Home Assistant (ni eventos, ni cuenta, ni «Enterado todas»): el
   registro las marca con `mqtt: true`. Los paneles sin nodo no salen en «Resto de la malla» ni en el mapa.
+- Hecho así (fase 3, Dani 21 oct. 2026): tipo de dato «estado» (1/0) con nombres a elegir (`NOMBRES_ESTADO`) y «al
+  revés»; `n.metrics[k].desde` = desde cuándo tiene ese valor. Alarma `rules[k].estado = { cuando, min }` («cuando:
+  Abierta», al momento o «más de X min»; `evalEstados` cada 15 s en el servidor). Lecturas de un estado: cada cambio
+  al momento, si no cambia una por hora. Tema de conexión (LWT) por panel sin nodo: `n.conectado`, alarma
+  `${num}||conexion` si se marca «Avisar si se desconecta». Las alarmas de los datos MQTT siguen sin ir a Home
+  Assistant: Dani valorará más adelante mandarlas a HA o a Telegram con un bot.
 - Fases: 1) brokers (Mosquitto propio + varios); 2) paneles, nombres, datos MQTT numéricos, estación al panel del
   receptor; 3) ON/OFF; 4) control; 5) descubrimiento automático; 6) **controlar interruptores desde la malla** (a Dani
   le interesa mucho). Más adelante: un segundo receptor 868 con firmware propio para estaciones meteorológicas

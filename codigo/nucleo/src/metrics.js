@@ -96,7 +96,9 @@ export function fmtNum(v, dec) {
 /** Valor formateado sin unidad. La batería 101 significa alimentada por USB/externa. */
 export function fmtValue(metric, v) {
   if (metric === "batteryLevel" && v > 100) return "USB";
-  return fmtNum(v, metricMeta(metric).dec);
+  const m = metricMeta(metric);
+  if (m.estados) return m.estados[v ? 0 : 1]; // un dato ON/OFF del servidor: «Abierta», «Cerrada»
+  return fmtNum(v, m.dec);
 }
 
 /** Límite puesto por el usuario: respeta sus decimales (25,5 no se muestra como 26). */
@@ -110,5 +112,6 @@ export function fmtLimit(metric, v, withUnit = false) {
 export function fmtWithUnit(metric, v) {
   const m = metricMeta(metric);
   if (metric === "batteryLevel" && v > 100) return "USB";
+  if (m.estados) return m.estados[v ? 0 : 1];
   return m.unit ? `${fmtNum(v, m.dec)} ${m.unit}` : fmtNum(v, m.dec);
 }

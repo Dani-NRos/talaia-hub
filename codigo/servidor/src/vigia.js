@@ -174,7 +174,8 @@ export async function crearVigia(config, registro, opts = {}) {
   });
 
   /* ── tareas periódicas ── */
-  const offlineId = setInterval(() => motor.evalOffline(), 15000);
+  // Sin señal y los estados que tienen que durar un tiempo («abierta más de 10 min»).
+  const offlineId = setInterval(() => { motor.evalOffline(); motor.evalEstados(); }, 15000);
   async function podar() {
     const dias = S.settings.retentionDays || config.retencionDias;
     try {
