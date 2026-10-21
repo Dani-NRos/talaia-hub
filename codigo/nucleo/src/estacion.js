@@ -123,9 +123,10 @@ const entero = (x) => Number.isInteger(x);
 /**
  * Comprueba y completa una configuración nueva (lo que no venga se queda como estaba).
  * temaProhibido(tema): texto si ese tema no vale (lo que publica el propio Vigía, para no hacer un bucle).
+ * brokers: los ids de los brokers que hay (null: no se comprueba, como al leer lo guardado).
  * Devuelve { cfg } o { error } con el motivo en español.
  */
-export function comprobarEstacion(dada, antes = ESTACION_DEFECTO, temaProhibido = () => null) {
+export function comprobarEstacion(dada, antes = ESTACION_DEFECTO, { temaProhibido = () => null, brokers = null } = {}) {
   const c = { ...ESTACION_DEFECTO, ...antes, ...dada };
   c.activado = !!c.activado;
   c.cada = Number(c.cada);
@@ -148,13 +149,16 @@ export function comprobarEstacion(dada, antes = ESTACION_DEFECTO, temaProhibido 
     if (/[+#\0]/.test(tema)) return { error: `El tema de «${nombre}» no puede llevar «+» ni «#»: tiene que ser uno concreto.` };
     if (tema.length > 250 || campo.length > 100) return { error: `El tema o el campo de «${nombre}» es demasiado largo.` };
     if (campo && campo.split(".").some((p) => !p)) return { error: `El campo de «${nombre}» no es válido (por ejemplo, temperature o datos.temperatura).` };
+    const broker = String(d.broker ?? "").trim();
+    if (!broker) return { error: `Elige el broker de «${nombre}».` };
+    if (brokers && !brokers.has(broker)) return { error: `El broker de «${nombre}» ya no está en la lista.` };
     const prohibido = temaProhibido(tema);
     if (prohibido) return { error: `«${nombre}»: ${prohibido}` };
     const unidad = d.unidad || unidades(m)[0];
     if (!unidades(m).includes(unidad)) return { error: `La unidad de «${nombre}» no es válida.` };
     const caduca = Number(d.caduca || 0);
     if (!ESTACION_CADUCA.includes(caduca)) return { error: `Elige cuándo deja de mandarse «${nombre}» si no llega nada nuevo.` };
-    datos.push({ metrica: m, tema, campo, unidad, caduca });
+    datos.push({ metrica: m, broker, tema, campo, unidad, caduca });
   }
   c.datos = datos;
   if (c.activado && c.canal == null) return { error: "Elige por qué canal se manda." };

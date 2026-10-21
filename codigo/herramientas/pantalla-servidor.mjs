@@ -32,7 +32,9 @@ const tcp = await nodo.escucharTcp();
 const datos = fs.mkdtempSync(path.join(os.tmpdir(), "vigia-"));
 const WEB = 40000 + Math.floor(Math.random() * 9000);
 const cfgFile = path.join(datos, "servidor.json");
-fs.writeFileSync(cfgFile, JSON.stringify({ receptor: { tipo: "tcp", host: "127.0.0.1", puerto: tcp }, web: { puerto: WEB }, datos, registro: "info" }));
+// El broker de este equipo: un Mosquitto de verdad (hace falta tenerlo instalado), como el que pone el instalador.
+const MQ_LOCAL = 41000 + Math.floor(Math.random() * 9000);
+fs.writeFileSync(cfgFile, JSON.stringify({ receptor: { tipo: "tcp", host: "127.0.0.1", puerto: tcp }, web: { puerto: WEB }, datos, registro: "info", mosquitto: { puerto: MQ_LOCAL } }));
 let serverLog = "";
 function arrancarServidor() {
   const p = spawn(process.execPath, [`${REPO}/servidor/src/main.js`, "--config", cfgFile], { env: { ...process.env, TZ: "Europe/Madrid" } });
@@ -44,6 +46,13 @@ let srv = arrancarServidor();
 const URL0 = `http://${process.argv[3] || "127.0.0.1"}:${WEB}/`;
 for (let i = 0; i < 100; i++) { try { const r = await fetch(`${URL0}api/salud`); if ((await r.json()).receptor === "ready") break; } catch { /* aún no */ } await sleep(100); }
 log("salud:", await (await fetch(`${URL0}api/salud`)).text());
+// Mosquitto lee los usuarios que escribe Vigía; en el BMAX los copia y lo recarga vigia-mosquitto.path, aquí esto.
+const PASSWD = path.join(datos, "mosquitto", "passwd");
+for (let i = 0; i < 50 && !fs.existsSync(PASSWD); i++) await sleep(100);
+fs.writeFileSync(path.join(datos, "mosquitto.conf"), `listener ${MQ_LOCAL} 127.0.0.1\nallow_anonymous false\npassword_file ${PASSWD}\npersistence false\nuser ${os.userInfo().username}\n`);
+const mosquitto = spawn("mosquitto", ["-c", path.join(datos, "mosquitto.conf")], { stdio: "ignore" });
+mosquitto.on("error", () => { console.error("Hace falta Mosquitto instalado (apt install mosquitto)."); process.exit(1); });
+fs.watchFile(PASSWD, { interval: 200 }, () => mosquitto.kill("SIGHUP"));
 
 const browser = await pw.chromium.launch();
 const errores = [];
@@ -180,36 +189,72 @@ await ha.subscribeAsync("#");
 const ID = CASETA.toString(16).padStart(8, "0");
 const esperarMqtt = async (f, que, ms = 8000) => { const fin = Date.now() + ms; while (Date.now() < fin) { if (f()) return; await sleep(100); } throw new Error(`MQTT no vio: ${que}`); };
 
-await paso("MQTT desde Ajustes: con usuario y contraseña conecta y Home Assistant recibe los dispositivos", async () => {
+/** Foto de un apartado de Ajustes entero: la ventana, alta para que quepa (Ajustes tiene su propio desplazamiento). */
+async function fotoApartado(page, sel, nombre) {
+  const vp = page.viewportSize();
+  await page.setViewportSize({ width: vp.width, height: 4000 });
+  await sleep(300);
+  await page.locator(sel).screenshot({ path: path.join(out, `${nombre}.png`) });
+  await page.setViewportSize(vp);
+}
+
+await paso("MQTT desde Ajustes: añadir el broker de Home Assistant (con contraseña mal y bien) y publicar en él", async () => {
   await pc.click("#setBtn");
   await sleep(400);
-  await pc.locator("#mqttBox").screenshot({ path: path.join(out, "mqtt-apagado.png") });
-  await pc.fill("#mqttUrl", `127.0.0.1:${MQTT_PUERTO}`);
-  await pc.fill("#mqttUser", "vigia");
-  await pc.fill("#mqttPass", "otra");
-  await pc.check("#mqttOn", { force: true });
-  await pc.click("[data-mqtt-save]");
-  await esperarTexto(pc, /No se puede conectar con mqtt:\/\/127\.0\.0\.1:\d+: usuario o contraseña incorrectos/, "error de contraseña en Ajustes");
+  await esperarTexto(pc, /Este servidor[\s\S]*Conectado desde las/, "el broker de este servidor, conectado");
+  await pc.locator("#mqttBox").screenshot({ path: path.join(out, "mqtt-inicio.png") });
+  await pc.click("[data-brk-nuevo]");
+  await pc.fill("#brkNombre", "Home Assistant");
+  await pc.fill("#brkUrl", `127.0.0.1:${MQTT_PUERTO}`);
+  await pc.fill("#brkUser", "vigia");
+  await pc.fill("#brkPass", "otra");
+  await pc.click("[data-brk-save]");
+  await esperarTexto(pc, /Home Assistant[\s\S]*No se puede conectar: usuario o contraseña incorrectos/, "error de contraseña en Ajustes");
   await pc.locator("#mqttBox").screenshot({ path: path.join(out, "mqtt-error.png") });
-  await pc.fill("#mqttPass", "clave-secreta");
-  await pc.click("[data-mqtt-save]");
-  await esperarTexto(pc, new RegExp(`Conectado a mqtt://127\\.0\\.0\\.1:${MQTT_PUERTO}`), "Conectado en Ajustes");
+  await pc.click('[data-brk-edit="b1"]');
+  if ((await pc.inputValue("#brkUser")) !== "vigia" || (await pc.inputValue("#brkPass")) !== "") throw new Error("el editor no trae el usuario o trae la contraseña");
+  await pc.fill("#brkPass", "clave-secreta");
+  await pc.click("[data-brk-save]");
+  await esperarTexto(pc, /Home Assistant[\s\S]*Conectado desde las/, "Home Assistant conectado");
+  // Publicar para Home Assistant en ese broker.
+  await pc.check("#haOn", { force: true });
+  await pc.selectOption("#haBroker", "b1");
+  await pc.click("[data-ha-save]");
   await esperarMqtt(() => visto.get("vigia/estado") === "online", "online");
   await esperarMqtt(() => visto.get(`homeassistant/sensor/vigia_${ID}/temperature/config`), "sensor de temperatura");
   const cfg = JSON.parse(visto.get(`homeassistant/sensor/vigia_${ID}/temperature/config`));
   if (cfg.device.name !== "Vigía · Caseta huerto") throw new Error(`nombre del dispositivo: ${cfg.device.name}`);
   if (/clave-secreta/.test(await (await fetch(`${URL0}api/estado`)).text())) throw new Error("la contraseña sale en /api/estado");
-  if (await pc.inputValue("#mqttPass")) throw new Error("la contraseña se queda escrita en la pantalla");
 });
-await foto(pc, "pc-ajustes-mqtt");
+
+await paso("broker de este servidor: un usuario creado desde Ajustes deja entrar a un Shelly; la contraseña mal, no", async () => {
+  await pc.fill("#usrNombre", "shelly");
+  await pc.fill("#usrClave", "corta");
+  await pc.click("[data-usr-save]");
+  await esperarTexto(pc, /al menos 8 caracteres/, "contraseña corta rechazada");
+  await pc.fill("#usrClave", "clave-del-shelly");
+  await pc.click("[data-usr-save]");
+  await esperarTexto(pc, /Usuarios de este broker[\s\S]*shelly[\s\S]*Quitar/, "usuario en la lista");
+  let shelly = null;
+  for (let i = 0; i < 30 && !shelly; i++) {
+    shelly = await mqttLib.connectAsync(`mqtt://127.0.0.1:${MQ_LOCAL}`, { username: "shelly", password: "clave-del-shelly", reconnectPeriod: 0 }).catch(() => null);
+    if (!shelly) await sleep(200);
+  }
+  if (!shelly) throw new Error("el Shelly no entra en el broker de este servidor");
+  await shelly.publishAsync("shellies/shellyht-1/sensor/humidity", "58", { retain: true });
+  await shelly.endAsync();
+  const mala = await mqttLib.connectAsync(`mqtt://127.0.0.1:${MQ_LOCAL}`, { username: "shelly", password: "otra-mala-1", reconnectPeriod: 0 }).catch(() => null);
+  if (mala) { await mala.endAsync(); throw new Error("entra con la contraseña mal"); }
+  await fotoApartado(pc, "#mqttBox", "mqtt-pc");
+});
 await pc.keyboard.press("Escape");
 
-await paso("el móvil ve la misma configuración MQTT (sin la contraseña)", async () => {
+await paso("el móvil ve los mismos brokers (sin contraseñas)", async () => {
   await movil.click("#setBtn");
-  await esperarTexto(movil, /Conectado a mqtt:/, "Conectado en el móvil");
-  if ((await movil.inputValue("#mqttUser")) !== "vigia") throw new Error("usuario");
-  if (await movil.inputValue("#mqttPass")) throw new Error("la contraseña aparece en el móvil");
-  await movil.locator("#mqttBox").screenshot({ path: path.join(out, "mqtt-conectado-movil.png") });
+  await esperarTexto(movil, /Home Assistant[\s\S]*Conectado desde las/, "Home Assistant en el móvil");
+  await movil.click("#mqttBox summary:text('Usuarios de este broker')");
+  await esperarTexto(movil, /Usuarios de este broker[\s\S]*shelly/, "el usuario en el móvil");
+  await fotoApartado(movil, "#mqttBox", "mqtt-movil");
   await movil.keyboard.press("Escape");
 });
 
@@ -231,14 +276,6 @@ for (const [x, v, u] of [["temperature", "19.6", "°C"], ["humidity", "64", "%"]
 }
 await ha.publishAsync("zigbee2mqtt/Salón", JSON.stringify({ temperature: 22.1, battery: 90 }), { retain: true });
 const fila = (page, i, k) => page.locator(`#estDatos .est-d:nth-child(${i + 1}) [data-est-k="${k}"]`);
-/** Foto de un apartado de Ajustes entero: la ventana, alta para que quepa (Ajustes tiene su propio desplazamiento). */
-async function fotoApartado(page, sel, nombre) {
-  const vp = page.viewportSize();
-  await page.setViewportSize({ width: vp.width, height: 4000 });
-  await sleep(300);
-  await page.locator(sel).screenshot({ path: path.join(out, `${nombre}.png`) });
-  await page.setViewportSize(vp);
-}
 
 await paso("estación desde Ajustes: se ve dónde va el tema; buscar, filtrar y «Usar» rellenan dato, tema y unidad", async () => {
   await pc.click("#setBtn");
@@ -252,21 +289,27 @@ await paso("estación desde Ajustes: se ve dónde va el tema; buscar, filtrar y 
   const n = await pc.locator("#estHallados li").count();
   if (n !== 5) throw new Error(`con el filtro salen ${n}, no 5`);
   await fotoApartado(pc, "#estBox", "estacion-encontrados");
-  for (const x of ["temperature", "humidity", "pressure", "wind_speed"]) {
-    await pc.locator(`#estHallados li:has(.est-ht[title="${MC(`${x}/state`)}"]) [data-est-usar]`).click();
-    await sleep(150);
-  }
+  const usar = async (tema) => { await pc.locator(`#estHallados li:has(.est-ht[title="${tema}"]) [data-est-usar]`).click(); await sleep(150); };
+  await usar(MC("temperature/state"));
+  // La humedad, la del Shelly, que publica en el broker de este servidor.
+  await pc.fill("#estFiltro", "shellies");
+  await esperarTexto(pc, /humidity\s*58 · parece humedad · en Este servidor/, "el Shelly, en el broker de este servidor");
+  await usar("shellies/shellyht-1/sensor/humidity");
+  await pc.fill("#estFiltro", "meteoclimatic");
+  await sleep(150);
+  for (const x of ["pressure", "wind_speed"]) await usar(MC(`${x}/state`));
   const metricas = [];
   for (let i = 0; i < 4; i++) metricas.push(await fila(pc, i, "metrica").inputValue());
   if (metricas.join() !== "temperature,relativeHumidity,barometricPressure,windSpeed") throw new Error(`datos: ${metricas}`);
   if ((await fila(pc, 3, "unidad").inputValue()) !== "km/h") throw new Error("el viento no quedó en km/h");
   if ((await fila(pc, 0, "tema").inputValue()) !== MC("temperature/state")) throw new Error("tema de la temperatura");
+  if ((await fila(pc, 0, "broker").inputValue()) !== "b1" || (await fila(pc, 1, "broker").inputValue()) !== "local") throw new Error("brokers de los datos");
   await pc.selectOption("#estCh", "1");
   await pc.check("#estOn", { force: true });
   await pc.click("[data-est-save]");
   await esperarTexto(pc, /19,6 °C · ahora mismo/, "temperatura en Ajustes");
   await esperarTexto(pc, /5,0 m\/s \(18,0 km\/h\)/, "viento convertido");
-  await esperarTexto(pc, /Próximo envío a las \d\d:\d\d: «Temperatura 19,6 °C · Humedad 64 % · Presión 1015 hPa · Viento 5,0 m\/s»/, "próximo envío");
+  await esperarTexto(pc, /Próximo envío a las \d\d:\d\d: «Temperatura 19,6 °C · Humedad 58 % · Presión 1015 hPa · Viento 5,0 m\/s»/, "próximo envío");
   await fotoApartado(pc, "#estBox", "estacion-pc");
 });
 
@@ -278,7 +321,7 @@ await paso("Enviar ahora: el nodo recibe la telemetría por el canal 1; las dos 
   const tel = fromBinary(TEL.TelemetrySchema, p.payloadVariant.value.payload);
   const e = tel.variant.value;
   log("   telemetría:", p.channel, p.to.toString(16), JSON.stringify({ t: e.temperature, h: e.relativeHumidity, p: e.barometricPressure, v: e.windSpeed }));
-  if (p.channel !== 1 || p.to !== 0xffffffff || Math.abs(e.temperature - 19.6) > 1e-3 || Math.abs(e.windSpeed - 5) > 1e-3) throw new Error("paquete equivocado");
+  if (p.channel !== 1 || p.to !== 0xffffffff || Math.abs(e.temperature - 19.6) > 1e-3 || e.relativeHumidity !== 58 || Math.abs(e.windSpeed - 5) > 1e-3) throw new Error("paquete equivocado");
   const rout = toBinary(M.RoutingSchema, create(M.RoutingSchema, { variant: { case: "errorReason", value: 0 } }));
   nodo.paquete({ from: ME, payloadVariant: { case: "decoded", value: create(M.DataSchema, { portnum: PORT.ROUTING_APP, payload: rout, requestId: p.id }) } });
   await esperarTexto(pc, /Último \(a mano\), a las \d\d:\d\d: «Temperatura 19,6 °C[^»]*» → canal «avisos»: repetido por la malla/, "último envío en el PC");
@@ -316,6 +359,8 @@ await foto(pc, "pc-final");
 fs.writeFileSync(path.join(out, "servidor.log"), serverLog);
 fs.writeFileSync(path.join(out, "errores.txt"), errores.join("\n"));
 await browser.close();
+fs.unwatchFile(PASSWD);
+mosquitto.kill();
 await ha.endAsync();
 broker.close();
 srvMqtt.close();

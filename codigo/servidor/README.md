@@ -39,6 +39,9 @@ El instalador:
 - deja el programa en `/opt/vigia/actual` y guarda las dos versiones anteriores;
 - crea un usuario `vigia` sin privilegios, con permiso para el puerto serie (grupo `dialout`);
 - escribe la configuración en `/etc/vigia/servidor.json` y guarda los datos en `/var/lib/vigia`;
+- instala **Mosquitto** (el broker MQTT de casa) en el puerto 1883, **con usuario y contraseña**; los usuarios se
+  crean desde la pantalla (ver *MQTT* más abajo). Si Mosquitto ya tenía su propia configuración, no la toca. Para no
+  instalarlo: `--sin-mosquitto`;
 - deja el servicio `vigia-servidor` en marcha, y arranca solo al encender.
 
 Para **actualizar**, vuelve a ejecutar la misma orden: se queda con tu configuración y tus datos.
@@ -94,7 +97,8 @@ El diario dice qué pasa y qué hacer. Lo más habitual:
 wget -qO- https://raw.githubusercontent.com/Dani-NRos/vigia-mesh/main/codigo/servidor/instalar.sh | sudo bash -s -- --desinstalar
 ```
 
-Los datos se quedan en `/var/lib/vigia`; con `--desinstalar --borrar-datos` se borran también.
+Los datos se quedan en `/var/lib/vigia`; con `--desinstalar --borrar-datos` se borran también. Mosquitto se queda
+instalado, sin la configuración de Vigía (si no lo usas para nada más: `sudo apt remove mosquitto`).
 
 ## La pantalla
 
@@ -114,20 +118,38 @@ Los activas en Ajustes → *Avisos por la malla*, como en la app (vienen apagado
 servidor 24/7, aunque no haya ninguna pantalla abierta: cada alarma (y, si quieres, cuando se resuelve) a un canal
 privado, a un nodo o a ambos. Como mucho 20 por hora; los canales públicos están bloqueados.
 
-## MQTT y Home Assistant
+## MQTT
 
-El servidor se conecta a un broker MQTT (el Mosquitto de Home Assistant, por ejemplo) y Home Assistant crea solo los
-dispositivos de Vigía. Se configura en Ajustes → *MQTT y Home Assistant* (viene apagado); la configuración se guarda en
-el servidor y la contraseña no vuelve a salir en ninguna pantalla.
+Vigía se conecta a la vez a varios brokers MQTT, que se apuntan en Ajustes → *MQTT*:
+
+- **Este servidor**: el Mosquitto de este equipo, el que pone el instalador. Ahí pueden publicar los dispositivos de
+  casa (Shelly, Tasmota, zigbee2mqtt, ESPHome…). Solo deja entrar con usuario y contraseña: en *Usuarios de este
+  broker* se crean (por ejemplo, uno para los Shelly), se les cambia la contraseña (guardando otra vez el mismo
+  usuario) y se quitan. En el dispositivo: servidor, la IP de este equipo; puerto, 1883; y ese usuario. Las
+  contraseñas se guardan cifradas y no vuelven a salir en ninguna pantalla.
+- **Otros brokers** con *Añadir broker*, como el Mosquitto de Home Assistant: nombre, dirección, usuario y
+  contraseña. Debajo de cada uno dice si está conectado o qué falla.
+
+Por dentro, Vigía escribe los usuarios en `/var/lib/vigia/mosquitto/passwd` y el servicio `vigia-mosquitto.path` los
+pasa a Mosquitto y lo recarga, sin cortar a quien ya está conectado. Si usas un cortafuegos (`ufw`), abre el 1883 para
+la red de casa.
+
+Home Assistant solo se conecta a un broker. Si quieres en Home Assistant algo que se publica en el de Vigía, lo normal
+es un «puente» entre los dos Mosquitto (unas líneas de configuración en uno de ellos).
+
+## Home Assistant
+
+Home Assistant crea solos los dispositivos de Vigía. En Ajustes → *MQTT* → *Home Assistant*: activa *Publicar los
+nodos vigilados*, elige el broker de Home Assistant y pulsa *Guardar* (viene apagado).
 
 **Con el complemento Mosquitto de Home Assistant:**
 
 1. En Home Assistant, crea un usuario para Vigía: Ajustes → Personas → *Añadir persona* (por ejemplo `vigia`), con
    permiso para iniciar sesión, y ponle contraseña. Mosquitto deja entrar con los usuarios de Home Assistant (los
    nombres `homeassistant` y `addons` están reservados).
-2. En la pantalla de Vigía servidor, Ajustes → *MQTT y Home Assistant*: la dirección de Home Assistant (como
-   `192.168.1.20`; si no pones puerto, usa el 1883), ese usuario y su contraseña. Activa *Conectar a un broker MQTT* y
-   pulsa *Guardar*. Debajo dice si ha conectado o qué falla.
+2. En la pantalla de Vigía servidor, Ajustes → *MQTT* → *Añadir broker*: nombre (Home Assistant), la dirección de
+   Home Assistant (como `192.168.1.20`; si no pones puerto, usa el 1883), ese usuario y su contraseña. Luego, en
+   *Home Assistant*, actívalo y elige ese broker.
 3. En Home Assistant aparecen solos, en Ajustes → Dispositivos y servicios → MQTT:
    - **Vigía servidor**: receptor conectado, alarmas sin atender (sí/no y cuántas), alarmas activas, nodos oídos en la
      última hora, último aviso por la malla, el evento *Alarmas* y el botón *Enterado todas*.
@@ -185,7 +207,8 @@ zigbee2mqtt…) salen cada cierto tiempo a la malla como **telemetría de ambien
 sensores: la app de Meshtastic y Vigía los ven en sus gráficas. El servidor los guarda además como lecturas del
 receptor, así que tienen gráficas, alarmas (vigilando el receptor) e histórico como cualquier nodo.
 
-Se configura en Ajustes → *De MQTT a la malla* (viene apagado; hace falta MQTT conectado):
+Se configura en Ajustes → *De MQTT a la malla* (viene apagado; hace falta algún broker conectado). Cada dato dice de
+qué broker viene, así que pueden mezclarse los de Home Assistant y los de un Shelly que publique en este servidor:
 
 - **Cada** cuánto (por defecto, 30 minutos, a las en punto y a las y media), **por qué canal** y con **cuántos
   saltos** (por defecto, los del receptor).

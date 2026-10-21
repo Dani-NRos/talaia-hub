@@ -11,7 +11,7 @@ import { comprobar } from "../src/config.js";
 import { crearRegistro } from "../src/registro.js";
 import { abrirAlmacen } from "../src/almacen.js";
 import { instantanea } from "../src/sincro.js";
-import { normalizarUrl, comprobarMqtt, coincide, textoError } from "../src/mqtt.js";
+import { normalizarUrl, comprobarBroker, comprobarHA, migrarMqtt, coincide, textoError } from "../src/mqtt.js";
 import { NodoFalso, hasta, CASETA } from "./nodo-falso.mjs";
 
 const ID = CASETA.toString(16).padStart(8, "0");
@@ -41,12 +41,12 @@ async function espia(t, puerto, opts = {}) {
   return { c, ultimo, eventos, json };
 }
 
-async function montar(t) {
+async function montar(t, almacen = abrirAlmacen(":memory:")) {
   const nodo = new NodoFalso();
   const puertoNodo = await nodo.escucharTcp();
   const config = comprobar({ receptor: { tipo: "tcp", host: "127.0.0.1", puerto: puertoNodo }, datos: os.tmpdir() });
   const registro = crearRegistro({ nivel: "error", salida: [] });
-  const vigia = await crearVigia(config, registro, { almacen: abrirAlmacen(":memory:") });
+  const vigia = await crearVigia(config, registro, { almacen });
   vigia.arrancar();
   await hasta(() => vigia.S.link.state === "ready", 8000, "receptor listo");
   t.after(async () => { await vigia.detener(); await nodo.cerrar(); });
@@ -58,6 +58,14 @@ async function montar(t) {
   return { vigia, nodo };
 }
 
+/** Como desde Ajustes: el broker de Home Assistant (será «b1») y publicar en él para Home Assistant. */
+async function conHA(vigia, puerto, extra = {}) {
+  const r = await vigia.mqtt.configurarBroker(null, { nombre: "Home Assistant", url: `127.0.0.1:${puerto}`, ...extra });
+  if (r.ok) assert.equal((await vigia.mqtt.configurarHA({ activado: true, broker: r.id })).ok, true);
+  return r;
+}
+const broker1 = (vigia) => vigia.S.mqtt.brokers.find((b) => b.id === "b1");
+
 /* ── piezas ── */
 test("MQTT: direcciones, configuración y temas", () => {
   assert.equal(normalizarUrl("192.168.1.20"), "mqtt://192.168.1.20:1883");
@@ -65,13 +73,26 @@ test("MQTT: direcciones, configuración y temas", () => {
   assert.equal(normalizarUrl("mqtts://ha.local"), "mqtts://ha.local:8883");
   assert.equal(normalizarUrl("http://x"), null);
   assert.equal(normalizarUrl(""), null);
-  assert.match(comprobarMqtt({ activado: true, url: "" }).error, /Falta la dirección/);
-  assert.match(comprobarMqtt({ url: "ftp://x" }).error, /No entiendo la dirección/);
-  assert.match(comprobarMqtt({ base: "vigia/#" }).error, /tema base/);
+  assert.match(comprobarBroker({ nombre: "HA", url: "" }).error, /Falta la dirección/);
+  assert.match(comprobarBroker({ nombre: "HA", url: "ftp://x" }).error, /No entiendo la dirección/);
+  assert.match(comprobarBroker({ url: "x" }).error, /Ponle un nombre/);
+  assert.match(comprobarHA({ base: "vigia/#" }).error, /tema base/);
+  assert.match(comprobarHA({ activado: true }).error, /Elige en qué broker/);
+  assert.match(comprobarHA({ activado: true, broker: "b9" }, undefined, (id) => id === "b1").error, /ya no está/);
   // La contraseña: sin dar se queda; null la borra.
-  const a = comprobarMqtt({ activado: true, url: "x", usuario: "v", clave: "s" }).cfg;
-  assert.equal(comprobarMqtt({ usuario: "u" }, a).cfg.clave, "s");
-  assert.equal(comprobarMqtt({ clave: null }, a).cfg.clave, "");
+  const a = comprobarBroker({ id: "b1", nombre: "HA", url: "x", usuario: "v", clave: "s" }).broker;
+  assert.equal(comprobarBroker({ usuario: "u" }, a).broker.clave, "s");
+  assert.equal(comprobarBroker({ clave: null }, a).broker.clave, "");
+  assert.equal(comprobarBroker({ nombre: "Otro" }, a).broker.id, "b1");
+  // La configuración de la 1.16 (un broker) pasa a la de varios.
+  assert.deepEqual(migrarMqtt({ activado: true, url: "192.168.1.20", usuario: "u", clave: "c", base: "vigia", ha: { activado: true, prefijo: "homeassistant" } }), {
+    brokers: [{ id: "b1", nombre: "Home Assistant", url: "192.168.1.20", usuario: "u", clave: "c", activado: true }],
+    ha: { activado: true, broker: "b1", base: "vigia", prefijo: "homeassistant" },
+  });
+  assert.equal(migrarMqtt({ activado: false, url: "x", ha: { activado: true } }).ha.activado, false);
+  assert.deepEqual(migrarMqtt({}).brokers, []);
+  const nuevo = { brokers: [], ha: {} };
+  assert.equal(migrarMqtt(nuevo), nuevo);
   assert.ok(coincide("vigia/nodo/+/enterado", "vigia/nodo/3c6e19a2/enterado"));
   assert.ok(coincide("homeassistant/#", "homeassistant/sensor/x/y/config"));
   assert.ok(!coincide("vigia/nodo/+/enterado", "vigia/nodo/3c6e19a2/estado"));
@@ -84,8 +105,8 @@ test("al conectar publica «online», el servidor y la caseta vigilada; la contr
   const { puerto } = await broker(t);
   const ha = await espia(t, puerto);
   const { vigia } = await montar(t);
-  assert.match((await vigia.mqtt.configurar({ activado: true, url: `127.0.0.1:${puerto}`, clave: "secreta" })).error, /hace falta también el usuario/);
-  const r = await vigia.mqtt.configurar({ activado: true, url: `127.0.0.1:${puerto}`, usuario: "vigia", clave: "secreta" });
+  assert.match((await conHA(vigia, puerto, { clave: "secreta" })).error, /hace falta también el usuario/);
+  const r = await conHA(vigia, puerto, { usuario: "vigia", clave: "secreta" });
   assert.equal(r.ok, true);
   await hasta(() => ha.ultimo.get("vigia/estado") === "online", 5000, "online");
   await hasta(() => ha.json(`vigia/nodo/${ID}/estado`), 5000, "estado de la caseta");
@@ -106,8 +127,8 @@ test("al conectar publica «online», el servidor y la caseta vigilada; la contr
   assert.equal(est.a.temperature_alta, "OFF");
   await hasta(() => ha.json("vigia/servidor/estado")?.receptor === "ON", 5000, "receptor en el servidor");
   // Lo que ven las pantallas: sin la contraseña.
-  assert.equal(vigia.S.mqtt.hayClave, true);
-  assert.equal(vigia.S.mqtt.estado.fase, "conectada");
+  assert.equal(broker1(vigia).hayClave, true);
+  await hasta(() => broker1(vigia).estado.fase === "conectada", 3000, "conectada");
   assert.doesNotMatch(JSON.stringify(instantanea(vigia.S)), /secreta/);
 });
 
@@ -115,7 +136,7 @@ test("alarma: sensor binario encendido y evento; «Enterado» desde HA queda vis
   const { puerto } = await broker(t);
   const ha = await espia(t, puerto);
   const { vigia, nodo } = await montar(t);
-  await vigia.mqtt.configurar({ activado: true, url: `127.0.0.1:${puerto}` });
+  await conHA(vigia, puerto);
   await hasta(() => ha.json(`vigia/nodo/${ID}/estado`), 5000, "estado de la caseta");
   nodo.ambiente(CASETA, { temperature: 31.5, relativeHumidity: 60 });
   await hasta(() => ha.json(`vigia/nodo/${ID}/estado`)?.a.temperature_alta === "ON", 5000, "alarma encendida");
@@ -143,7 +164,7 @@ test("«Enterado todas» desde HA", async (t) => {
   const { puerto } = await broker(t);
   const ha = await espia(t, puerto);
   const { vigia, nodo } = await montar(t);
-  await vigia.mqtt.configurar({ activado: true, url: `127.0.0.1:${puerto}` });
+  await conHA(vigia, puerto);
   nodo.ambiente(CASETA, { temperature: 33, relativeHumidity: 60 });
   await hasta(() => vigia.S.active.size === 1, 5000, "alarma");
   await hasta(() => ha.ultimo.has("vigia/estado"), 5000, "conectado");
@@ -155,7 +176,7 @@ test("dejar de vigilar quita sus entidades de HA y su estado retenido", async (t
   const { puerto } = await broker(t);
   const ha = await espia(t, puerto);
   const { vigia } = await montar(t);
-  await vigia.mqtt.configurar({ activado: true, url: `127.0.0.1:${puerto}` });
+  await conHA(vigia, puerto);
   await hasta(() => ha.json(CFG("sensor", "temperature")), 5000, "sensor publicado");
   vigia.acciones.dejarDeVigilar(CASETA);
   vigia.eventos.emit("parte", "cfg");
@@ -173,7 +194,7 @@ test("al conectar quita lo que había de antes y ya no corresponde", async (t) =
   const ajeno = "homeassistant/sensor/zigbee_salon/temperature/config";
   await ha.c.publishAsync(ajeno, JSON.stringify({ name: "de otro" }), { retain: true });
   const { vigia } = await montar(t);
-  await vigia.mqtt.configurar({ activado: true, url: `127.0.0.1:${puerto}` });
+  await conHA(vigia, puerto);
   await hasta(() => ha.ultimo.get(viejo) === "", 8000, "lo viejo de Vigía, retirado");
   assert.ok(ha.json(ajeno), "lo que no es de Vigía no se toca");
 });
@@ -182,7 +203,7 @@ test("cuando HA arranca (homeassistant/status online), se le vuelve a contar tod
   const { puerto } = await broker(t);
   const ha = await espia(t, puerto);
   const { vigia } = await montar(t);
-  await vigia.mqtt.configurar({ activado: true, url: `127.0.0.1:${puerto}` });
+  await conHA(vigia, puerto);
   await hasta(() => ha.json(CFG("sensor", "temperature")), 5000, "sensor publicado");
   ha.ultimo.clear();
   await ha.c.publishAsync("homeassistant/status", "online");
@@ -192,32 +213,67 @@ test("cuando HA arranca (homeassistant/status online), se le vuelve a contar tod
 test("usuario o contraseña mal: error en español; al corregirlos conecta", async (t) => {
   const { puerto } = await broker(t, { usuario: "vigia", clave: "buena" });
   const { vigia } = await montar(t);
-  await vigia.mqtt.configurar({ activado: true, url: `127.0.0.1:${puerto}`, usuario: "vigia", clave: "mala" });
-  await hasta(() => vigia.S.mqtt.estado.fase === "error", 5000, "error");
-  assert.match(vigia.S.mqtt.estado.error, /usuario o contraseña incorrectos/);
-  await vigia.mqtt.configurar({ clave: "buena" });
-  await hasta(() => vigia.S.mqtt.estado.fase === "conectada", 5000, "conectada");
+  await conHA(vigia, puerto, { usuario: "vigia", clave: "mala" });
+  await hasta(() => broker1(vigia).estado.fase === "error", 5000, "error");
+  assert.match(broker1(vigia).estado.error, /usuario o contraseña incorrectos/);
+  assert.equal((await vigia.mqtt.configurarBroker("b1", { clave: "buena" })).ok, true);
+  await hasta(() => broker1(vigia).estado.fase === "conectada", 5000, "conectada");
 });
 
-test("apagar Home Assistant retira sus entidades; apagar MQTT deja «offline»", async (t) => {
+test("apagar Home Assistant retira sus entidades y deja «offline»; desconectar el broker lo para", async (t) => {
   const { puerto } = await broker(t);
   const ha = await espia(t, puerto);
   const { vigia } = await montar(t);
-  await vigia.mqtt.configurar({ activado: true, url: `127.0.0.1:${puerto}` });
+  await conHA(vigia, puerto);
   await hasta(() => ha.json(CFG("sensor", "temperature")), 5000, "sensor publicado");
-  await vigia.mqtt.configurar({ ha: { activado: false } });
+  await vigia.mqtt.configurarHA({ activado: false });
   await hasta(() => ha.ultimo.get(CFG("sensor", "temperature")) === "", 5000, "retirado");
-  await vigia.mqtt.configurar({ activado: false });
   await hasta(() => ha.ultimo.get("vigia/estado") === "offline", 5000, "offline");
-  assert.equal(vigia.S.mqtt.estado.fase, "parada");
+  await hasta(() => broker1(vigia).estado.fase === "conectada", 5000, "el broker sigue conectado");
+  await vigia.mqtt.configurarBroker("b1", { activado: false });
+  assert.equal(broker1(vigia).estado.fase, "parada");
 });
 
 test("si el servidor cae sin despedirse, el broker publica «offline» por él", async (t) => {
   const { puerto } = await broker(t);
   const ha = await espia(t, puerto);
   const { vigia } = await montar(t);
-  await vigia.mqtt.configurar({ activado: true, url: `127.0.0.1:${puerto}` });
+  await conHA(vigia, puerto);
   await hasta(() => ha.ultimo.get("vigia/estado") === "online", 5000, "online");
-  vigia.mqtt.conexion.c.stream.destroy(); // como si se cortara la luz
+  vigia.mqtt.conexion("b1").c.stream.destroy(); // como si se cortara la luz
   await hasta(() => ha.ultimo.get("vigia/estado") === "offline", 5000, "testamento");
+});
+
+test("dos brokers a la vez: Home Assistant en uno y nada en el otro; no se quita uno en uso", async (t) => {
+  const p1 = (await broker(t)).puerto, p2 = (await broker(t)).puerto;
+  const ha = await espia(t, p1);
+  const otro = await espia(t, p2);
+  const { vigia } = await montar(t);
+  await conHA(vigia, p1);
+  const r2 = await vigia.mqtt.configurarBroker(null, { nombre: "Taller", url: `127.0.0.1:${p2}` });
+  assert.equal(r2.id, "b2");
+  await hasta(() => vigia.S.mqtt.brokers.every((b) => b.estado.fase === "conectada"), 5000, "los dos conectados");
+  await hasta(() => ha.json(CFG("sensor", "temperature")), 5000, "HA en el primero");
+  assert.ok(![...otro.ultimo.keys()].some((k) => k.startsWith("homeassistant/") || k.startsWith("vigia/")), "nada en el otro");
+  assert.match((await vigia.mqtt.quitarBroker("b1")).error, /Lo usa: Home Assistant/);
+  // Home Assistant pasa al segundo: lo del primero se retira y aparece en el segundo.
+  assert.equal((await vigia.mqtt.configurarHA({ broker: "b2" })).ok, true);
+  await hasta(() => ha.ultimo.get(CFG("sensor", "temperature")) === "", 5000, "retirado del primero");
+  await hasta(() => otro.json(CFG("sensor", "temperature")), 5000, "publicado en el segundo");
+  assert.equal((await vigia.mqtt.quitarBroker("b1")).ok, true);
+  assert.deepEqual(vigia.S.mqtt.brokers.map((b) => b.id), ["b2"]);
+});
+
+test("la configuración de la 1.16 (un broker y la estación) se migra al arrancar", async (t) => {
+  const { puerto } = await broker(t);
+  const ha = await espia(t, puerto);
+  const almacen = abrirAlmacen(":memory:");
+  almacen.guardar("mqtt", { activado: true, url: `127.0.0.1:${puerto}`, usuario: "", clave: "", base: "vigia", ha: { activado: true, prefijo: "homeassistant" } });
+  almacen.guardar("estacion", { activado: false, cada: 30, canal: 0, saltos: null, datos: [{ metrica: "temperature", tema: "ha/t", campo: "", unidad: "°C", caduca: 0 }] });
+  const { vigia } = await montar(t, almacen);
+  assert.deepEqual(vigia.S.mqtt.brokers.map((b) => [b.id, b.nombre]), [["b1", "Home Assistant"]]);
+  assert.equal(vigia.S.mqtt.ha.broker, "b1");
+  assert.equal(vigia.S.estacion.datos[0].broker, "b1");
+  await hasta(() => ha.json(CFG("sensor", "temperature")), 5000, "sigue publicando en HA");
+  assert.match((await vigia.mqtt.quitarBroker("b1")).error, /Lo usa: Home Assistant, la estación \(Temperatura\)/);
 });

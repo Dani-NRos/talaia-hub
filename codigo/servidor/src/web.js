@@ -70,20 +70,26 @@ function crearOrdenes(vigia) {
     pruebaMalla: () => acciones.pruebaMalla(),
     borrarHistorico: () => acciones.borrarHistorico(),
     reconectar: () => { vigia.receptor.retryNow(); return { ok: true }; },
-    mqtt: async ({ cambio }) => {
+    broker: async ({ id, cambio }) => {
+      exigir(id == null || typeof id === "string", "id");
       exigir(cambio && typeof cambio === "object" && !Array.isArray(cambio), "cambio");
-      exigir(Object.keys(cambio).every((k) => ["activado", "url", "usuario", "clave", "base", "ha"].includes(k)), "cambio");
-      if ("activado" in cambio) exigir(typeof cambio.activado === "boolean", "activado");
-      for (const k of ["url", "usuario", "base"]) if (k in cambio) exigir(typeof cambio[k] === "string", k);
+      exigir(Object.keys(cambio).every((k) => ["nombre", "url", "usuario", "clave", "activado"].includes(k)), "cambio");
+      for (const k of ["nombre", "url", "usuario"]) if (k in cambio) exigir(typeof cambio[k] === "string", k);
       if ("clave" in cambio) exigir(cambio.clave === null || typeof cambio.clave === "string", "clave");
-      if ("ha" in cambio) {
-        const h = cambio.ha;
-        exigir(h && typeof h === "object" && Object.keys(h).every((k) => ["activado", "prefijo"].includes(k)), "ha");
-        if ("activado" in h) exigir(typeof h.activado === "boolean", "ha.activado");
-        if ("prefijo" in h) exigir(typeof h.prefijo === "string", "ha.prefijo");
-      }
-      return vigia.mqtt.configurar(cambio);
+      if ("activado" in cambio) exigir(typeof cambio.activado === "boolean", "activado");
+      return vigia.mqtt.configurarBroker(id ?? null, cambio);
     },
+    quitarBroker: ({ id }) => { exigir(typeof id === "string", "id"); return vigia.mqtt.quitarBroker(id); },
+    homeAssistant: ({ cambio }) => {
+      exigir(cambio && typeof cambio === "object" && !Array.isArray(cambio), "cambio");
+      exigir(Object.keys(cambio).every((k) => ["activado", "broker", "base", "prefijo"].includes(k)), "cambio");
+      if ("activado" in cambio) exigir(typeof cambio.activado === "boolean", "activado");
+      if ("broker" in cambio) exigir(cambio.broker === null || typeof cambio.broker === "string", "broker");
+      for (const k of ["base", "prefijo"]) if (k in cambio) exigir(typeof cambio[k] === "string", k);
+      return vigia.mqtt.configurarHA(cambio);
+    },
+    usuarioBroker: ({ nombre, clave }) => { exigir(typeof nombre === "string" && typeof clave === "string", "usuario"); return vigia.mqtt.ponerUsuario(nombre, clave); },
+    quitarUsuarioBroker: ({ nombre }) => { exigir(typeof nombre === "string", "nombre"); return vigia.mqtt.quitarUsuario(nombre); },
     estacion: ({ cambio }) => {
       exigir(cambio && typeof cambio === "object" && !Array.isArray(cambio), "cambio");
       exigir(Object.keys(cambio).every((k) => ["activado", "cada", "canal", "saltos", "datos"].includes(k)), "cambio");
@@ -92,8 +98,8 @@ function crearOrdenes(vigia) {
       if ("datos" in cambio) {
         exigir(Array.isArray(cambio.datos) && cambio.datos.length <= 30, "datos");
         for (const d of cambio.datos) {
-          exigir(d && typeof d === "object" && Object.keys(d).every((k) => ["metrica", "tema", "campo", "unidad", "caduca"].includes(k)), "dato");
-          for (const k of ["metrica", "tema", "campo", "unidad"]) if (k in d) exigir(typeof d[k] === "string", `dato.${k}`);
+          exigir(d && typeof d === "object" && Object.keys(d).every((k) => ["metrica", "broker", "tema", "campo", "unidad", "caduca"].includes(k)), "dato");
+          for (const k of ["metrica", "broker", "tema", "campo", "unidad"]) if (k in d) exigir(typeof d[k] === "string", `dato.${k}`);
           if ("caduca" in d) exigir(Number.isInteger(d.caduca), "dato.caduca");
         }
       }

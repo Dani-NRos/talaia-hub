@@ -38,19 +38,24 @@ function numerosDe(obj, ruta = "", out = [], nivel = 0) {
 }
 
 /**
- * vigia: { S, motor, eventos, almacen, registro, receptor: () => el receptor actual }.
- * Devuelve { enganchar, arrancar, configurar, buscarTemas, enviarAhora, parar }.
+ * vigia: { S, motor, eventos, almacen, registro, receptor: () => el receptor actual,
+ *          brokers: () => [{ id, nombre }] (los que hay, para comprobar y para los textos) }.
+ * Devuelve { enganchar, usos, arrancar, configurar, buscarTemas, enviarAhora, parar }.
  */
-export function crearEstacion({ S, motor, eventos, almacen, registro, receptor }) {
-  let cfg = comprobarEstacion(almacen.leer("estacion", {}) || {}).cfg || { ...ESTACION_DEFECTO };
+export function crearEstacion({ S, motor, eventos, almacen, registro, receptor, brokers = () => [] }) {
+  const leida = comprobarEstacion(almacen.leer("estacion", {}) || {});
+  if (leida.error) registro.aviso(`Estación: la configuración guardada no vale (${leida.error}); empieza vacía`);
+  let cfg = leida.cfg || { ...ESTACION_DEFECTO };
   const valores = new Map(); // metrica → { v, t } | { nulo, t } | { error, t }; v ya en unidades de Meshtastic
-  let conexion = null, quitar = [], timer = null, proximo = null, contarT = null, vivo = true;
+  const conexiones = new Map(); // id del broker → su conexión (las que están enganchadas)
+  const quitar = new Map(); // id del broker → cómo quitar sus suscripciones
+  let timer = null, proximo = null, contarT = null, vivo = true;
   let ultimo = almacen.leer("estacionUltimo", null);
   let ultimoFallo = null, aMano = 0;
 
   /** Lo que no puede venir de MQTT: lo que publica el propio Vigía (haría un bucle malla → MQTT → malla). */
   function temaProhibido(tema) {
-    const base = S.mqtt?.base || "vigia";
+    const base = S.mqtt?.ha?.base || "vigia";
     if (tema === base || tema.startsWith(`${base}/`) || tema.split("/").some((p) => p.startsWith("vigia_"))) {
       return "ese tema es de lo que publica Vigía: mandaría a la malla lo que ya viene de ella.";
     }
@@ -88,10 +93,10 @@ export function crearEstacion({ S, motor, eventos, almacen, registro, receptor }
   const contarPronto = () => { if (!contarT) contarT = setTimeout(contar, 1000); };
 
   /* ── lo que llega por MQTT ── */
-  function recibido(tema, carga) {
+  function recibido(broker, tema, carga) {
     const t = Date.now();
     for (const d of cfg.datos) {
-      if (d.tema !== tema) continue;
+      if (d.broker !== broker || d.tema !== tema) continue;
       const r = leerValor(carga, d.campo);
       if (r.error || r.nulo) { valores.set(d.metrica, { ...r, t }); continue; }
       const c = aMeshtastic(d.metrica, d.unidad, r.v);
@@ -100,15 +105,18 @@ export function crearEstacion({ S, motor, eventos, almacen, registro, receptor }
     contarPronto();
   }
 
-  function suscribirse() {
-    for (const q of quitar) q();
-    quitar = [];
+  /** Los temas de los datos de ese broker (o de todos), aunque esté apagado: así se ven los valores en Ajustes. */
+  function suscribirse(solo = null) {
     // Lo que ya no se usa no se queda con un valor viejo en pantalla.
     for (const m of [...valores.keys()]) if (!cfg.datos.some((d) => d.metrica === m)) valores.delete(m);
-    if (!conexion) return;
-    // Aunque esté apagado: así se ven los valores en Ajustes antes de activarlo.
-    for (const tema of new Set(cfg.datos.map((d) => d.tema))) quitar.push(conexion.suscribir(tema, (t, carga) => recibido(tema, carga)));
+    for (const [id, con] of conexiones) {
+      if (solo && id !== solo) continue;
+      for (const q of quitar.get(id) || []) q();
+      const temas = new Set(cfg.datos.filter((d) => d.broker === id).map((d) => d.tema));
+      quitar.set(id, [...temas].map((tema) => con.suscribir(tema, (t, carga) => recibido(id, tema, carga))));
+    }
   }
+  const comprobar = (dada, antes) => comprobarEstacion(dada, antes, { temaProhibido, brokers: new Set(brokers().map((b) => b.id)) });
 
   /* ── envíos ── */
   function programar() {
@@ -165,27 +173,55 @@ export function crearEstacion({ S, motor, eventos, almacen, registro, receptor }
   }
 
   contar();
+  /** Escucha un broker unos segundos: los temas con números (de un JSON, cada campo con número). */
+  async function buscarEn(broker, con) {
+    const vistos = new Map();
+    const uds = new Map(); // mqtt_statestream con publish_attributes: «…/entidad/unit_of_measurement» → «"km/h"»
+    const soltar = con.suscribir("#", (tema, carga) => {
+      if (tema.endsWith("/unit_of_measurement")) {
+        try { const u = JSON.parse(carga.toString()); if (typeof u === "string") uds.set(tema.slice(0, -20), u); } catch { /* no es una unidad */ }
+        return;
+      }
+      if (vistos.size >= BUSCAR_MAX || temaProhibido(tema) || /\/config$/.test(tema) || /(^|\/)bridge\//.test(tema)) return;
+      const r = leerValor(carga);
+      if (r.v != null) return vistos.set(`${tema}\n`, { broker, tema, campo: "", v: r.v });
+      let j;
+      try { j = JSON.parse(carga.toString()); } catch { return; }
+      for (const x of numerosDe(j)) vistos.set(`${tema}\n${x.campo}`, { broker, tema, ...x });
+    });
+    await new Promise((r) => setTimeout(r, BUSCAR_MS));
+    soltar();
+    const temas = [...vistos.values()];
+    for (const x of temas) {
+      const u = x.tema.endsWith("/state") && uds.get(x.tema.slice(0, -6));
+      if (u) x.unidad = u;
+    }
+    return temas;
+  }
+
   return {
-    /** La conexión MQTT nueva (al arrancar o cambiar su configuración). Devuelve cómo soltarla. */
-    enganchar(con) {
-      conexion = con;
-      suscribirse();
+    /** La conexión de un broker (al arrancar o al cambiar su configuración). Devuelve cómo soltarla. */
+    enganchar(id, con) {
+      conexiones.set(id, con);
+      suscribirse(id);
       contar();
       return () => {
-        if (conexion !== con) return;
-        for (const q of quitar) q();
-        quitar = [];
-        conexion = null;
+        if (conexiones.get(id) !== con) return;
+        for (const q of quitar.get(id) || []) q();
+        quitar.delete(id);
+        conexiones.delete(id);
         contar();
       };
     },
+    /** Qué datos usan ese broker (para no quitarlo). */
+    usos: (id) => cfg.datos.filter((d) => d.broker === id).map((d) => `la estación (${metricMeta(d.metrica).label})`),
     arrancar() {
       if (cfg.activado) registro.info(`Estación: ${cfg.datos.length} datos a la malla cada ${cfg.cada} min por el canal ${cfg.canal}`);
       programar();
     },
     /** Cambia la configuración (lo que no venga se queda). Devuelve { ok, toast?, error? }. */
     configurar(dada) {
-      const { cfg: nueva, error } = comprobarEstacion(dada, cfg, temaProhibido);
+      const { cfg: nueva, error } = comprobar(dada, cfg);
       if (error) return { ok: false, error };
       const antes = cfg;
       cfg = nueva;
@@ -193,7 +229,7 @@ export function crearEstacion({ S, motor, eventos, almacen, registro, receptor }
       // Si cambia la unidad o el campo de un dato, el valor que había ya no vale: se espera al siguiente.
       for (const d of cfg.datos) {
         const a = antes.datos.find((x) => x.metrica === d.metrica);
-        if (!a || a.tema !== d.tema || a.campo !== d.campo || a.unidad !== d.unidad) valores.delete(d.metrica);
+        if (!a || a.broker !== d.broker || a.tema !== d.tema || a.campo !== d.campo || a.unidad !== d.unidad) valores.delete(d.metrica);
       }
       registro.info(cfg.activado ? `Estación: ${cfg.datos.length} datos a la malla cada ${cfg.cada} min por el canal ${cfg.canal}` : "Estación: apagada");
       suscribirse();
@@ -205,28 +241,10 @@ export function crearEstacion({ S, motor, eventos, almacen, registro, receptor }
      * (la unidad, si Home Assistant la publica con mqtt_statestream y publish_attributes).
      */
     async buscarTemas() {
-      if (!conexion?.conectada) return { ok: false, error: "Primero conecta MQTT (en el apartado de arriba)." };
-      const vistos = new Map();
-      const uds = new Map(); // mqtt_statestream con publish_attributes: «…/entidad/unit_of_measurement» → «"km/h"»
-      const soltar = conexion.suscribir("#", (tema, carga) => {
-        if (tema.endsWith("/unit_of_measurement")) {
-          try { const u = JSON.parse(carga.toString()); if (typeof u === "string") uds.set(tema.slice(0, -20), u); } catch { /* no es una unidad */ }
-          return;
-        }
-        if (vistos.size >= BUSCAR_MAX || temaProhibido(tema) || /\/config$/.test(tema) || /(^|\/)bridge\//.test(tema)) return;
-        const r = leerValor(carga);
-        if (r.v != null) return vistos.set(`${tema}\n`, { tema, campo: "", v: r.v });
-        let j;
-        try { j = JSON.parse(carga.toString()); } catch { return; }
-        for (const x of numerosDe(j)) vistos.set(`${tema}\n${x.campo}`, { tema, ...x });
-      });
-      await new Promise((r) => setTimeout(r, BUSCAR_MS));
-      soltar();
-      const temas = [...vistos.values()].sort((a, b) => a.tema.localeCompare(b.tema) || a.campo.localeCompare(b.campo));
-      for (const x of temas) {
-        const u = x.tema.endsWith("/state") && uds.get(x.tema.slice(0, -6));
-        if (u) x.unidad = u;
-      }
+      const conectadas = [...conexiones].filter(([, c]) => c.conectada);
+      if (!conectadas.length) return { ok: false, error: "Primero conecta algún broker MQTT (en Ajustes → MQTT)." };
+      const porBroker = await Promise.all(conectadas.map(([id, c]) => buscarEn(id, c)));
+      const temas = porBroker.flat().sort((a, b) => a.tema.localeCompare(b.tema) || a.campo.localeCompare(b.campo) || a.broker.localeCompare(b.broker));
       return { ok: true, temas, toast: temas.length ? `${temas.length} con números` : "No ha llegado ningún tema con números" };
     },
     /** Manda ya lo que haya (sin esperar al siguiente envío). */
@@ -241,8 +259,8 @@ export function crearEstacion({ S, motor, eventos, almacen, registro, receptor }
       vivo = false;
       clearTimeout(timer);
       clearTimeout(contarT);
-      for (const q of quitar) q();
-      quitar = [];
+      for (const qs of quitar.values()) for (const q of qs) q();
+      quitar.clear();
     },
     /** Para las pruebas: los últimos valores y mandar sin esperar (ni el minuto entre envíos a mano). */
     get valores() { return valores; },

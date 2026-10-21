@@ -1,7 +1,7 @@
 [Unit]
 Description=Vigía servidor (telemetría y alarmas Meshtastic)
 Documentation=https://github.com/Dani-NRos/vigia-mesh
-After=network-online.target
+After=network-online.target mosquitto.service
 Wants=network-online.target
 
 [Service]

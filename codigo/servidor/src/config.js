@@ -6,8 +6,12 @@
 //   "web": { "puerto": 4404 },
 //   "datos": "/var/lib/vigia",
 //   "retencionDias": 365,
-//   "registro": "info"                                       // o "depurar"
+//   "registro": "info",                                      // o "depurar"
+//   "mosquitto": { "puerto": 1883 }                          // el broker MQTT de este equipo, que gestiona Vigía
 // }
+//
+// «mosquitto» lo pone el instalador cuando instala Mosquitto: Vigía escribe sus usuarios en
+// <datos>/mosquitto/passwd y un servicio del sistema (vigia-mosquitto.path) lo pasa a Mosquitto y lo recarga.
 import fs from "node:fs";
 
 export const RUTA_CONFIG = "/etc/vigia/servidor.json";
@@ -18,6 +22,7 @@ export const DEFECTO = {
   datos: "/var/lib/vigia",
   retencionDias: 365,
   registro: "info",
+  mosquitto: null,
 };
 
 export class ErrorConfig extends Error {}
@@ -44,6 +49,11 @@ export function comprobar(dada) {
     receptor: { ...(dada.receptor?.tipo === "tcp" ? { tipo: "tcp", puerto: 4403 } : DEFECTO.receptor), ...(dada.receptor || {}) },
     web: { ...DEFECTO.web, ...(dada.web || {}) },
   };
+  if (c.mosquitto) {
+    c.mosquitto = { puerto: 1883, usuarios: null, ...c.mosquitto };
+    if (!Number.isInteger(c.mosquitto.puerto) || c.mosquitto.puerto < 1 || c.mosquitto.puerto > 65535) throw new ErrorConfig("mosquitto.puerto tiene que ser un número de puerto (por defecto 1883)");
+    if (c.mosquitto.usuarios != null && (typeof c.mosquitto.usuarios !== "string" || !c.mosquitto.usuarios.startsWith("/"))) throw new ErrorConfig("mosquitto.usuarios tiene que ser la ruta completa del fichero de usuarios");
+  }
   const r = c.receptor;
   if (r.tipo !== "usb" && r.tipo !== "tcp") throw new ErrorConfig(`receptor.tipo tiene que ser "usb" o "tcp" (pone "${r.tipo}")`);
   if (r.tipo === "tcp") {

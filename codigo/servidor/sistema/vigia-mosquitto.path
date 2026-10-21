@@ -1,0 +1,11 @@
+# Cuando Vigía cambia los usuarios de su broker (los escribe en /var/lib/vigia/mosquitto/passwd), se los pasa a
+# Mosquitto (vigia-mosquitto.service). Así Vigía no necesita permisos de administrador.
+[Unit]
+Description=Vigía: vigila los usuarios del broker MQTT para pasárselos a Mosquitto
+
+[Path]
+PathChanged=/var/lib/vigia/mosquitto/passwd
+Unit=vigia-mosquitto.service
+
+[Install]
+WantedBy=multi-user.target

@@ -355,68 +355,137 @@ function meshLastHTML() {
 }
 function patchMeshLast() { const el = $("#meshLast"); if (el) el.innerHTML = meshLastHTML(); }
 
-/* ───────────── MQTT y Home Assistant (solo con servidor) ───────────── */
-// Lo escrito y aún sin guardar: si Ajustes se redibuja (cambia el receptor, llega diagnóstico…), no se pierde.
-let mqttBorrador = null;
-function mqttEstadoHTML() {
-  const m = S.mqtt;
-  if (!m) return "";
-  const e = m.estado || {};
-  const dir = esc(e.url || m.url || "");
-  if (!m.activado) return "Apagado.";
-  if (e.fase === "conectada") return `<span class="okt">Conectado</span> a ${dir} desde las ${esc(hhmm.format(new Date(e.desde)))}.${m.ha?.activado ? " Publicando en Home Assistant." : ""}`;
-  if (e.fase === "error") return `<span class="warn-t">No se puede conectar</span> con ${dir}: ${esc(e.error || "")}. Lo vuelve a intentar cada 5 s.`;
-  return `Conectando con ${dir}…`;
+/* ───────────── MQTT: brokers y Home Assistant (solo con servidor) ───────────── */
+// Lo escrito y aún sin guardar: si Ajustes se redibuja (llega un estado, diagnóstico…), no se pierde.
+let brokerEdit = null; // el broker que se está añadiendo (id null) o cambiando: { id, nombre, url, usuario, clave, activado }
+let haBorrador = null; // { activado, broker, base, prefijo }
+const mqttBrokers = () => S.mqtt?.brokers || [];
+const nombreBroker = (id) => mqttBrokers().find((b) => b.id === id)?.nombre || "(broker quitado)";
+
+function brokerEstadoHTML(b) {
+  const e = b.estado || {};
+  if (!b.activado) return "Desconectado (apagado).";
+  if (e.fase === "conectada") return `<span class="okt">Conectado</span> desde las ${esc(hhmm.format(new Date(e.desde)))}.`;
+  if (e.fase === "error") return `<span class="warn-t">No se puede conectar</span>: ${esc(e.error || "")}. Lo vuelve a intentar cada 5 s.`;
+  return "Conectando…";
 }
-const mqttClaveTxt = (hay) => (hay ? "guardada; escribe otra para cambiarla" : "sin contraseña");
-// Lo que cambia sin tocar lo que se está escribiendo: el estado y si hay contraseña guardada.
-function patchMqttEstado() {
-  const el = $("#mqttEstado");
-  if (!el) return;
-  el.innerHTML = mqttEstadoHTML();
-  const hay = !!S.mqtt?.hayClave;
-  $("#mqttPass").placeholder = mqttClaveTxt(hay);
-  $("#mqttNoclave").hidden = !hay;
+function brokerEditorHTML() {
+  const b = brokerEdit;
+  const guardado = b.id ? mqttBrokers().find((x) => x.id === b.id) : null;
+  return `<div class="mq-ed">
+      <div class="mq-f">
+        <label for="brkNombre">Nombre</label><input id="brkNombre" class="inp" data-brk="nombre" autocomplete="off" placeholder="Home Assistant" value="${esc(b.nombre || "")}">
+        <label for="brkUrl">Dirección</label><input id="brkUrl" class="inp" data-brk="url" autocomplete="off" spellcheck="false" placeholder="192.168.1.20 o 192.168.1.20:1883" value="${esc(b.url || "")}">
+        <label for="brkUser">Usuario</label><input id="brkUser" class="inp" data-brk="usuario" autocomplete="off" spellcheck="false" placeholder="sin usuario" value="${esc(b.usuario || "")}">
+        <label for="brkPass">Contraseña</label><input id="brkPass" class="inp" data-brk="clave" type="password" autocomplete="new-password" placeholder="${guardado?.hayClave ? "guardada; escribe otra para cambiarla" : "sin contraseña"}" value="${esc(b.clave || "")}">
+      </div>
+      <div class="set-row"><label class="sw" for="brkOn"><input type="checkbox" id="brkOn" data-brk="activado" ${b.activado !== false ? "checked" : ""}><span class="sw-ui"></span><span>Conectado</span></label></div>
+      <p class="form-err" id="brkErr" role="alert" hidden></p>
+      <div class="btns"><button type="button" class="btn primary" data-brk-save>Guardar</button>${guardado?.hayClave ? `<button type="button" class="mini" data-brk-noclave>Quitar la contraseña</button>` : ""}<button type="button" class="btn ghost" data-brk-cancel>Cancelar</button>${b.id ? `<button type="button" class="btn danger-ghost" data-brk-del="${esc(b.id)}">Quitar broker</button>` : ""}</div>
+      <p class="hint">Para el Mosquitto de Home Assistant: su IP y un usuario de Home Assistant (o uno de la configuración del complemento Mosquitto).</p>
+    </div>`;
+}
+function brokerLocalHTML() {
+  const l = S.mqtt?.local;
+  if (!l) return "";
+  const dirs = l.direcciones.length ? l.direcciones : ["la IP de este equipo"];
+  const usuarios = l.usuarios.length
+    ? `<ul class="mq-us">${l.usuarios.map((u) => `<li><span>${esc(u.nombre)}</span><button type="button" class="mini" data-usr-del="${esc(u.nombre)}">Quitar</button></li>`).join("")}</ul>`
+    : `<p class="hint">Todavía no hay ningún usuario: sin uno, ningún dispositivo puede conectarse.</p>`;
+  return `<details class="mq-adv"${l.usuarios.length ? "" : " open"}><summary>Usuarios de este broker</summary>
+      ${usuarios}
+      <div class="mq-f">
+        <label for="usrNombre">Usuario</label><input id="usrNombre" class="inp" autocomplete="off" spellcheck="false" placeholder="por ejemplo, shelly">
+        <label for="usrClave">Contraseña</label><input id="usrClave" class="inp" type="password" autocomplete="new-password" placeholder="al menos 8 caracteres">
+      </div>
+      <p class="form-err" id="usrErr" role="alert" hidden></p>
+      <div class="btns"><button type="button" class="btn ghost" data-usr-save>Guardar usuario</button></div>
+      <p class="hint">Si el usuario ya existe, se cambia su contraseña. En un Shelly, Tasmota o zigbee2mqtt: servidor ${dirs.map(esc).join(" o ")}, puerto ${l.puerto}, y uno de estos usuarios.</p>
+    </details>`;
+}
+function haHTML() {
+  const h = { ...(S.mqtt?.ha || {}), ...(haBorrador || {}) };
+  const brs = mqttBrokers();
+  const opts = [`<option value=""${!h.broker ? " selected" : ""}>Elige un broker</option>`]
+    .concat(brs.map((b) => `<option value="${esc(b.id)}"${h.broker === b.id ? " selected" : ""}>${esc(b.nombre)}</option>`)).join("");
+  return `<h4 class="mq-h">Home Assistant</h4>
+      <div class="set-row"><label class="sw" for="haOn"><input type="checkbox" id="haOn" ${h.activado ? "checked" : ""}><span class="sw-ui"></span><span>Publicar los nodos vigilados</span></label></div>
+      <div class="set-row"><label for="haBroker">En el broker</label><select id="haBroker" class="inp sel">${opts}</select></div>
+      <details class="mq-adv"><summary>Temas</summary><div class="mq-f">
+        <label for="haBase">Tema de Vigía</label><input id="haBase" class="inp" autocomplete="off" spellcheck="false" value="${esc(h.base || "vigia")}">
+        <label for="haPref">Prefijo de Home Assistant</label><input id="haPref" class="inp" autocomplete="off" spellcheck="false" value="${esc(h.prefijo || "homeassistant")}">
+      </div><p class="hint">Normalmente no hay que tocarlos. Vigía publica en «vigia/…» y Home Assistant busca lo que se le anuncia en «homeassistant/…».</p></details>
+      <p class="form-err" id="haErr" role="alert" hidden></p>
+      <div class="btns"><button type="button" class="btn primary" data-ha-save>Guardar</button></div>
+      <p class="hint">En Home Assistant aparecen solos «Vigía servidor» y un dispositivo por cada nodo vigilado («Vigía · nombre»): sus lecturas, un sensor por cada alarma que le pongas, un botón de «Enterado» y un evento por cada alarma para notificar al móvil. Si el servidor se apaga, Home Assistant lo marca como no disponible.</p>`;
 }
 function mqttSection() {
-  const m = S.mqtt || { activado: false, url: "", usuario: "", hayClave: false, base: "vigia", ha: { activado: true, prefijo: "homeassistant" } };
-  const v = { activado: m.activado, url: m.url, usuario: m.usuario, haOn: m.ha?.activado, base: m.base, prefijo: m.ha?.prefijo, ...(mqttBorrador || {}) };
-  const sw = (id, on, txt) => `<div class="set-row"><label class="sw" for="${id}"><input type="checkbox" id="${id}" ${on ? "checked" : ""}><span class="sw-ui"></span><span>${txt}</span></label></div>`;
-  return `<section class="blk" id="mqttBox"><h3>MQTT y Home Assistant</h3>
-      ${sw("mqttOn", v.activado, "Conectar a un broker MQTT")}
-      <div class="mq-f">
-        <label for="mqttUrl">Dirección del broker</label><input id="mqttUrl" class="inp" autocomplete="off" spellcheck="false" placeholder="192.168.1.20 o 192.168.1.20:1883" value="${esc(v.url || "")}">
-        <label for="mqttUser">Usuario</label><input id="mqttUser" class="inp" autocomplete="off" spellcheck="false" placeholder="sin usuario" value="${esc(v.usuario || "")}">
-        <label for="mqttPass">Contraseña</label><input id="mqttPass" class="inp" type="password" autocomplete="new-password" placeholder="${mqttClaveTxt(m.hayClave)}">
-      </div>
-      <div class="btns" id="mqttNoclave" ${m.hayClave ? "" : "hidden"}><button type="button" class="mini" data-mqtt-noclave>Quitar la contraseña guardada</button></div>
-      ${sw("mqttHa", v.haOn, "Publicar en Home Assistant")}
-      <details class="mq-adv"><summary>Temas</summary><div class="mq-f">
-        <label for="mqttBase">Tema de Vigía</label><input id="mqttBase" class="inp" autocomplete="off" spellcheck="false" value="${esc(v.base || "vigia")}">
-        <label for="mqttPref">Prefijo de Home Assistant</label><input id="mqttPref" class="inp" autocomplete="off" spellcheck="false" value="${esc(v.prefijo || "homeassistant")}">
-      </div><p class="hint">Normalmente no hay que tocarlos. Vigía publica en «vigia/…» y Home Assistant busca lo que se le anuncia en «homeassistant/…».</p></details>
-      <p class="form-err" id="mqttErr" role="alert" hidden></p>
-      <div class="btns"><button type="button" class="btn primary" data-mqtt-save>Guardar</button></div>
-      <p class="hint" id="mqttEstado">${mqttEstadoHTML()}</p>
-      <p class="hint">Con Home Assistant, aparecen solos «Vigía servidor» y un dispositivo por cada nodo vigilado («Vigía · nombre»): sus lecturas, un sensor por cada alarma que le pongas, un botón de «Enterado» y un evento por cada alarma para notificar al móvil. Si el servidor se apaga, Home Assistant lo marca como no disponible. Para el Mosquitto de Home Assistant, usa un usuario de Home Assistant (o uno de la configuración del complemento Mosquitto).</p>
+  const brs = mqttBrokers();
+  const lista = brs.map((b) => `<li class="mq-b">
+      <div class="mq-bh"><strong>${esc(b.nombre)}</strong><span class="mq-u">${esc(b.local ? `puerto ${S.mqtt.local?.puerto ?? ""}` : b.url)}</span>${b.local ? "" : `<button type="button" class="mini" data-brk-edit="${esc(b.id)}">Cambiar</button>`}</div>
+      <p class="hint" data-brk-estado="${esc(b.id)}">${brokerEstadoHTML(b)}</p>
+      ${b.local ? brokerLocalHTML() : ""}
+      ${brokerEdit?.id === b.id ? brokerEditorHTML() : ""}
+    </li>`).join("");
+  return `<section class="blk" id="mqttBox"><h3>MQTT</h3>
+      <p class="hint">Los brokers a los que se conecta Vigía, a la vez. ${S.mqtt?.local ? "«Este servidor» es el Mosquitto de este equipo: los dispositivos de casa (Shelly, Tasmota, Zigbee…) pueden publicar ahí." : ""}</p>
+      ${brs.length ? `<ul class="mq-l">${lista}</ul>` : `<p class="hint">Ninguno todavía.</p>`}
+      ${brokerEdit && !brokerEdit.id ? brokerEditorHTML() : `<div class="btns"><button type="button" class="btn ghost" data-brk-nuevo>Añadir broker</button></div>`}
+      ${haHTML()}
     </section>`;
 }
-async function guardarMqtt() {
-  const err = $("#mqttErr");
-  const clave = $("#mqttPass").value;
-  const cambio = {
-    activado: $("#mqttOn").checked, url: $("#mqttUrl").value.trim(), usuario: $("#mqttUser").value.trim(),
-    base: $("#mqttBase").value.trim(), ha: { activado: $("#mqttHa").checked, prefijo: $("#mqttPref").value.trim() },
-    ...(clave ? { clave } : {}),
-  };
-  const res = await orden({ orden: "mqtt", cambio });
-  if (!res.ok) return showErr(err, res.error || "No se pudo guardar.");
-  err.hidden = true;
-  mqttBorrador = null;
-  $("#mqttPass").value = "";
-  toast(res.toast);
+/** Vuelve a pintar el apartado sin cerrar Ajustes. */
+function renderMqtt() {
+  const box = $("#mqttBox");
+  if (box) box.outerHTML = mqttSection();
 }
-const MQTT_CAMPOS = { mqttOn: "activado", mqttUrl: "url", mqttUser: "usuario", mqttHa: "haOn", mqttBase: "base", mqttPref: "prefijo" };
+/** Lo que llega del servidor: si no se está escribiendo nada, todo el apartado; si no, solo los estados. */
+function patchMqtt() {
+  const box = $("#mqttBox");
+  if (!box) return;
+  const escribiendo = box.contains(document.activeElement) && document.activeElement.matches("input, select");
+  if (!brokerEdit && !haBorrador && !escribiendo && !$("#usrNombre")?.value && !$("#usrClave")?.value) {
+    const abiertos = [...box.querySelectorAll("details[open]")].map((d) => d.querySelector("summary")?.textContent);
+    renderMqtt();
+    for (const d of $("#mqttBox").querySelectorAll("details")) if (abiertos.includes(d.querySelector("summary")?.textContent)) d.open = true;
+    return;
+  }
+  for (const b of mqttBrokers()) { const el = box.querySelector(`[data-brk-estado="${b.id}"]`); if (el) el.innerHTML = brokerEstadoHTML(b); }
+}
+async function guardarBroker() {
+  const b = brokerEdit;
+  const cambio = { nombre: (b.nombre || "").trim(), url: (b.url || "").trim(), usuario: (b.usuario || "").trim(), activado: b.activado !== false, ...(b.clave ? { clave: b.clave } : {}) };
+  const res = await orden({ orden: "broker", id: b.id, cambio });
+  if (!res.ok) return showErr($("#brkErr"), res.error || "No se pudo guardar.");
+  brokerEdit = null;
+  toast(res.toast);
+  renderMqtt();
+}
+async function guardarHA() {
+  const h = { ...(S.mqtt?.ha || {}), ...(haBorrador || {}) };
+  const res = await orden({ orden: "homeAssistant", cambio: { activado: !!h.activado, broker: h.broker || null, base: (h.base || "").trim(), prefijo: (h.prefijo || "").trim() } });
+  if (!res.ok) return showErr($("#haErr"), res.error || "No se pudo guardar.");
+  haBorrador = null;
+  toast(res.toast);
+  renderMqtt();
+}
+async function guardarUsuarioBroker() {
+  const nombre = $("#usrNombre").value.trim(), clave = $("#usrClave").value;
+  const res = await orden({ orden: "usuarioBroker", nombre, clave });
+  if (!res.ok) return showErr($("#usrErr"), res.error || "No se pudo guardar.");
+  $("#usrNombre").value = "";
+  $("#usrClave").value = "";
+  toast(res.toast);
+  renderMqtt();
+  $("#mqttBox details.mq-adv").open = true;
+}
+/** Un cambio en el apartado MQTT: al borrador del broker o de Home Assistant. */
+function editarMqtt(t) {
+  const k = t.dataset.brk;
+  if (k && brokerEdit) return void (brokerEdit[k] = t.type === "checkbox" ? t.checked : t.value);
+  const HA = { haOn: "activado", haBroker: "broker", haBase: "base", haPref: "prefijo" };
+  if (HA[t.id]) haBorrador = { ...(haBorrador || {}), [HA[t.id]]: t.type === "checkbox" ? t.checked : t.value };
+}
 
 /* ───────────── De MQTT a la malla: la estación (solo con servidor) ───────────── */
 // Datos que llegan por MQTT y el servidor manda a la malla como telemetría del receptor (ver servidor/src/estacion.js).
@@ -431,11 +500,19 @@ function estCfg() {
   const e = S.estacion;
   if (!e) return null;
   // Sin ningún dato todavía, una fila vacía: que se vea dónde va el tema.
-  const datos = e.datos.length ? e.datos.map((d) => ({ ...d })) : [{ metrica: METRICAS_ESTACION[0], tema: "", campo: "", unidad: unidades(METRICAS_ESTACION[0])[0], caduca: 0 }];
+  const datos = e.datos.length ? e.datos.map((d) => ({ ...d })) : [{ metrica: METRICAS_ESTACION[0], broker: brokerPorDefecto(), tema: "", campo: "", unidad: unidades(METRICAS_ESTACION[0])[0], caduca: 0 }];
   return { activado: e.activado, cada: e.cada, canal: e.canal, saltos: e.saltos, datos };
 }
 const estEditar = () => (estBorrador ||= estCfg());
-const estMismo = (a, b) => a && b && a.metrica === b.metrica && a.tema === b.tema && a.campo === b.campo && a.unidad === b.unidad;
+const estMismo = (a, b) => a && b && a.metrica === b.metrica && a.broker === b.broker && a.tema === b.tema && a.campo === b.campo && a.unidad === b.unidad;
+/** Para un dato nuevo: el único broker que haya, o el primero que no sea el de este equipo (de momento, el de HA). */
+const brokerPorDefecto = () => { const b = mqttBrokers(); return (b.find((x) => !x.local) || b[0])?.id || ""; };
+function brokerOpts(sel) {
+  const b = mqttBrokers();
+  let o = b.map((x) => `<option value="${esc(x.id)}"${x.id === sel ? " selected" : ""}>${esc(x.nombre)}</option>`).join("");
+  if (sel && !b.some((x) => x.id === sel)) o += `<option value="${esc(sel)}" selected>(broker quitado)</option>`;
+  return o || `<option value="">Añade un broker en el apartado MQTT</option>`;
+}
 
 /** El último valor de un dato, si es el que está guardado (si se está cambiando, aún no hay). */
 function estValorHTML(d) {
@@ -458,6 +535,7 @@ function estDatoHTML(d, i, datos) {
   const caduca = Object.entries(EST_CADUCA).map(([k, t]) => `<option value="${k}"${Number(k) === (d.caduca || 0) ? " selected" : ""}>${esc(t)}</option>`).join("");
   return `<div class="est-d">
       <div class="est-r"><select class="inp sel" data-est-i="${i}" data-est-k="metrica" aria-label="Qué dato es">${opts}</select><button type="button" class="mini" data-est-del="${i}">Quitar</button></div>
+      <select class="inp sel" data-est-i="${i}" data-est-k="broker" aria-label="Broker MQTT">${brokerOpts(d.broker)}</select>
       <input class="inp" data-est-i="${i}" data-est-k="tema" list="estTemas" autocomplete="off" spellcheck="false" placeholder="Tema MQTT, p. ej. ha_estados/sensor/temperatura/state" aria-label="Tema MQTT" value="${esc(d.tema || "")}">
       <div class="est-r"><input class="inp" data-est-i="${i}" data-est-k="campo" list="estCampos${i}" autocomplete="off" spellcheck="false" placeholder="Campo, si llega un JSON" aria-label="Campo del JSON" value="${esc(d.campo || "")}">${unidad}</div>
       <select class="inp sel" data-est-i="${i}" data-est-k="caduca" aria-label="Si deja de llegar">${caduca}</select>
@@ -479,10 +557,11 @@ function estHalladosHTML() {
   const lista = estTemas.map((x, i) => ({ x, i, m: adivinarMetrica(x.tema, x.campo) }))
     .filter(({ x }) => !f || `${x.tema} ${x.campo}`.toLowerCase().includes(f))
     .sort((a, b) => (a.m ? 0 : 1) - (b.m ? 0 : 1)); // primero lo que parece un dato de los que caben
-  const usados = new Set(estCfg().datos.map((d) => `${d.tema}\n${d.campo}`));
+  const usados = new Set(estCfg().datos.map((d) => `${d.broker}\n${d.tema}\n${d.campo}`));
+  const variosBrokers = new Set(estTemas.map((x) => x.broker)).size > 1;
   const filas = lista.slice(0, EST_VISTOS).map(({ x, i, m }) => `<li><div class="est-hn"><span class="est-ht" title="${esc(x.tema)}${x.campo ? ` · ${esc(x.campo)}` : ""}">${esc(estNombre(x))}</span>
-      <span class="hint">${esc(String(x.v))}${x.unidad ? ` ${esc(x.unidad)}` : ""}${m ? ` · parece ${esc(metricMeta(m).label.toLowerCase())}` : ""}</span></div>
-      ${usados.has(`${x.tema}\n${x.campo}`) ? `<span class="hint">ya está</span>` : `<button type="button" class="mini" data-est-usar="${i}">Usar</button>`}</li>`).join("");
+      <span class="hint">${esc(String(x.v))}${x.unidad ? ` ${esc(x.unidad)}` : ""}${m ? ` · parece ${esc(metricMeta(m).label.toLowerCase())}` : ""}${variosBrokers ? ` · en ${esc(nombreBroker(x.broker))}` : ""}</span></div>
+      ${usados.has(`${x.broker}\n${x.tema}\n${x.campo}`) ? `<span class="hint">ya está</span>` : `<button type="button" class="mini" data-est-usar="${i}">Usar</button>`}</li>`).join("");
   const mas = lista.length > EST_VISTOS ? `<p class="hint">Y ${lista.length - EST_VISTOS} más: escribe arriba para filtrar.</p>` : "";
   return `<input id="estFiltro" class="inp" autocomplete="off" spellcheck="false" placeholder="Filtrar, p. ej. meteoclimatic o temperature" aria-label="Filtrar lo encontrado" value="${esc(estFiltro)}">
     ${lista.length ? `<ul class="est-hl">${filas}</ul>${mas}` : `<p class="hint">Nada con «${esc(estFiltro)}».</p>`}`;
@@ -502,7 +581,7 @@ function estUsar(i) {
   for (const y of c.datos) if (y !== d && y.metrica === m) y.metrica = METRICAS_ESTACION.find((k) => !c.datos.some((z) => z.metrica === k)) || y.metrica;
   const uds = unidades(m);
   const ud = unidadDe(m, x.unidad) || (uds.includes("km/h") ? "km/h" : uds[0]); // el viento en Home Assistant suele ir en km/h
-  Object.assign(d, { metrica: m, tema: x.tema, campo: x.campo, unidad: ud });
+  Object.assign(d, { metrica: m, broker: x.broker, tema: x.tema, campo: x.campo, unidad: ud });
   renderEstacion();
   const ojo = !x.unidad && ud !== uds[0] ? ` en ${ud}: comprueba que llega en esa unidad` : "";
   toast(adiv === m ? `Añadido como «${metricMeta(m).label}»${ojo}.` : `Añadido como «${metricMeta(m).label}»: no sé qué dato es, elígelo en su fila.`);
@@ -522,7 +601,7 @@ function estEstadoHTML() {
   const e = S.estacion;
   if (!e) return "";
   const out = [];
-  if (!S.mqtt?.activado) out.push(`<span class="warn-t">MQTT está apagado</span>: los datos llegan por MQTT; actívalo en el apartado de arriba.`);
+  if (!mqttBrokers().some((b) => b.estado?.fase === "conectada")) out.push(`<span class="warn-t">Ningún broker MQTT conectado</span>: los datos llegan por MQTT; mira el apartado de arriba.`);
   if (!e.activado) out.push("Apagado: no se manda nada a la malla.");
   else if (e.proximo) {
     out.push(`Próximo envío a las ${esc(hhmm.format(new Date(e.proximo)))}: ${e.previo.texto ? `«${esc(e.previo.texto)}»` : "de momento, nada al día"}.`);
@@ -582,7 +661,7 @@ function renderEstacion() {
   const box = $("#estBox");
   if (box) box.outerHTML = estacionSection();
 }
-const estGuardada = () => { const e = S.estacion; return e ? JSON.stringify([e.activado, e.cada, e.canal, e.saltos, e.datos, e.receptor]) : ""; };
+const estGuardada = () => { const e = S.estacion; return e ? JSON.stringify([e.activado, e.cada, e.canal, e.saltos, e.datos, e.receptor, mqttBrokers().map((b) => [b.id, b.nombre])]) : ""; };
 /**
  * Lo que llega del servidor: si ha cambiado la configuración (desde otra pantalla) y aquí no se está cambiando nada,
  * todo el apartado; si no, solo los valores y el estado (llegan a menudo y no deben cerrar lo desplegado).
@@ -2074,21 +2153,28 @@ document.addEventListener("click", async (ev) => {
     return render();
   }
   if ("diag" in ds) { openSettings(); setTimeout(() => $("#diagBox")?.scrollIntoView({ block: "start" }), 50); return; }
-  if ("mqttSave" in ds) return guardarMqtt();
+  if ("brkNuevo" in ds) { brokerEdit = { id: null, nombre: "", url: "", usuario: "", clave: "", activado: true }; renderMqtt(); return $("#brkNombre")?.focus(); }
+  if ("brkEdit" in ds) { const b = mqttBrokers().find((x) => x.id === ds.brkEdit); if (b) brokerEdit = { id: b.id, nombre: b.nombre, url: b.url, usuario: b.usuario, clave: "", activado: b.activado }; return renderMqtt(); }
+  if ("brkCancel" in ds) { brokerEdit = null; return renderMqtt(); }
+  if ("brkSave" in ds) return guardarBroker();
+  if ("brkNoclave" in ds) { const r = await orden({ orden: "broker", id: brokerEdit.id, cambio: { clave: null } }); if (!r.ok) return showErr($("#brkErr"), r.error); return toast("Contraseña quitada"); }
+  if ("brkDel" in ds) { const r = await orden({ orden: "quitarBroker", id: ds.brkDel }); if (!r.ok) return showErr($("#brkErr"), r.error); brokerEdit = null; toast(r.toast); return renderMqtt(); }
+  if ("usrSave" in ds) return guardarUsuarioBroker();
+  if ("usrDel" in ds) { const r = await orden({ orden: "quitarUsuarioBroker", nombre: ds.usrDel }); return toast(r.error || r.toast); }
+  if ("haSave" in ds) return guardarHA();
   if ("estSave" in ds) return guardarEstacion();
   if ("estBuscar" in ds) return buscarTemasEstacion(t);
   if ("estAdd" in ds) {
     const c = estEditar();
     const libre = METRICAS_ESTACION.find((m) => !c.datos.some((d) => d.metrica === m));
     if (!libre) return;
-    c.datos.push({ metrica: libre, tema: "", campo: "", unidad: unidades(libre)[0], caduca: 0 });
+    c.datos.push({ metrica: libre, broker: brokerPorDefecto(), tema: "", campo: "", unidad: unidades(libre)[0], caduca: 0 });
     renderEstacion();
     return $(`#estDatos .est-d:last-child [data-est-k="metrica"]`)?.focus();
   }
   if ("estDel" in ds) { estEditar().datos.splice(Number(ds.estDel), 1); return renderEstacion(); }
   if ("estUsar" in ds) return estUsar(Number(ds.estUsar));
   if ("estSend" in ds) { const r = await orden({ orden: "estacionEnviar" }); return toast(r.error || r.toast); }
-  if ("mqttNoclave" in ds) { const r = await orden({ orden: "mqtt", cambio: { clave: null } }); if (r.error) return toast(r.error); return toast("Contraseña quitada"); }
   if ("meshTest" in ds) {
     const res = SERVIDOR ? await orden({ orden: "pruebaMalla" }) : acciones.pruebaMalla();
     if (res.toast) toast(res.toast);
@@ -2198,8 +2284,7 @@ document.addEventListener("keydown", (ev) => {
 
 document.addEventListener("input", (ev) => {
   if (ev.target.id === "meshQ") onMeshQuery(ev.target.value);
-  const campo = MQTT_CAMPOS[ev.target.id];
-  if (campo) mqttBorrador = { ...(mqttBorrador || {}), [campo]: ev.target.type === "checkbox" ? ev.target.checked : ev.target.value };
+  if (ev.target.closest?.("#mqttBox")) editarMqtt(ev.target);
   if (ev.target.id === "estFiltro") {
     estFiltro = ev.target.value;
     const ul = $("#estHallados");
@@ -2216,6 +2301,7 @@ document.addEventListener("input", (ev) => {
 document.addEventListener("change", async (ev) => {
   const t = ev.target;
   if (t.closest?.("#estBox")) return editarEstacion(t);
+  if (t.closest?.("#mqttBox")) return editarMqtt(t);
   if (t.id === "meshSort") { S.meshView.sort = t.value; S.meshExpanded = false; saveMeshView(); return renderMesh(); }
   if (t.id === "fence-r") return S.detail && setFenceRadius(S.detail.num, t);
   if (t.id === "tr-metric") return trendFormFill();
@@ -2294,7 +2380,7 @@ function refrescarAbiertos(p) {
   if (S.full && (p.nodes || p.rows || "active" in p)) refreshFull(S.full.num);
   if ($("#settings").open) {
     if ("meshLast" in p) patchMeshLast();
-    if ("mqtt" in p) { patchMqttEstado(); patchEstacion(); } // el aviso de «MQTT apagado»
+    if ("mqtt" in p) { patchMqtt(); patchEstacion(); } // la estación: el aviso de «ningún broker» y los nombres
     if ("estacion" in p) patchEstacion();
     if (("link" in p || "diag" in p || "settings" in p || "channels" in p || "trouble" in p) && !escribiendo("#settings input, #settings select")) renderSettings();
   }

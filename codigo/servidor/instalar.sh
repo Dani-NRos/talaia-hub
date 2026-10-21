@@ -13,11 +13,14 @@
 #   --borrar-datos        con --desinstalar, borra también los datos y la configuración
 #   --codigo-local DIR    usa una copia local del repositorio en vez de descargarla
 #   --node-local DIR      usa un Node ya descargado (DIR/bin/node) en vez de bajarlo de nodejs.org
+#   --sin-mosquitto       no instala ni configura Mosquitto (el broker MQTT de este equipo)
 #   --sin-systemd         no toca systemd (para probar en un contenedor)
 #
 # Qué hace: pone su propio Node en /opt/vigia/node (no toca el del sistema), el programa en /opt/vigia/versiones/…
 # (con /opt/vigia/actual apuntando a la última), un usuario «vigia» sin privilegios en el grupo dialout, la
-# configuración en /etc/vigia/servidor.json, los datos en /var/lib/vigia y el servicio vigia-servidor.
+# configuración en /etc/vigia/servidor.json, los datos en /var/lib/vigia y el servicio vigia-servidor. Además,
+# Mosquitto (apt) como broker MQTT de casa, con usuario y contraseña: los usuarios se gestionan desde Vigía y el
+# servicio vigia-mosquitto (path + oneshot, como root) se los pasa a Mosquitto.
 set -euo pipefail
 
 REPO="Dani-NRos/vigia-mesh"
@@ -28,7 +31,9 @@ DATOS="/var/lib/vigia"
 SERVICIO="vigia-servidor"
 # Descargas de Node: nodejs.org, o un espejo con la misma estructura (VIGIA_NODE_DIST=https://…/dist).
 NODE_DIST="${VIGIA_NODE_DIST:-https://nodejs.org/dist}"
-TCP="" PUERTO="" RECONFIGURAR=0 DESINSTALAR=0 BORRAR=0 CODIGO_LOCAL="" NODE_LOCAL="" SIN_SYSTEMD=0
+MOSQ_CONF="/etc/mosquitto/conf.d/vigia.conf"
+MOSQ_PW="/etc/mosquitto/vigia.passwd"
+TCP="" PUERTO="" RECONFIGURAR=0 DESINSTALAR=0 BORRAR=0 CODIGO_LOCAL="" NODE_LOCAL="" SIN_SYSTEMD=0 SIN_MOSQUITTO=0
 
 ayuda() {
   cat <<'FIN'
@@ -39,6 +44,7 @@ Instala o actualiza Vigía servidor. Opciones:
   --rama RAMA           instala desde otra rama (por defecto, main)
   --desinstalar         quita el servicio y el programa (los datos se quedan)
   --borrar-datos        con --desinstalar, borra también datos y configuración
+  --sin-mosquitto       no instala ni configura Mosquitto (el broker MQTT de este equipo)
 FIN
 }
 dice() { printf '\033[1m»\033[0m %s\n' "$*"; }
@@ -56,6 +62,7 @@ while [ $# -gt 0 ]; do
     --codigo-local) CODIGO_LOCAL="${2:?falta la carpeta}"; shift 2 ;;
     --node-local) NODE_LOCAL="${2:?falta la carpeta}"; shift 2 ;;
     --sin-systemd) SIN_SYSTEMD=1; shift ;;
+    --sin-mosquitto) SIN_MOSQUITTO=1; shift ;;
     -h|--help) ayuda; exit 0 ;;
     *) falla "opción desconocida: $1 (mira --help)" ;;
   esac
@@ -68,9 +75,14 @@ con_systemd() { [ "$SIN_SYSTEMD" -eq 0 ]; }
 # ── desinstalar ──
 if [ "$DESINSTALAR" -eq 1 ]; then
   if con_systemd; then
-    systemctl disable --now "$SERVICIO" 2>/dev/null || true
-    rm -f "/etc/systemd/system/$SERVICIO.service"
+    systemctl disable --now "$SERVICIO" vigia-mosquitto.path 2>/dev/null || true
+    rm -f "/etc/systemd/system/$SERVICIO.service" /etc/systemd/system/vigia-mosquitto.path /etc/systemd/system/vigia-mosquitto.service
     systemctl daemon-reload
+  fi
+  if [ -f "$MOSQ_CONF" ]; then
+    rm -f "$MOSQ_CONF" "$MOSQ_PW"
+    if con_systemd; then systemctl restart mosquitto 2>/dev/null || true; fi
+    aviso "Mosquitto sigue instalado, sin la configuración de Vigía. Si no lo usas para nada más: sudo apt remove mosquitto"
   fi
   rm -rf "$BASE" /usr/local/bin/vigia-servidor /etc/udev/rules.d/60-vigia-meshtastic.rules
   if [ "$BORRAR" -eq 1 ]; then
@@ -200,6 +212,40 @@ else
   [ -n "$TCP$PUERTO" ] && aviso "Ya había configuración en $ETC/servidor.json y se ha dejado tal cual. Para cambiarla, añade --reconfigurar."
   dice "Se mantiene la configuración de $ETC/servidor.json"
 fi
+
+# ── Mosquitto: el broker MQTT de casa, con usuario y contraseña (los usuarios, desde Vigía) ──
+MOSQUITTO_OK=0
+if [ "$SIN_MOSQUITTO" -eq 0 ]; then
+  if ! command -v mosquitto >/dev/null 2>&1; then
+    if command -v apt-get >/dev/null 2>&1; then
+      dice "Instalando Mosquitto (el broker MQTT de casa)…"
+      export DEBIAN_FRONTEND=noninteractive
+      apt-get install -y -q mosquitto mosquitto-clients >/dev/null 2>&1 \
+        || { apt-get update -q >/dev/null 2>&1 && apt-get install -y -q mosquitto mosquitto-clients >/dev/null 2>&1; } \
+        || aviso "No se pudo instalar Mosquitto. Vigía funciona sin él; repite el instalador cuando haya internet para tenerlo."
+    else
+      aviso "No hay apt-get: si quieres el broker MQTT en este equipo, instala Mosquitto y repite el instalador."
+    fi
+  fi
+  if command -v mosquitto >/dev/null 2>&1 && id mosquitto >/dev/null 2>&1; then
+    # Si Mosquitto ya tiene otra configuración que escucha en la red o pide usuarios, no se toca.
+    OTRA="$(grep -lsE '^[[:space:]]*(listener|port|password_file)[[:space:]]' /etc/mosquitto/mosquitto.conf /etc/mosquitto/conf.d/*.conf 2>/dev/null | grep -vx "$MOSQ_CONF" || true)"
+    if [ -n "$OTRA" ]; then
+      aviso "Mosquitto ya tiene su propia configuración ($(echo $OTRA)): no se toca. Vigía puede usarlo como un broker más (Ajustes → MQTT)."
+    else
+      MOSQUITTO_OK=1
+      install -m 644 "$BASE/actual/servidor/sistema/mosquitto-vigia.conf" "$MOSQ_CONF"
+      [ -f "$MOSQ_PW" ] || install -m 600 -o mosquitto -g mosquitto /dev/null "$MOSQ_PW"
+      mkdir -p "$DATOS/mosquitto" && chown vigia:vigia "$DATOS/mosquitto" && chmod 700 "$DATOS/mosquitto"
+      # Que Vigía sepa que tiene su broker (también en una configuración que ya existía).
+      "$NODE" -e '
+        const fs = require("fs"), f = process.argv[1], c = JSON.parse(fs.readFileSync(f, "utf8"));
+        if (!c.mosquitto) { c.mosquitto = { puerto: 1883 }; fs.writeFileSync(f, JSON.stringify(c, null, 2) + "\n"); }' "$ETC/servidor.json"
+      dice "Mosquitto: broker MQTT en el puerto 1883, con usuario y contraseña (se crean en Vigía: Ajustes → MQTT)"
+    fi
+  fi
+fi
+
 "$NODE" -e 'import("'"$BASE"'/actual/servidor/src/config.js").then((m) => m.leerConfig(process.argv[1], { obligatoria: true })).catch((e) => { console.error(e.message); process.exit(1); })' "$ETC/servidor.json" \
   || falla "la configuración de $ETC/servidor.json no es válida"
 
@@ -211,6 +257,16 @@ fi
 if command -v brltty >/dev/null 2>&1; then
   aviso "Está instalado brltty (lector braille): en Ubuntu de escritorio se queda con los nodos de chip CH340 y su puerto desaparece."
   aviso "Si no usas una línea braille: sudo apt remove brltty"
+fi
+
+if con_systemd && [ "$MOSQUITTO_OK" -eq 1 ]; then
+  install -m 644 "$BASE/actual/servidor/sistema/vigia-mosquitto.path" "$BASE/actual/servidor/sistema/vigia-mosquitto.service" /etc/systemd/system/
+  systemctl daemon-reload
+  systemctl enable --now vigia-mosquitto.path >/dev/null 2>&1
+  # Los usuarios que ya hubiera (de una instalación anterior) pasan a Mosquitto antes de arrancarlo.
+  [ -f "$DATOS/mosquitto/passwd" ] && systemctl start vigia-mosquitto.service 2>/dev/null || true
+  systemctl enable mosquitto >/dev/null 2>&1
+  systemctl restart mosquitto || aviso "Mosquitto no ha arrancado. Mira qué dice: journalctl -u mosquitto -n 30"
 fi
 
 if con_systemd; then
@@ -234,6 +290,10 @@ PUERTO_WEB="$("$NODE" -e 'import("'"$BASE"'/actual/servidor/src/config.js").then
 if [ -n "$IPS" ]; then
   dice "Pantalla en la red de casa:"
   for ip in $IPS; do echo "    http://$ip:$PUERTO_WEB"; done
+  if [ "$MOSQUITTO_OK" -eq 1 ]; then
+    dice "Broker MQTT (crea sus usuarios en la pantalla: Ajustes → MQTT):"
+    for ip in $IPS; do echo "    mqtt://$ip:1883"; done
+  fi
 fi
 echo
 dice "Hecho. Para seguirlo:"

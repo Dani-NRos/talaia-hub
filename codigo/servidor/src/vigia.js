@@ -9,9 +9,10 @@ import { abrirAlmacen } from "./almacen.js";
 import { ReceptorNodo, CONSEJO } from "./receptor.js";
 import { describirReceptor } from "./config.js";
 import os from "node:os";
-import { crearServicioMqtt } from "./mqtt.js";
+import { crearServicioMqtt, migrar as migrarMqtt } from "./mqtt.js";
 import { crearSalidaHA } from "./homeassistant.js";
 import { crearEstacion } from "./estacion.js";
+import { crearBrokerLocal } from "./mosquitto.js";
 
 const GUARDAR_NODOS_MS = 30000; // la lista de nodos (cientos) se guarda como mucho cada 30 s
 const DIAG_MAX = 200;
@@ -162,10 +163,13 @@ export async function crearVigia(config, registro, opts = {}) {
     onTelemetry: (p) => motor.recibir.telemetry(p),
   }, config.receptor, opts.receptorOpts);
 
-  /* ── MQTT: Home Assistant, y la estación (datos que llegan por MQTT y salen a la malla como del receptor) ── */
-  const estacion = crearEstacion({ S, motor, eventos, almacen, registro, receptor: () => receptor });
-  const mqtt = await crearServicioMqtt({ S, motor, eventos, almacen, registro }, {
-    crearSalidaHA, clienteId: `vigia-servidor-${os.hostname()}`, enganches: [estacion.enganchar],
+  /* ── MQTT: varios brokers (el de este equipo, si lo hay, y los que se añadan), Home Assistant y la estación ── */
+  migrarMqtt(almacen); // la configuración de la 1.16 (un broker): antes de leer la de la estación
+  const local = config.mosquitto ? crearBrokerLocal({ config, almacen, registro }) : null;
+  let mqtt = null;
+  const estacion = crearEstacion({ S, motor, eventos, almacen, registro, receptor: () => receptor, brokers: () => mqtt?.brokers() || [] });
+  mqtt = await crearServicioMqtt({ S, motor, eventos, almacen, registro }, {
+    crearSalidaHA, clienteId: `vigia-servidor-${os.hostname()}`, enganches: [estacion.enganchar], local, usos: estacion.usos,
   });
 
   /* ── tareas periódicas ── */

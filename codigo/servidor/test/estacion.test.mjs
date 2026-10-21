@@ -46,17 +46,19 @@ async function montar(t, puerto) {
   vigia.arrancar();
   await hasta(() => vigia.S.link.state === "ready", 8000, "receptor listo");
   t.after(async () => { await vigia.detener(); await nodo.cerrar(); });
-  assert.equal((await vigia.mqtt.configurar({ activado: true, url: `127.0.0.1:${puerto}` })).ok, true);
-  await hasta(() => vigia.mqtt.conexion?.conectada, 5000, "MQTT conectado");
+  // El broker de Home Assistant («b1»), publicando también para Home Assistant (lo suyo no debe volver a la malla).
+  assert.equal((await vigia.mqtt.configurarBroker(null, { nombre: "Home Assistant", url: `127.0.0.1:${puerto}` })).ok, true);
+  assert.equal((await vigia.mqtt.configurarHA({ activado: true, broker: "b1" })).ok, true);
+  await hasta(() => vigia.mqtt.conexion("b1")?.conectada, 5000, "MQTT conectado");
   return { vigia, nodo };
 }
 
 const DATOS = [
-  { metrica: "temperature", tema: T_TEMP },
-  { metrica: "relativeHumidity", tema: T_Z2M, campo: "humidity" },
-  { metrica: "barometricPressure", tema: T_Z2M, campo: "pressure" },
-  { metrica: "windSpeed", tema: T_VIENTO, unidad: "km/h" },
-  { metrica: "rainfall24h", tema: T_Z2M, campo: "lluvia.hoy", caduca: 60 },
+  { metrica: "temperature", broker: "b1", tema: T_TEMP },
+  { metrica: "relativeHumidity", broker: "b1", tema: T_Z2M, campo: "humidity" },
+  { metrica: "barometricPressure", broker: "b1", tema: T_Z2M, campo: "pressure" },
+  { metrica: "windSpeed", broker: "b1", tema: T_VIENTO, unidad: "km/h" },
+  { metrica: "rainfall24h", broker: "b1", tema: T_Z2M, campo: "lluvia.hoy", caduca: 60 },
 ];
 
 /** El paquete de telemetría que le ha llegado al nodo, decodificado. */
@@ -92,8 +94,8 @@ test("de MQTT a la malla: valores al momento, envío por el canal y saltos elegi
   await publicar(T_Z2M, { humidity: 61, pressure: 1016.2, lluvia: { hoy: 0.4 }, battery: 90 });
 
   // Lo que no vale, con su motivo.
-  assert.match(estacion.configurar({ datos: [{ metrica: "temperature", tema: "vigia/nodo/3c6e19a2/estado" }] }).error, /publica Vigía/);
-  assert.match(estacion.configurar({ datos: [{ metrica: "temperature", tema: "ha_estados/sensor/vigia_dnn_5_temperatura/state" }] }).error, /publica Vigía/);
+  assert.match(estacion.configurar({ datos: [{ metrica: "temperature", broker: "b1", tema: "vigia/nodo/3c6e19a2/estado" }] }).error, /publica Vigía/);
+  assert.match(estacion.configurar({ datos: [{ metrica: "temperature", broker: "b1", tema: "ha_estados/sensor/vigia_dnn_5_temperatura/state" }] }).error, /publica Vigía/);
   assert.match(estacion.configurar({ activado: true, datos: [] }).error, /al menos un dato/);
 
   const r = estacion.configurar({ activado: true, canal: 1, saltos: 3, datos: DATOS });
@@ -200,11 +202,12 @@ test("buscar temas: los que traen números, sin lo que publica Vigía; y sigue a
   await publicar(T_VIENTO, "15");
   await publicar("ha_estados/sensor/estacion_viento/unit_of_measurement", '"km/h"');
   await publicar("ha_estados/sensor/estacion_viento/friendly_name", '"Viento"');
-  await hasta(() => vigia.S.mqtt.estado.fase === "conectada", 3000, "conectado");
+  await hasta(() => vigia.S.mqtt.brokers[0].estado.fase === "conectada", 3000, "conectado");
   const r = await estacion.buscarTemas();
   assert.equal(r.ok, true);
   const vistos = r.temas.map((x) => `${x.tema}|${x.campo}`);
   assert.ok(vistos.includes(`${T_TEMP}|`));
+  assert.ok(r.temas.every((x) => x.broker === "b1"));
   assert.ok(vistos.includes(`${T_Z2M}|humidity`));
   assert.ok(vistos.includes(`${T_Z2M}|datos.presion`));
   assert.equal(r.temas.find((x) => x.tema === T_VIENTO).unidad, "km/h");
@@ -215,13 +218,17 @@ test("buscar temas: los que traen números, sin lo que publica Vigía; y sigue a
   assert.ok(!r.temas.some((x) => x.tema.startsWith("vigia/")));
 
   // Al volver a configurar MQTT (nueva conexión), la estación se vuelve a enganchar.
-  assert.equal(estacion.configurar({ datos: [{ metrica: "temperature", tema: T_TEMP }] }).ok, true);
+  assert.equal(estacion.configurar({ datos: [{ metrica: "temperature", broker: "b1", tema: T_TEMP }] }).ok, true);
   await hasta(() => estacion.valores.get("temperature")?.v === 21.4, 3000, "temperatura");
-  await vigia.mqtt.configurar({ ha: { activado: false } });
-  await hasta(() => vigia.mqtt.conexion?.conectada, 5000, "reconectado");
+  await vigia.mqtt.configurarBroker("b1", { nombre: "HA de casa" });
+  await hasta(() => vigia.mqtt.conexion("b1")?.conectada, 5000, "reconectado");
   await publicar(T_TEMP, "22.6");
   await hasta(() => estacion.valores.get("temperature")?.v === 22.6, 5000, "valor nuevo tras reconectar");
-  // MQTT apagado: buscar avisa.
-  await vigia.mqtt.configurar({ activado: false });
-  assert.match((await estacion.buscarTemas()).error, /Primero conecta MQTT/);
+  // Un dato de un broker que no existe no vale; y no se puede quitar un broker que usa la estación.
+  assert.match(estacion.configurar({ datos: [{ metrica: "temperature", broker: "b5", tema: T_TEMP }] }).error, /ya no está en la lista/);
+  await vigia.mqtt.configurarHA({ activado: false });
+  assert.match((await vigia.mqtt.quitarBroker("b1")).error, /Lo usa: la estación \(Temperatura\)/);
+  // Sin ningún broker conectado: buscar avisa.
+  await vigia.mqtt.configurarBroker("b1", { activado: false });
+  assert.match((await estacion.buscarTemas()).error, /Primero conecta algún broker/);
 });

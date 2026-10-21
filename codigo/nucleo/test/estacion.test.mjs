@@ -43,10 +43,10 @@ test("unidades: se pasa a la de Meshtastic y se rechaza lo imposible", () => {
 
 test("configuración: se completa, y lo que no vale se explica", () => {
   const prohibido = (t) => (t.startsWith("vigia/") ? "es de Vigía" : null);
-  const c = (dada, antes) => comprobarEstacion(dada, antes, prohibido);
-  const dato = { metrica: "temperature", tema: " ha/sensor/t/state " };
+  const c = (dada, antes) => comprobarEstacion(dada, antes, { temaProhibido: prohibido, brokers: new Set(["b1", "local"]) });
+  const dato = { metrica: "temperature", broker: "b1", tema: " ha/sensor/t/state " };
   const ok = c({ activado: true, datos: [dato] }).cfg;
-  assert.deepEqual(ok, { activado: true, cada: 30, canal: 0, saltos: null, datos: [{ metrica: "temperature", tema: "ha/sensor/t/state", campo: "", unidad: "°C", caduca: 0 }] });
+  assert.deepEqual(ok, { activado: true, cada: 30, canal: 0, saltos: null, datos: [{ metrica: "temperature", broker: "b1", tema: "ha/sensor/t/state", campo: "", unidad: "°C", caduca: 0 }] });
   // Lo que no viene se queda.
   assert.equal(c({ cada: 60 }, ok).cfg.datos.length, 1);
   assert.equal(c({}, {}).cfg.activado, false);
@@ -63,9 +63,11 @@ test("configuración: se completa, y lo que no vale se explica", () => {
   assert.match(c({ saltos: 9 }).error, /saltos/);
   assert.match(c({ activado: true, canal: null, datos: [dato] }).error, /por qué canal/);
   assert.match(c({ activado: true, datos: [] }).error, /al menos un dato/);
+  assert.match(c({ datos: [{ ...dato, broker: "" }] }).error, /Elige el broker de «Temperatura»/);
+  assert.match(c({ datos: [{ ...dato, broker: "b7" }] }).error, /broker de «Temperatura» ya no está/);
   // Con km/h y caducidad.
-  const v = c({ datos: [{ metrica: "windSpeed", tema: "ha/v", unidad: "km/h", caduca: 60 }] }).cfg.datos[0];
-  assert.deepEqual(v, { metrica: "windSpeed", tema: "ha/v", campo: "", unidad: "km/h", caduca: 60 });
+  const v = c({ datos: [{ metrica: "windSpeed", broker: "local", tema: "ha/v", unidad: "km/h", caduca: 60 }] }).cfg.datos[0];
+  assert.deepEqual(v, { metrica: "windSpeed", broker: "local", tema: "ha/v", campo: "", unidad: "km/h", caduca: 60 });
   assert.equal(METRICAS_ESTACION.length, new Set(METRICAS_ESTACION).size);
 });
 
