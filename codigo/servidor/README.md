@@ -232,6 +232,17 @@ alarmas (también avisos por la malla) e histórico, como un nodo. Solo en el se
   pulsas el enchufe mientras busca) y a veces sin ese campo (solo la potencia): esos mensajes no cuentan para el dato.
 - **Alarma de un estado**, en la ficha: *Avisar cuando: Abierta* (o *Cerrada*), al momento o solo si sigue así más de
   unos minutos (una puerta abierta más de 10 min, una bomba encendida más de 1 h). Se resuelve al cambiar.
+- **Encender y apagar desde Vigía**: en un estado, *Encender y apagar desde Vigía* y el tema al que se mandan las
+  órdenes, con el mensaje para cada estado. Vigía lo propone a partir del tema de estado (Shelly Plus/Pro/Gen3:
+  `…/command/switch:0` con `on` y `off`, con *Enable MQTT Control* activado en el Shelly; Tasmota: `cmnd/…/POWER` con
+  `ON` y `OFF`; zigbee2mqtt: `zigbee2mqtt/…/set` con `{"state":"ON"}`; ESPHome: `…/switch/…/command`); se puede
+  cambiar. En la tarjeta, la ficha y la pantalla completa sale un interruptor: se pulsa y se manda, **sin
+  confirmación** y sin contraseña (cualquiera en la red de casa puede usarlo). Dice *Enviando…* hasta que el
+  dispositivo cuenta por su tema de estado que lo ha hecho; si en 10 s no lo cuenta, *No ha contestado*. Cada orden
+  queda en el registro. Home Assistant no recibe órdenes por `mqtt_statestream`.
+- **Los Shelly no guardan su estado en el broker**: al conectar con él (y al guardar los datos), Vigía les pide que lo
+  digan (`status_update` en `…/command/switch:0`; en los de primera generación, `update`). Solo es una petición de
+  información, no cambia nada. Por `…/events/rpc` no se puede pedir: mejor `…/status/switch:0`.
 - **Conexión del dispositivo** (paneles sin nodo, opcional): el tema donde dice si está conectado. Tasmota:
   `tele/…/LWT` (`Online`/`Offline`); Shelly: `…/online` (`true`/`false`); zigbee2mqtt: `zigbee2mqtt/…/availability`
   (campo `state`). Con él, el panel dice *Sin conexión* al momento y, con *Avisar si se desconecta*, salta su alarma

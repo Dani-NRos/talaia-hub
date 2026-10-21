@@ -11,6 +11,9 @@
 //    motor sabe desde cuándo está cada uno («desde») para avisar de «abierta más de 10 min».
 //  - Un panel sin nodo puede tener un tema de conexión (el LWT de Tasmota, el «online» de Shelly…): «Sin conexión» en
 //    el panel al momento y, si se pide, su alarma.
+//  - Un estado con «orden» se enciende y apaga desde Vigía (sin confirmación, como decidió Dani): se publica el mensaje
+//    en su tema y se espera a que el tema de estado diga que ha cambiado (si en 10 s no lo dice, «no ha contestado»).
+//  - Los Shelly no dejan su estado guardado en el broker: al conectar con él se les pide (status_update / update).
 //
 // Configuración en SQLite («paneles»); lo que ven las pantallas, en S.paneles (parte «paneles»). Lo de la 1.16 (la
 // estación, en Ajustes) se migra al panel del receptor: ver migrarEstacion.
@@ -18,7 +21,8 @@ import { create, toBinary } from "@bufbuild/protobuf";
 import { Protobuf } from "@meshtastic/core";
 import {
   comprobarDatos, comprobarMalla, comprobarConexion, leerValor, leerEstado, pareceEstado, pareceConexion, convertir,
-  unidades, textoValores, proximoEnvio, metasDe, nombreDato, esEstado, TIPOS_PANEL, MALLA_DEFECTO, TIPOS,
+  unidades, textoValores, textoDato, proximoEnvio, metasDe, nombreDato, esEstado, pedirEstadoShelly, TIPOS_PANEL,
+  MALLA_DEFECTO, TIPOS,
 } from "@vigia/nucleo/mqtt-datos.js";
 import { registrarMetricas } from "@vigia/nucleo/metrics.js";
 import { RE, trendKey, conexionKey } from "@vigia/nucleo/motor.js";
@@ -29,6 +33,7 @@ const BUSCAR_MAX = 2000; // un broker con mucho retenido (Home Assistant, zigbee
 const A_MANO_MS = 60000; // entre dos «Enviar ahora»
 const LECTURA_MS = 60000; // cada dato se guarda como lectura como mucho una vez por minuto
 const ESTADO_MS = 3600000; // un estado, al cambiar; si no cambia, como mucho una vez por hora
+const ORDEN_MS = 10000; // lo que se espera a que un dispositivo diga que ha hecho la orden
 
 /** Un Telemetry con la telemetría de ambiente, codificado. valores: { tipo: número } en unidades de Meshtastic. */
 export function telemetriaAmbiente(valores, segundos) {
@@ -103,6 +108,7 @@ export function crearPaneles({ S, motor, eventos, almacen, registro, receptor, b
   const guardadoT = new Map(); // clave → cuándo se guardó la última
   const guardadoV = new Map(); // clave → el último valor guardado (para los estados: cada cambio se guarda)
   const conexionV = new Map(); // num del panel → lo último de su tema de conexión: { v: 1 | 0, t } | { error, t } | { nulo, t }
+  const ordenes = new Map(); // clave → la orden que espera respuesta { num, v, t, timer } o la que no la tuvo { v, t, error }
   let timer = null, proximo = null, contarT = null, vivo = true;
   let ultimo = almacen.leer("mallaUltimo", null), ultimoFallo = null, aMano = 0;
 
@@ -163,6 +169,7 @@ export function crearPaneles({ S, motor, eventos, almacen, registro, receptor, b
       valores: Object.fromEntries(valores),
       malla: { ...cfg.malla, proximo, ultimo, previo: { texto: textoValores(previo.vals), faltan: previo.faltan } },
       conexion: Object.fromEntries(conexionV),
+      ordenes: Object.fromEntries([...ordenes].map(([k, o]) => [k, o.error ? { v: o.v, t: o.t, error: o.error } : { v: o.v, t: o.t, enviando: true }])),
     };
     eventos.emit("parte", "paneles");
   }
@@ -215,6 +222,13 @@ export function crearPaneles({ S, motor, eventos, almacen, registro, receptor, b
       cambioNodos = true;
     }
     lectura(num, d.clave, r.v, t, true);
+    const o = ordenes.get(d.clave);
+    if (o && !o.error && o.v === r.v) { // el dispositivo dice que lo ha hecho
+      clearTimeout(o.timer);
+      ordenes.delete(d.clave);
+      motor.addLog("info", `${nombrePanel(num)} · ${nombreDato(d)}: ${textoDato(d, r.v)} (orden desde Vigía)`, num);
+      contar(); // a las pantallas ya, junto con el estado nuevo (sin el segundo de espera de los valores)
+    } else if (o?.error) ordenes.delete(d.clave); // ya ha dicho algo: fuera el «no ha contestado»
   }
 
   /** Lo que dice el tema de conexión de un panel sin nodo («Online», «Offline», true…). */
@@ -284,6 +298,18 @@ export function crearPaneles({ S, motor, eventos, almacen, registro, receptor, b
       for (const p of Object.values(cfg.paneles)) if (p.conexion?.broker === id) temas.add(p.conexion.tema);
       quitar.set(id, [...temas].map((tema) => con.suscribir(tema, (t, carga) => recibido(id, tema, carga))));
     }
+  }
+
+  /** A los Shelly de ese broker, que digan su estado (solo pide información: no cambia nada). */
+  function pedirEstados(id) {
+    const con = conexiones.get(id);
+    if (!con?.conectada) return;
+    const pedir = new Map();
+    for (const { d } of porClave.values()) {
+      const p = d.broker === id && pedirEstadoShelly(d.tema);
+      if (p) pedir.set(p.tema, p.carga);
+    }
+    for (const [tema, carga] of pedir) con.publicar(tema, carga);
   }
 
   /* ── a la malla ── */
@@ -378,6 +404,8 @@ export function crearPaneles({ S, motor, eventos, almacen, registro, receptor, b
     S.recent.delete(`${num}|${clave}`);
     clearTimeout(pendientes.get(clave)?.timer);
     pendientes.delete(clave);
+    clearTimeout(ordenes.get(clave)?.timer);
+    ordenes.delete(clave);
     valores.delete(clave);
     almacen.lecturas.borrar(num, clave);
   }
@@ -392,7 +420,12 @@ export function crearPaneles({ S, motor, eventos, almacen, registro, receptor, b
       conexiones.set(id, con);
       suscribirse(id);
       contar();
+      // Al conectar (y al volver a conectar), los Shelly dicen cómo están: un poco después, ya con las suscripciones.
+      const alConectar = () => { const tt = setTimeout(() => { if (vivo) pedirEstados(id); }, 300); tt.unref?.(); };
+      con.on?.("conectada", alConectar);
+      if (con.conectada) alConectar();
       return () => {
+        con.off?.("conectada", alConectar);
         if (conexiones.get(id) !== con) return;
         for (const q of quitar.get(id) || []) q();
         quitar.delete(id);
@@ -522,7 +555,33 @@ export function crearPaneles({ S, motor, eventos, almacen, registro, receptor, b
       motor.guardar("nodes");
       registro.info(`Paneles: ${nombrePanel(num)} con ${r.datos.length} datos por MQTT`);
       programar();
+      for (const id of conexiones.keys()) pedirEstados(id); // si hay un Shelly nuevo, que diga ya cómo está
       return { ok: true, toast: "Datos guardados." };
+    },
+    /**
+     * Enciende (v = 1) o apaga (v = 0) un dato ON/OFF que tenga orden: publica su mensaje y espera a que su tema de
+     * estado diga que ha cambiado. Sin confirmación (decisión de Dani; sin usuarios por ahora).
+     */
+    async mandar(num, clave, v) {
+      const d = panel(num)?.datos.find((x) => x.clave === clave);
+      if (!S.cfg.watched[num] || !d) return { ok: false, error: "Ese dato ya no está." };
+      if (!d.orden) return { ok: false, error: "Ese dato no se puede encender ni apagar desde Vigía." };
+      if (v !== 0 && v !== 1) return { ok: false };
+      const con = conexiones.get(d.broker);
+      if (!con?.conectada) return { ok: false, error: `El broker de «${nombreDato(d)}» no está conectado.` };
+      if (ordenes.get(clave)?.timer) return { ok: false, error: "Espera: aún no ha contestado a la orden anterior." };
+      if (!(await con.publicar(d.orden.tema, v ? d.orden.on : d.orden.off, { qos: 1 }))) return { ok: false, error: "No se pudo mandar la orden al broker." };
+      const o = { num, v, t: Date.now(), timer: null };
+      o.timer = setTimeout(() => {
+        if (ordenes.get(clave) !== o) return;
+        ordenes.set(clave, { v, t: o.t, error: "No ha contestado" });
+        motor.addLog("info", `${nombrePanel(num)} · ${nombreDato(d)}: no ha contestado a la orden «${textoDato(d, v)}»`, num);
+        contar();
+      }, ORDEN_MS);
+      o.timer.unref?.();
+      ordenes.set(clave, o);
+      contar();
+      return { ok: true };
     },
     /** Cada cuánto, por qué canal y con cuántos saltos salen a la malla los datos del receptor. */
     configurarMalla(cambio) {
@@ -562,6 +621,7 @@ export function crearPaneles({ S, motor, eventos, almacen, registro, receptor, b
       clearTimeout(contarT);
       for (const qs of quitar.values()) for (const q of qs) q();
       quitar.clear();
+      for (const o of ordenes.values()) clearTimeout(o.timer);
     },
     /** Para las pruebas. */
     get valores() { return valores; },

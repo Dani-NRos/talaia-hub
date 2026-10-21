@@ -470,6 +470,52 @@ await paso("estados ON/OFF y conexión en el panel del enchufe: «Usar», al rev
   if (JSON.stringify({ ...sv, aviso: null }).includes("Enchufe del taller")) throw new Error("el panel sin nodo está en el estado del servidor");
 });
 
+await paso("encender y apagar un Shelly desde la tarjeta del móvil: propone el tema de las órdenes, espera a que conteste", async () => {
+  // Un Shelly Plug de mentira en el broker de Home Assistant: contesta a on/off y a status_update con su estado.
+  const shelly = await mqttLib.connectAsync(`mqtt://127.0.0.1:${MQTT_PUERTO}`, { username: "vigia", password: "clave-secreta" });
+  let output = false;
+  const recibidas = [];
+  const publicaEstado = () => shelly.publishAsync("shellyplug01/status/switch:0", JSON.stringify({ id: 0, source: "button", output, apower: output ? 45 : 0 }));
+  shelly.on("message", (tema, c) => {
+    const m = c.toString();
+    recibidas.push(`${tema} ${m}`);
+    if (m === "on" || m === "off") output = m === "on";
+    if (["on", "off", "status_update"].includes(m)) publicaEstado();
+  });
+  await shelly.subscribeAsync("shellyplug01/command/#");
+  await pc.click("#cards .name-btn:text('Enchufe del taller')");
+  await sleep(300);
+  await pc.click("[data-dat-add]");
+  const i = (await pc.locator("#datLista .est-d").count()) - 1;
+  await fila(pc, i, "tipo").selectOption("estado");
+  await fila(pc, i, "nombre").fill("Shelly");
+  await fila(pc, i, "tema").fill("shellyplug01/status/switch:0");
+  await fila(pc, i, "campo").fill("output");
+  await fila(pc, i, "control").check({ force: true });
+  if ((await fila(pc, i, "ordenTema").inputValue()) !== "shellyplug01/command/switch:0" || (await fila(pc, i, "ordenOn").inputValue()) !== "on") throw new Error("no propone el tema de las órdenes del Shelly");
+  await fotoApartado(pc, "#datBox", "datos-orden");
+  await pc.click("[data-dat-save]");
+  // Al guardar, Vigía le pide el estado (solo información) y el Shelly contesta: Apagado.
+  await esperarTexto(pc, /Apagado · ahora mismo/, "el estado pedido al guardar");
+  if (!recibidas.includes("shellyplug01/command/switch:0 status_update") || output) throw new Error(`le ha mandado: ${recibidas}`);
+  await pc.keyboard.press("Escape");
+  const st = await estado();
+  const num = Number(Object.keys(st.paneles.paneles).find((k) => st.paneles.paneles[k].nombre === "Enchufe del taller"));
+  const k = st.paneles.paneles[num].datos.find((d) => d.nombre === "Shelly").clave;
+  const sw = movil.locator(`#cards [data-orden="${k}"]`);
+  await sw.waitFor();
+  await sw.click();
+  await esperarTexto(movil, /SHELLY\s*Encendido/i, "encendido en la tarjeta del móvil");
+  if (!output) throw new Error("el Shelly no se ha encendido");
+  await esperarTexto(pc, /Shelly: Encendido \(orden desde Vigía\)/, "en el registro del PC");
+  if ((await sw.getAttribute("aria-checked")) !== "true") throw new Error("el interruptor no está encendido");
+  await foto(movil, "movil-interruptor");
+  await sw.click();
+  await esperarTexto(movil, /SHELLY\s*Apagado/i, "apagado en la tarjeta del móvil");
+  if (output) throw new Error("el Shelly no se ha apagado");
+  await shelly.endAsync();
+});
+
 await paso("gráfica: serie desde el servidor", async () => {
   const r = await (await fetch(`${URL0}api/serie?nodo=${CASETA}&metrica=temperature&desde=0`)).json();
   if (r.length < 4) throw new Error(`serie con ${r.length} puntos`);

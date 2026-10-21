@@ -152,6 +152,14 @@ test("órdenes de los paneles: crear uno sin nodo (con su número), renombrar, l
   assert.equal(r.status, 400);
   r = await orden(base, { orden: "datosPanel", num: -1, datos: [{ tipo: "estado", invertir: "sí" }] });
   assert.equal(r.status, 400);
+  r = await orden(base, { orden: "mandar", num: -1, clave: "temperature", v: 1 });
+  assert.equal(r.status, 400);
+  r = await orden(base, { orden: "mandar", num: -1, clave: "mq1", v: true });
+  assert.equal(r.status, 400);
+  r = await orden(base, { orden: "mandar", num: -1, clave: "mq1", v: 1 });
+  assert.match(r.json.error, /ya no está/);
+  r = await orden(base, { orden: "datosPanel", num: -1, datos: [{ tipo: "estado", orden: { tema: "x", on: 1 } }] });
+  assert.equal(r.status, 400);
   r = await orden(base, { orden: "alarmaEstado", num: -1, metrica: "mq1", cuando: 2, minutos: 0 });
   assert.equal(r.status, 400);
   r = await orden(base, { orden: "alarmaEstado", num: -1, metrica: "mq1", cuando: 1, minutos: null });

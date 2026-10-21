@@ -230,6 +230,68 @@ test("un Shelly por events/rpc: «params.switch:0.output»; los avisos sin ese c
   assert.equal(paneles.valores.get("mq2").v, 40);
 });
 
+/** Un Shelly Plug de mentira: contesta a las órdenes y a «status_update» publicando su estado (sin retener). */
+async function shellyFalso(t, puerto, prefijo = "shellyplug01", { contesta = true } = {}) {
+  const c = await mqtt.connectAsync(`mqtt://127.0.0.1:${puerto}`, { clientId: `shelly-${Math.random()}` });
+  t.after(() => c.endAsync());
+  const recibidas = [];
+  let output = false;
+  const estado = () => c.publishAsync(`${prefijo}/status/switch:0`, JSON.stringify({ id: 0, source: "init", output, apower: output ? 45 : 0 }));
+  c.on("message", (tema, carga) => {
+    const m = carga.toString();
+    recibidas.push([tema, m]);
+    if (!contesta) return;
+    if (m === "on" || m === "off") { output = m === "on"; estado(); } else if (m === "status_update") estado();
+  });
+  await c.subscribeAsync(`${prefijo}/command/#`);
+  return { recibidas, get output() { return output; }, estado };
+}
+
+test("encender y apagar un Shelly desde Vigía: espera a que diga que lo ha hecho; al conectar, se le pide el estado", async (t) => {
+  const puerto = await broker(t);
+  const shelly = await shellyFalso(t, puerto);
+  const mudo = await shellyFalso(t, puerto, "shellymudo", { contesta: false });
+  const { vigia } = await montar(t, puerto);
+  const { S, paneles, motor } = vigia;
+  const { num } = paneles.crearPanel({ nombre: "Taller", tipo: "shelly" });
+  const orden = { tema: "shellyplug01/command/switch:0", on: "on", off: "off" };
+  assert.equal(paneles.guardarDatos(num, [
+    { tipo: "estado", nombre: "Enchufe", broker: "b1", tema: "shellyplug01/status/switch:0", campo: "output", orden },
+    { tipo: "estado", nombre: "Mudo", broker: "b1", tema: "shellymudo/status/switch:0", campo: "output", orden: { ...orden, tema: "shellymudo/command/switch:0" } },
+    { tipo: "power", broker: "b1", tema: "shellyplug01/status/switch:0", campo: "apower" },
+  ]).ok, true);
+  // Al guardar (y al conectar con el broker) se pide el estado a los Shelly: solo información.
+  const n = S.nodes.get(num);
+  await hasta(() => n.metrics.mq1?.v === 0, 3000, "estado pedido al guardar");
+  assert.deepEqual(shelly.recibidas.at(-1), ["shellyplug01/command/switch:0", "status_update"]);
+  assert.equal(shelly.output, false, "pedir el estado no cambia nada");
+  // Encender: se manda la orden, «enviando» hasta que el Shelly dice que está encendido.
+  assert.equal((await paneles.mandar(num, "mq1", 1)).ok, true);
+  assert.equal(S.paneles.ordenes.mq1.enviando, true);
+  await hasta(() => n.metrics.mq1.v === 1 && n.metrics.mq3?.v === 45, 3000, "encendido");
+  await hasta(() => !S.paneles.ordenes.mq1, 3000, "confirmada");
+  assert.equal(S.log[0].text, "Taller · Enchufe: Encendido (orden desde Vigía)");
+  assert.match((await paneles.mandar(num, "mq3", 1)).error, /no se puede encender ni apagar/);
+  assert.match((await paneles.mandar(num, "mq9", 1)).error, /ya no está/);
+  // Uno que no contesta: a los 10 s, «no ha contestado» (aquí, con el reloj de la prueba).
+  t.mock.timers.enable({ apis: ["setTimeout"] });
+  assert.equal((await paneles.mandar(num, "mq2", 1)).ok, true);
+  // (con los temporizadores de mentira, se espera a que llegue cediendo el turno, sin setTimeout)
+  for (let i = 0; i < 5000 && mudo.recibidas.at(-1)?.[1] !== "on"; i++) await new Promise((r) => setImmediate(r));
+  assert.deepEqual(mudo.recibidas.at(-1), ["shellymudo/command/switch:0", "on"]);
+  assert.match((await paneles.mandar(num, "mq2", 1)).error, /aún no ha contestado/);
+  t.mock.timers.tick(10000);
+  t.mock.timers.reset();
+  assert.equal(S.paneles.ordenes.mq2.error, "No ha contestado");
+  assert.equal(S.log[0].text, "Taller · Mudo: no ha contestado a la orden «Encendido»");
+  // Al volver a conectar con el broker, se le vuelve a pedir el estado.
+  const antes = shelly.recibidas.length;
+  motor.addLog("info", "—");
+  vigia.mqtt.conexion("b1").emit("conectada");
+  await hasta(() => shelly.recibidas.length > antes, 3000, "status_update al reconectar");
+  assert.deepEqual(shelly.recibidas.at(-1), ["shellyplug01/command/switch:0", "status_update"]);
+});
+
 test("al parar, lo que esperaba su minuto se guarda como lectura", async (t) => {
   const puerto = await broker(t);
   const dispositivo = await cliente(t, puerto);

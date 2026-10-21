@@ -124,6 +124,11 @@ con Tasmota/ESPHome, Zigbee por zigbee2mqtt, ESPHome, Home Assistant…).
   al momento, si no cambia una por hora. Tema de conexión (LWT) por panel sin nodo: `n.conectado`, alarma
   `${num}||conexion` si se marca «Avisar si se desconecta». Las alarmas de los datos MQTT siguen sin ir a Home
   Assistant: Dani valorará más adelante mandarlas a HA o a Telegram con un bot.
+- Hecho así (fase 4, Dani 22 oct. 2026): un estado puede llevar `orden: { tema, on, off }` (la propone
+  `proponerOrden` desde el tema de estado; se puede cambiar). Interruptor en tarjeta, ficha y pantalla completa, sin
+  confirmación; `paneles.mandar` publica (qos 1, sin retener) y espera a que el tema de estado diga el valor (10 s;
+  si no, «No ha contestado»); queda en el registro. A los Shelly se les pide el estado al conectar con el broker y al
+  guardar los datos (`pedirEstadoShelly`: `status_update` en `…/command/switch:0`): solo información.
 - Fases: 1) brokers (Mosquitto propio + varios); 2) paneles, nombres, datos MQTT numéricos, estación al panel del
   receptor; 3) ON/OFF; 4) control; 5) descubrimiento automático; 6) **controlar interruptores desde la malla** (a Dani
   le interesa mucho). Más adelante: un segundo receptor 868 con firmware propio para estaciones meteorológicas

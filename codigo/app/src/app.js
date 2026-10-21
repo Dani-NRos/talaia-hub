@@ -10,7 +10,7 @@ import { searchNodes, highlight, tokens, FILTERS, SORTS } from "./meshsearch.js"
 import { conectarServidor, crearStoreRemoto } from "./remoto.js";
 import { MIN, HOUR, DAY, isNum, hhmm, dShort, ago, stamp, dur, trendDec, fmtTrend, trendVerb, hoursText, lastWindow } from "@vigia/nucleo/textos.js";
 import { crearAcciones } from "@vigia/nucleo/acciones.js";
-import { TIPOS, LISTA_TIPOS, TIPOS_PANEL, NOMBRES_ESTADO, tipoMalla, esEstado, unidades, adivinarTipo, adivinarEstado, unidadDe, textoDato, metasDe, MALLA_MAX_SALTOS } from "@vigia/nucleo/mqtt-datos.js";
+import { TIPOS, LISTA_TIPOS, TIPOS_PANEL, NOMBRES_ESTADO, tipoMalla, esEstado, unidades, adivinarTipo, adivinarEstado, proponerOrden, unidadDe, textoDato, metasDe, MALLA_MAX_SALTOS } from "@vigia/nucleo/mqtt-datos.js";
 import { crearMotor, estadoInicial, MESH_DEFAULT, MESH_HOURLY, ASK, ASK_ALL, askKey, RE, INFO_SUPPRESS, seriesKey, trendKey, estadoKey, hexId } from "@vigia/nucleo/motor.js";
 
 /* ───────────── utilidades ───────────── */
@@ -575,12 +575,23 @@ function datoHTML(num, d, i) {
       <input class="inp" data-dat-i="${i}" data-dat-k="tema" list="temasMqtt" autocomplete="off" spellcheck="false" placeholder="Tema MQTT, p. ej. tele/enchufe/SENSOR" aria-label="Tema MQTT" value="${esc(d.tema || "")}">
       <div class="est-r"><input class="inp" data-dat-i="${i}" data-dat-k="campo" list="camposMqtt${i}" autocomplete="off" spellcheck="false" placeholder="Campo, si llega un JSON" aria-label="Campo del JSON" value="${esc(d.campo || "")}">${unidad}</div>
       ${estado ? `<div class="est-r"><select class="inp sel" data-dat-i="${i}" data-dat-k="nombres" aria-label="Cómo se llaman sus estados">${Object.entries(NOMBRES_ESTADO).map(([k, [on, off]]) => `<option value="${k}"${k === (d.nombres || "encendido") ? " selected" : ""}>${esc(on)} / ${esc(off)}</option>`).join("")}</select>
-        <label class="sw" for="datR${i}"><input type="checkbox" id="datR${i}" data-dat-i="${i}" data-dat-k="invertir" ${d.invertir ? "checked" : ""}><span class="sw-ui"></span><span>Al revés</span></label></div>` : ""}
+        <label class="sw" for="datR${i}"><input type="checkbox" id="datR${i}" data-dat-i="${i}" data-dat-k="invertir" ${d.invertir ? "checked" : ""}><span class="sw-ui"></span><span>Al revés</span></label></div>
+      ${ordenHTML(d, i)}` : ""}
       ${malla}
       <p class="hint" data-dat-v="${i}">${datoValorHTML(num, d)}</p>
       <datalist id="camposMqtt${i}">${camposOpts(d.tema)}</datalist>
     </div>`;
 }
+/** Encender y apagar un estado desde Vigía: el tema de las órdenes y el mensaje de cada una. */
+function ordenHTML(d, i) {
+  const [on, off] = NOMBRES_ESTADO[d.nombres || "encendido"] || NOMBRES_ESTADO.encendido;
+  const o = d.orden;
+  return `<label class="sw" for="datO${i}"><input type="checkbox" id="datO${i}" data-dat-i="${i}" data-dat-k="control" ${o ? "checked" : ""}><span class="sw-ui"></span><span>Encender y apagar desde Vigía</span></label>
+    ${o ? `<input class="inp" data-dat-i="${i}" data-dat-k="ordenTema" autocomplete="off" spellcheck="false" placeholder="Tema de las órdenes, p. ej. cmnd/enchufe/POWER" aria-label="Tema al que se mandan las órdenes" value="${esc(o.tema || "")}">
+      <div class="est-r"><input class="inp" data-dat-i="${i}" data-dat-k="ordenOn" autocomplete="off" spellcheck="false" placeholder="Mensaje para «${esc(on)}»" aria-label="Mensaje para ${esc(on)}" value="${esc(o.on || "")}"><input class="inp" data-dat-i="${i}" data-dat-k="ordenOff" autocomplete="off" spellcheck="false" placeholder="Mensaje para «${esc(off)}»" aria-label="Mensaje para ${esc(off)}" value="${esc(o.off || "")}"></div>
+      <p class="hint">Primero el mensaje para «${esc(on)}», después el de «${esc(off)}». Shelly (Plus, Pro, Gen3): …/command/switch:0, on y off. Tasmota: cmnd/…/POWER, ON y OFF. zigbee2mqtt: zigbee2mqtt/…/set, {"state":"ON"} y {"state":"OFF"}. Home Assistant no recibe órdenes por mqtt_statestream. Sin confirmación: se pulsa y se manda.</p>` : ""}`;
+}
+
 /** Nombre corto de un tema encontrado: de «ha_estados/sensor/entidad/state», la entidad; y el campo si es un JSON. */
 function nombreHallado(x) {
   const p = x.tema.split("/").filter((q) => q && q !== "state");
@@ -706,7 +717,7 @@ function conUsar(num, i) {
 }
 async function guardarDatos(num) {
   const datos = datosCfg(num).filter((d) => d.tema.trim()).map((d) => ({ ...(d.clave ? { clave: d.clave } : {}), nombre: d.nombre || "", tipo: d.tipo, broker: d.broker || "", tema: d.tema, campo: d.campo || "", unidad: d.unidad || "", caduca: Number(d.caduca || 0), malla: !!d.malla,
-    ...(esEstado(d.tipo) ? { nombres: d.nombres || "encendido", invertir: !!d.invertir } : {}) }));
+    ...(esEstado(d.tipo) ? { nombres: d.nombres || "encendido", invertir: !!d.invertir, orden: d.orden ? { tema: d.orden.tema || "", on: d.orden.on || "", off: d.orden.off || "" } : null } : {}) }));
   const c = num < 0 ? conexionCfg(num) : null;
   const conexion = c?.tema.trim() ? { broker: c.broker || "", tema: c.tema.trim(), campo: (c.campo || "").trim(), avisar: !!c.avisar } : null;
   const res = await orden({ orden: "datosPanel", num, datos, ...(num < 0 ? { conexion } : {}) });
@@ -734,11 +745,20 @@ function editarDato(num, t) {
   const k = t.dataset.datK;
   const d = datosEditar(num)[Number(t.dataset.datI)];
   if (!k || !d) return;
+  if (k === "control") { // encender y apagar desde Vigía: con lo que suele usar ese dispositivo, si se sabe
+    d.orden = t.checked ? proponerOrden(d.tema, d.campo) || { tema: "", on: "ON", off: "OFF" } : null;
+    return renderDatos(num);
+  }
+  if (k === "ordenTema" || k === "ordenOn" || k === "ordenOff") {
+    d.orden ||= { tema: "", on: "", off: "" };
+    d.orden[{ ordenTema: "tema", ordenOn: "on", ordenOff: "off" }[k]] = t.value;
+    return;
+  }
   d[k] = k === "caduca" ? Number(t.value) : k === "malla" || k === "invertir" ? t.checked : t.value;
   if (k === "tipo") {
     d.unidad = unidades(d.tipo)[0] || "";
     if (!(num === S.myNode && tipoMalla(d.tipo))) d.malla = false;
-    if (esEstado(d.tipo)) { d.nombres ||= "encendido"; d.invertir = !!d.invertir; }
+    if (esEstado(d.tipo)) { d.nombres ||= "encendido"; d.invertir = !!d.invertir; } else d.orden = null;
     renderDatos(num);
   }
   if (k === "malla") renderDatos(num);
@@ -1393,6 +1413,35 @@ function nodeState(num) {
 const vistoTxt = (n) => (n.num < 0
   ? [n.conectado === false ? `desconectado ${ago(n.conectadoT)}` : "", n.lastHeard ? `último dato ${ago(n.lastHeard)}` : "sin datos todavía"].filter(Boolean).join(" · ")
   : n.lastHeard ? `visto ${ago(n.lastHeard)}` : "sin señal registrada");
+/** El dato de un panel por su clave (para saber si se puede encender y apagar). */
+const datoDe = (num, k) => panelCfg(num)?.datos?.find((d) => d.clave === k) || null;
+/**
+ * Interruptor de un estado que se puede encender y apagar desde Vigía (servidor): manda la orden al pulsar, sin
+ * confirmación; «Enviando…» hasta que el dispositivo dice que lo ha hecho; si no contesta, lo dice.
+ */
+function interruptorHTML(num, k) {
+  if (!SERVIDOR || !datoDe(num, k)?.orden) return "";
+  const m = metricMeta(k), cur = S.nodes.get(num)?.metrics?.[k];
+  const o = S.paneles?.ordenes?.[k];
+  const on = cur?.v === 1;
+  const txt = o?.enviando ? "Enviando…" : o?.error ? `${o.error}` : "";
+  return `<span class="tgl-w" data-sw="${k}"><button type="button" class="tgl${on ? " on" : ""}${o?.enviando ? " env" : ""}" role="switch" aria-checked="${on}" data-orden="${k}" data-num="${num}"${o?.enviando ? " disabled" : ""} aria-label="${esc(m.label)}: ${esc(m.estados?.[on ? 1 : 0] ? `pasar a ${m.estados[on ? 1 : 0]}` : "cambiar")}"><span class="tgl-ui"></span></button>${txt ? `<span class="tgl-t${o?.error ? " warn-t" : ""}">${esc(txt)}</span>` : ""}</span>`;
+}
+async function mandarOrden(num, k) {
+  const cur = S.nodes.get(num)?.metrics?.[k];
+  const res = await orden({ orden: "mandar", num, clave: k, v: cur?.v === 1 ? 0 : 1 });
+  if (!res.ok && res.error) toast(res.error);
+}
+/** Los interruptores de la ficha y de la pantalla completa, al día (sin redibujar lo demás). */
+function patchInterruptores() {
+  for (const el of $$("[data-sw]")) {
+    const box = el.closest("[data-sw-num]");
+    if (!box) continue;
+    const html = interruptorHTML(Number(box.dataset.swNum), el.dataset.sw);
+    if (html && el.outerHTML !== html) el.outerHTML = html;
+  }
+}
+
 /** Lo que se ve de la alarma de un estado: «avisa: Abierta +10 min». */
 const estadoReglaTxt = (k, r) => (r ? `avisa: ${metricMeta(k).estados[r.cuando ? 0 : 1]}${r.min ? ` +${dur(r.min * MIN)}` : ""}` : "");
 function metaLine(n) {
@@ -1464,7 +1513,7 @@ function renderCards() {
       if (m.estados) { // un estado ON/OFF: su nombre, y su aviso o desde cuándo está así
         const bad = S.active.has(estadoKey(num, k));
         const lim = estadoReglaTxt(k, r.estado) || (n.metrics[k].desde ? `desde las ${hhmm.format(new Date(n.metrics[k].desde))}` : "");
-        return `<div class="rd${bad ? " bad" : ""}"><span class="rd-l">${esc(m.label)}</span><span class="rd-v est">${esc(fmtValue(k, v))}</span><span class="rd-lim">${esc(lim) || "&nbsp;"}</span></div>`;
+        return `<div class="rd${bad ? " bad" : ""}"><span class="rd-l">${esc(m.label)}</span><span class="rd-v est">${esc(fmtValue(k, v))}</span>${interruptorHTML(num, k)}<span class="rd-lim">${esc(lim) || "&nbsp;"}</span></div>`;
       }
       const bad = (isNum(r.max) && v > r.max) || (isNum(r.min) && v < r.min) || S.active.has(trendKey(num, k));
       const lim = [isNum(r.min) ? `mín ${fmtLimit(k, r.min)}` : "", isNum(r.max) ? `máx ${fmtLimit(k, r.max)}` : "", r.trend ? trendShort(k, r.trend) : ""].filter(Boolean).join(" · ");
@@ -1589,7 +1638,7 @@ function fullTiles(num) {
     const lim = m.estados ? estadoReglaTxt(k, r.estado) || (cur.desde ? `desde las ${hhmm.format(new Date(cur.desde))}` : "")
       : [isNum(r.min) ? `mín ${fmtLimit(k, r.min)}` : "", isNum(r.max) ? `máx ${fmtLimit(k, r.max)}` : "", r.trend ? trendShort(k, r.trend) : ""].filter(Boolean).join(" · ");
     const unit = k === "batteryLevel" && cur.v > 100 ? "" : m.unit;
-    return `<div class="nv-tile${bad ? " bad" : ""}"><span class="nv-l">${esc(m.label)}</span><span class="nv-v${m.estados ? " est" : ""}">${esc(fmtValue(k, cur.v))}${unit ? `<small>${esc(unit)}</small>` : ""}</span><span class="nv-s">${lim ? `<span class="nv-lim">${esc(lim)}</span>` : ""}<span data-fmm="${k}"></span><span>${esc(ago(cur.t))}</span></span></div>`;
+    return `<div class="nv-tile${bad ? " bad" : ""}"><span class="nv-l">${esc(m.label)}</span>${m.estados ? interruptorHTML(num, k) : ""}<span class="nv-v${m.estados ? " est" : ""}">${esc(fmtValue(k, cur.v))}${unit ? `<small>${esc(unit)}</small>` : ""}</span><span class="nv-s">${lim ? `<span class="nv-lim">${esc(lim)}</span>` : ""}<span data-fmm="${k}"></span><span>${esc(ago(cur.t))}</span></span></div>`;
   }).join("");
 }
 function renderFull() {
@@ -1920,7 +1969,7 @@ function estadosAlarmaHTML(num, keys) {
   return `<div class="est-al">${ks.map((k) => {
     const m = metricMeta(k), r = w?.rules?.[k]?.estado, cur = n?.metrics?.[k];
     const opt = (v) => `<option value="${v}"${r?.cuando === v ? " selected" : ""}>Avisar cuando: ${esc(m.estados[v ? 0 : 1])}</option>`;
-    return `<div class="est-al-r${S.active.has(estadoKey(num, k)) ? " bad" : ""}"><span class="est-al-n">${esc(m.label)} <b data-now="${k}">${cur ? esc(fmtValue(k, cur.v)) : "—"}</b></span>
+    return `<div class="est-al-r${S.active.has(estadoKey(num, k)) ? " bad" : ""}" data-sw-num="${num}"><span class="est-al-n">${esc(m.label)} <b data-now="${k}">${cur ? esc(fmtValue(k, cur.v)) : "—"}</b>${interruptorHTML(num, k)}</span>
       <select class="inp sel" data-est-cuando="${k}" aria-label="Cuándo avisar de ${esc(m.label)}"><option value=""${r ? "" : " selected"}>No avisar</option>${opt(1)}${opt(0)}</select>
       <span class="inp-u"><span>más de</span><input class="inp" data-est-min="${k}" inputmode="numeric" autocomplete="off" placeholder="0" value="${r?.min || ""}" aria-label="Minutos que tiene que durar para avisar de ${esc(m.label)}"><span>min</span></span></div>`;
   }).join("")}</div>
@@ -2443,6 +2492,7 @@ document.addEventListener("click", async (ev) => {
   if ("usrSave" in ds) return guardarUsuarioBroker();
   if ("usrDel" in ds) { const r = await orden({ orden: "quitarUsuarioBroker", nombre: ds.usrDel }); return toast(r.error || r.toast); }
   if ("haSave" in ds) return guardarHA();
+  if ("orden" in ds) return mandarOrden(Number(ds.num), ds.orden);
   if ("panelNuevo" in ds) return nuevoPanel();
   if ("panelCrear" in ds) return crearPanel();
   if ("panelQuitar" in ds) {
@@ -2698,6 +2748,7 @@ function refrescarAbiertos(p) {
       if ("req" in p || "traces" in p) { refreshAsk(num); refreshPos(num); }
     }
     if ("paneles" in p || "mqtt" in p || "channels" in p) patchPaneles(); // valores, nombres de los brokers, canales
+    if ("paneles" in p || p.nodes?.some((n) => n.num === num)) patchInterruptores();
   }
   if (S.full && (p.nodes || p.rows || "active" in p)) refreshFull(S.full.num);
   if ($("#settings").open) {

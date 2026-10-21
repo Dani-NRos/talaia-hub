@@ -100,7 +100,11 @@ function crearOrdenes(vigia) {
       exigir(esPanel(num), "num");
       exigir(Array.isArray(datos) && datos.length <= 40, "datos");
       for (const d of datos) {
-        exigir(d && typeof d === "object" && Object.keys(d).every((k) => ["clave", "nombre", "tipo", "broker", "tema", "campo", "unidad", "caduca", "malla", "nombres", "invertir"].includes(k)), "dato");
+        exigir(d && typeof d === "object" && Object.keys(d).every((k) => ["clave", "nombre", "tipo", "broker", "tema", "campo", "unidad", "caduca", "malla", "nombres", "invertir", "orden"].includes(k)), "dato");
+        if (d.orden != null) {
+          exigir(typeof d.orden === "object" && Object.keys(d.orden).every((k) => ["tema", "on", "off"].includes(k)), "dato.orden");
+          for (const k of ["tema", "on", "off"]) if (k in d.orden) exigir(typeof d.orden[k] === "string", `dato.orden.${k}`);
+        }
         for (const k of ["clave", "nombre", "tipo", "broker", "tema", "campo", "unidad", "nombres"]) if (k in d) exigir(typeof d[k] === "string", `dato.${k}`);
         if ("caduca" in d) exigir(Number.isInteger(d.caduca), "dato.caduca");
         for (const k of ["malla", "invertir"]) if (k in d) exigir(typeof d[k] === "boolean", `dato.${k}`);
@@ -111,6 +115,10 @@ function crearOrdenes(vigia) {
         if ("avisar" in conexion) exigir(typeof conexion.avisar === "boolean", "conexion.avisar");
       }
       return vigia.paneles.guardarDatos(num, datos, conexion);
+    },
+    mandar: ({ num, clave, v }) => {
+      exigir(esPanel(num), "num"); exigir(typeof clave === "string" && /^mq\d+$/.test(clave), "clave"); exigir(v === 0 || v === 1, "v");
+      return vigia.paneles.mandar(num, clave, v);
     },
     alarmaEstado: ({ num, metrica, cuando, minutos }) => {
       exigir(esPanel(num), "num"); exigir(esMetrica(metrica), "metrica");

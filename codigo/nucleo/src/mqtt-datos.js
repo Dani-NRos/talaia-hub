@@ -151,6 +151,45 @@ export function adivinarEstado(tema, campo = "") {
   return { nombres: "encendido", invertir: false };
 }
 
+/**
+ * Para un estado que se va a poder encender y apagar desde Vigía: el tema y los mensajes de las órdenes que suele
+ * usar ese dispositivo, sacados de su tema de estado. null si no se sabe (se escriben a mano).
+ *  Shelly Plus/Pro/Gen3: …/status/switch:0 (o …/events/rpc, params.switch:0.output) → …/command/switch:0, on / off
+ *  Shelly de primera generación: shellies/…/relay/0 → shellies/…/relay/0/command, on / off
+ *  Tasmota: stat/…/POWER (o tele/…/STATE, stat/…/RESULT con campo POWER) → cmnd/…/POWER, ON / OFF
+ *  zigbee2mqtt: zigbee2mqtt/… con campo state (o state_l1…) → zigbee2mqtt/…/set, {"state":"ON"} / {"state":"OFF"}
+ *  ESPHome: …/switch/…/state → …/switch/…/command, ON / OFF
+ */
+export function proponerOrden(tema, campo = "") {
+  const t = String(tema || "").trim(), c = String(campo || "").trim();
+  let m;
+  if ((m = /^(.+)\/status\/switch:(\d+)$/.exec(t))) return { tema: `${m[1]}/command/switch:${m[2]}`, on: "on", off: "off" };
+  if ((m = /^(.+)\/events\/rpc$/.exec(t)) && (m[2] = /^params\.switch:(\d+)\.output$/.exec(c)?.[1]) != null) return { tema: `${m[1]}/command/switch:${m[2]}`, on: "on", off: "off" };
+  if ((m = /^(shellies\/[^/]+\/relay\/\d+)$/.exec(t))) return { tema: `${m[1]}/command`, on: "on", off: "off" };
+  if ((m = /^stat\/(.+)\/(POWER\d*)$/i.exec(t))) return { tema: `cmnd/${m[1]}/${m[2].toUpperCase()}`, on: "ON", off: "OFF" };
+  if ((m = /^(?:tele|stat)\/(.+)\/(?:STATE|RESULT)$/i.exec(t)) && /^POWER\d*$/i.test(c)) return { tema: `cmnd/${m[1]}/${c.toUpperCase()}`, on: "ON", off: "OFF" };
+  if ((m = /^(zigbee2mqtt\/[^/]+(?:\/[^/]+)*)$/.exec(t)) && /^state(_[a-z0-9]+)?$/i.test(c) && !/\/(set|get|availability)$/.test(t)) {
+    return { tema: `${m[1]}/set`, on: JSON.stringify({ [c]: "ON" }), off: JSON.stringify({ [c]: "OFF" }) };
+  }
+  // ESPHome; el mqtt_statestream de Home Assistant tiene la misma forma, pero no recibe órdenes (se nota por el nombre).
+  if ((m = /^(.+\/switch\/[^/]+)\/state$/.exec(t)) && !/^(ha[_-]|homeassistant|hass|statestream)/i.test(t)) return { tema: `${m[1]}/command`, on: "ON", off: "OFF" };
+  return null;
+}
+
+/**
+ * Los Shelly no dejan su estado guardado en el broker: al conectar se les pide (es solo una petición de información).
+ * De un tema de un Shelly, a dónde se pide y con qué mensaje; null si no es de un Shelly (o no se puede pedir).
+ */
+export function pedirEstadoShelly(tema) {
+  const t = String(tema || "");
+  let m;
+  // Plus, Pro, Gen3: cada componente contesta en su tema de estado (…/status/switch:0) si se le pide en el suyo.
+  // Por …/events/rpc no hay manera: contestaría en …/status, con todo junto.
+  if ((m = /^(.+)\/status\/([a-z0-9_]+:\d+)$/i.exec(t))) return { tema: `${m[1]}/command/${m[2]}`, carga: "status_update" };
+  if ((m = /^shellies\/([^/]+)\//.exec(t)) && m[1] !== "command") return { tema: `shellies/${m[1]}/command`, carga: "update" };
+  return null;
+}
+
 /** ¿Es el tema donde un dispositivo dice si está conectado? (Tasmota: …/LWT; Shelly: …/online; zigbee2mqtt: …/availability) */
 export function pareceConexion(tema, campo = "", texto = "") {
   const x = String(texto).trim().toLowerCase();
@@ -309,6 +348,20 @@ export function comprobarDatos(lista, { temaProhibido = () => null, brokers = nu
       const nombres = d.nombres ?? "encendido";
       if (!NOMBRES_ESTADO[nombres]) return { error: `Elige cómo se llaman los estados de «${visto}».` };
       Object.assign(extra, { nombres, invertir: !!d.invertir });
+      if (d.orden != null) { // encender y apagar desde Vigía
+        const o = d.orden;
+        if (typeof o !== "object") return { error: "La lista de datos no es válida." };
+        const ot = String(o.tema ?? "").trim(), on = String(o.on ?? ""), off = String(o.off ?? "");
+        if (!ot) return { error: `Falta el tema al que se mandan las órdenes de «${visto}».` };
+        if (/[+#\0]/.test(ot)) return { error: `El tema de las órdenes de «${visto}» no puede llevar «+» ni «#».` };
+        if (ot.length > 250) return { error: `El tema de las órdenes de «${visto}» es demasiado largo.` };
+        const prohibidoO = temaProhibido(ot);
+        if (prohibidoO) return { error: `Órdenes de «${visto}»: ${prohibidoO}` };
+        if (!on.trim() || !off.trim()) return { error: `Faltan los mensajes para encender y apagar «${visto}».` };
+        if (on.length > 200 || off.length > 200) return { error: `Los mensajes de las órdenes de «${visto}» son demasiado largos.` };
+        if (on === off) return { error: `Los mensajes para encender y apagar «${visto}» no pueden ser iguales.` };
+        extra.orden = { tema: ot, on, off };
+      }
     } else if (tipo === "otro") {
       if (unidad.length > 12) return { error: `La unidad de «${visto}» es demasiado larga (hasta 12 letras).` };
     } else {

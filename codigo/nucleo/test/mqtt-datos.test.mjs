@@ -5,7 +5,7 @@ import assert from "node:assert/strict";
 import {
   leerValor, convertir, comprobarDatos, comprobarMalla, proximoEnvio, textoValores, unidades, unidadDe, adivinarTipo,
   metasDe, esClaveMqtt, MALLA_DEFECTO, TIPOS, LISTA_TIPOS, leerEstado, pareceEstado, adivinarEstado, pareceConexion,
-  comprobarConexion, textoDato,
+  comprobarConexion, textoDato, proponerOrden, pedirEstadoShelly,
 } from "../src/mqtt-datos.js";
 import { metricMeta, registrarMetricas, fmtWithUnit, fmtValue } from "../src/metrics.js";
 
@@ -193,4 +193,31 @@ test("tema de conexión de un panel: opcional; se comprueba como un tema", () =>
   assert.match(comprobarConexion({ broker: "", tema: "tele/enchufe/LWT" }).error, /Elige el broker/);
   assert.match(comprobarConexion({ broker: "b9", tema: "x" }, { brokers: new Set(["b1"]) }).error, /ya no está/);
   assert.match(comprobarConexion({ broker: "b1", tema: "vigia/estado" }, { temaProhibido: () => "es de Vigía." }).error, /es de Vigía/);
+});
+
+test("órdenes: el tema y los mensajes que suele usar cada dispositivo, y pedir su estado a los Shelly", () => {
+  const sh = { tema: "shellyplug01/command/switch:0", on: "on", off: "off" };
+  assert.deepEqual(proponerOrden("shellyplug01/status/switch:0", "output"), sh);
+  assert.deepEqual(proponerOrden("shellyplug01/events/rpc", "params.switch:0.output"), sh);
+  assert.deepEqual(proponerOrden("shellies/shelly1-AB/relay/0"), { tema: "shellies/shelly1-AB/relay/0/command", on: "on", off: "off" });
+  assert.deepEqual(proponerOrden("stat/enchufe/POWER"), { tema: "cmnd/enchufe/POWER", on: "ON", off: "OFF" });
+  assert.deepEqual(proponerOrden("tele/enchufe/STATE", "POWER2"), { tema: "cmnd/enchufe/POWER2", on: "ON", off: "OFF" });
+  assert.deepEqual(proponerOrden("zigbee2mqtt/Enchufe salón", "state"), { tema: "zigbee2mqtt/Enchufe salón/set", on: '{"state":"ON"}', off: '{"state":"OFF"}' });
+  assert.deepEqual(proponerOrden("casa/switch/rele/state"), { tema: "casa/switch/rele/command", on: "ON", off: "OFF" }); // ESPHome
+  assert.equal(proponerOrden("ha_estados/switch/enchufe/state"), null); // Home Assistant no recibe órdenes por ahí
+  assert.equal(proponerOrden("zigbee2mqtt/Puerta", "contact"), null);
+  assert.deepEqual(pedirEstadoShelly("shellyplug01/status/switch:0"), { tema: "shellyplug01/command/switch:0", carga: "status_update" });
+  assert.deepEqual(pedirEstadoShelly("shellies/shelly1-AB/relay/0"), { tema: "shellies/shelly1-AB/command", carga: "update" });
+  assert.equal(pedirEstadoShelly("shellyplug01/events/rpc"), null);
+  assert.equal(pedirEstadoShelly("stat/enchufe/POWER"), null);
+  // La configuración: solo en estados; tema y dos mensajes distintos.
+  const base = { tipo: "estado", nombre: "Enchufe", broker: "b1", tema: "shellyplug01/status/switch:0", campo: "output" };
+  assert.deepEqual(comprobarDatos([{ ...base, orden: sh }]).datos[0].orden, sh);
+  assert.equal("orden" in comprobarDatos([{ ...base, orden: null }]).datos[0], false);
+  assert.equal("orden" in comprobarDatos([{ ...base, tipo: "power", campo: "apower", orden: sh }]).datos[0], false);
+  assert.match(comprobarDatos([{ ...base, orden: { ...sh, tema: "" } }]).error, /Falta el tema al que se mandan las órdenes/);
+  assert.match(comprobarDatos([{ ...base, orden: { ...sh, tema: "a/#" } }]).error, /no puede llevar/);
+  assert.match(comprobarDatos([{ ...base, orden: { ...sh, off: "on" } }]).error, /no pueden ser iguales/);
+  assert.match(comprobarDatos([{ ...base, orden: { ...sh, on: " " } }]).error, /Faltan los mensajes/);
+  assert.match(comprobarDatos([{ ...base, orden: { ...sh, tema: "vigia/x" } }], { temaProhibido: (x) => (x.startsWith("vigia/") ? "es de Vigía." : null) }).error, /Órdenes de «Enchufe»: es de Vigía/);
 });
