@@ -225,6 +225,11 @@ alarmas (también avisos por la malla) e histórico, como un nodo. Solo en el se
   dispositivo lo dice al revés, *Al revés*: el `contact` de zigbee2mqtt es `true` con la puerta **cerrada** (al usarlo
   desde *Buscar temas* ya se marca). Cada cambio se guarda al momento en el histórico (si no cambia, uno por hora) y
   su gráfica es una barra de tiempo con lo que estuvo encendido.
+- **Shelly de segunda y tercera generación** (Plus, Pro, Gen3): en el Shelly, *Ajustes → MQTT*, activa *Generic status
+  update over MQTT*; el estado completo sale en `<prefijo>/status/switch:0` (campos `output`, `apower`, `voltage`,
+  `aenergy.total` en Wh, `temperature.tC`), y la conexión en `<prefijo>/online`. Sin esa opción, solo está
+  `<prefijo>/events/rpc`, con el campo `params.switch:0.output`: llega solo cuando algo cambia (*Buscar temas* lo ve si
+  pulsas el enchufe mientras busca) y a veces sin ese campo (solo la potencia): esos mensajes no cuentan para el dato.
 - **Alarma de un estado**, en la ficha: *Avisar cuando: Abierta* (o *Cerrada*), al momento o solo si sigue así más de
   unos minutos (una puerta abierta más de 10 min, una bomba encendida más de 1 h). Se resuelve al cambiar.
 - **Conexión del dispositivo** (paneles sin nodo, opcional): el tema donde dice si está conectado. Tasmota:

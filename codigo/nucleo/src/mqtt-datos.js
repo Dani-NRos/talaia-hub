@@ -165,6 +165,8 @@ const NO_DISPONIBLE = /^(unavailable|unknown|none|null|nan|)$/i;
  * El número que trae un mensaje MQTT. Sin campo, el mensaje entero («21.4», como lo publica Home Assistant); con
  * campo, el de ese JSON («temperature» o «a.b» si va dentro de otro, como zigbee2mqtt, Tasmota o Shelly).
  * Devuelve { v }, { nulo: true } (no disponible: Home Assistant manda «unavailable» si el sensor no responde) o { error }.
+ * Si el JSON no trae el campo, { error, falta: true }: hay temas con mensajes de varias clases (el «events/rpc» de los
+ * Shelly manda a veces solo la potencia), y ese mensaje no es para este dato.
  */
 export function leerValor(carga, campo = "") {
   const s = String(carga ?? "").trim();
@@ -173,7 +175,7 @@ export function leerValor(carga, campo = "") {
     let j;
     try { j = JSON.parse(s); } catch { return { error: "no llega un JSON" }; }
     for (const k of campo.split(".")) {
-      if (j == null || typeof j !== "object" || Array.isArray(j) || !(k in j)) return { error: `el JSON no trae «${campo}»` };
+      if (j == null || typeof j !== "object" || Array.isArray(j) || !(k in j)) return { error: `el JSON no trae «${campo}»`, falta: true };
       j = j[k];
     }
     if (j == null) return { nulo: true };
@@ -201,7 +203,7 @@ export function leerEstado(carga, campo = "", invertir = false) {
     let j;
     try { j = JSON.parse(x); } catch { return { error: "no llega un JSON" }; }
     for (const k of campo.split(".")) {
-      if (j == null || typeof j !== "object" || Array.isArray(j) || !(k in j)) return { error: `el JSON no trae «${campo}»` };
+      if (j == null || typeof j !== "object" || Array.isArray(j) || !(k in j)) return { error: `el JSON no trae «${campo}»`, falta: true };
       j = j[k];
     }
     if (j == null) return { nulo: true };

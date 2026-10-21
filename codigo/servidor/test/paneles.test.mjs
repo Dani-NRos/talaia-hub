@@ -203,6 +203,33 @@ test("estados ON/OFF y conexión: un enchufe Tasmota con su LWT y una puerta de 
   assert.match(paneles.guardarDatos(CASETA, [], { broker: "b1", tema: "tele/x/LWT" }).error, /paneles sin nodo/);
 });
 
+test("un Shelly por events/rpc: «params.switch:0.output»; los avisos sin ese campo no lo estropean", async (t) => {
+  const puerto = await broker(t);
+  const dispositivo = await cliente(t, puerto);
+  const { vigia } = await montar(t, puerto);
+  const { S, paneles } = vigia;
+  const { num } = paneles.crearPanel({ nombre: "Enchufe", tipo: "shelly" });
+  const T = "shellyplug01/events/rpc";
+  const aviso = (cambio) => ({ src: "shellyplugmg3-9070696fed78", dst: "shellyplug01/events", method: "NotifyStatus", params: { ts: 1792619486.33, "switch:0": cambio } });
+  assert.equal(paneles.guardarDatos(num, [
+    { tipo: "estado", nombre: "Enchufe", broker: "b1", tema: T, campo: "params.switch:0.output" },
+    { tipo: "power", broker: "b1", tema: T, campo: "params.switch:0.apower" },
+  ]).ok, true);
+  // Antes de ningún valor bueno, el aviso de que no trae el campo sí se ve (por si está mal escrito).
+  await dispositivo.publicar(T, aviso({ id: 0, apower: 12.5 }));
+  await hasta(() => S.nodes.get(num).metrics.mq2?.v === 12.5, 3000, "la potencia");
+  assert.match(paneles.valores.get("mq1").error, /no trae «params.switch:0.output»/);
+  await dispositivo.publicar(T, aviso({ id: 0, output: true, source: "button" }));
+  await hasta(() => S.nodes.get(num).metrics.mq1?.v === 1, 3000, "encendido");
+  // Otro aviso solo con la potencia: el estado sigue como estaba, sin error; y al revés.
+  await dispositivo.publicar(T, aviso({ id: 0, apower: 40 }));
+  await hasta(() => S.nodes.get(num).metrics.mq2?.v === 40, 3000, "la potencia otra vez");
+  assert.deepEqual(paneles.valores.get("mq1").v, 1);
+  await dispositivo.publicar(T, aviso({ id: 0, output: false, source: "button" }));
+  await hasta(() => S.nodes.get(num).metrics.mq1?.v === 0, 3000, "apagado");
+  assert.equal(paneles.valores.get("mq2").v, 40);
+});
+
 test("al parar, lo que esperaba su minuto se guarda como lectura", async (t) => {
   const puerto = await broker(t);
   const dispositivo = await cliente(t, puerto);

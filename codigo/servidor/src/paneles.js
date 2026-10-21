@@ -179,6 +179,7 @@ export function crearPaneles({ S, motor, eventos, almacen, registro, receptor, b
       if (d.broker !== broker || d.tema !== tema) continue;
       if (esEstado(d.tipo)) { recibidoEstado(num, d, carga, t); continue; }
       const r = leerValor(carga, d.campo);
+      if (r.falta && valores.get(d.clave)?.v != null) continue; // un mensaje de otra clase por el mismo tema: no es para este dato
       if (r.error || r.nulo) { valores.set(d.clave, { ...r, t }); continue; }
       const c = convertir(d.tipo, d.unidad, r.v);
       if (c.error) { valores.set(d.clave, { error: c.error, t }); continue; }
@@ -202,6 +203,7 @@ export function crearPaneles({ S, motor, eventos, almacen, registro, receptor, b
   /** Un estado ON/OFF: al momento en el panel, con desde cuándo lo tiene, y su alarma. */
   function recibidoEstado(num, d, carga, t) {
     const r = leerEstado(carga, d.campo, d.invertir);
+    if (r.falta && valores.get(d.clave)?.v != null) return; // un mensaje de otra clase por el mismo tema
     if (r.v == null) { valores.set(d.clave, { ...r, t }); return; }
     valores.set(d.clave, { v: r.v, t });
     if (S.cfg.watched[num]) {
@@ -220,6 +222,7 @@ export function crearPaneles({ S, motor, eventos, almacen, registro, receptor, b
     const c = panel(num)?.conexion;
     if (!c) return;
     const r = leerEstado(carga, c.campo);
+    if (r.falta && conexionV.get(num)?.v != null) return;
     if (r.v == null) { conexionV.set(num, { ...r, t }); return; }
     conexionV.set(num, { v: r.v, t });
     const n = motor.node(num);
