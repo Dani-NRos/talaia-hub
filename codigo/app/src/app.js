@@ -1831,7 +1831,9 @@ function openMap(focus = null, route = null) {
 
 /* ───────────── detalle de nodo ───────────── */
 function openDetail(num) {
-  if (S.detail?.num !== num) { datBorrador = null; mallaBorrador = null; filtroTemas = ""; }
+  // Lo cambiado sin guardar se queda si se vuelve a abrir el mismo panel (al cerrar se avisa); con otro, no.
+  if (datBorrador && datBorrador.num !== num) { datBorrador = null; filtroTemas = ""; }
+  if (num !== S.myNode) mallaBorrador = null;
   S.detail = { num, range: S.detail?.num === num ? S.detail.range : "24h" };
   renderDetail();
   const d = $("#detail");
@@ -2701,7 +2703,12 @@ document.addEventListener("change", async (ev) => {
 $("#nodeview").addEventListener("close", closeFull);
 // Al girar el móvil o cambiar el tamaño, las gráficas se rehacen a la medida nueva.
 window.addEventListener("resize", () => { if (S.full) { clearTimeout(fullT); fullT = setTimeout(drawFullCharts, 250); } });
-$("#detail").addEventListener("close", () => { if ($("#detail").open) return; S.detail = null; unwatchArmed = 0; });
+$("#detail").addEventListener("close", () => {
+  if ($("#detail").open) return;
+  if (S.detail && (datBorrador?.num === S.detail.num || (mallaBorrador && S.detail.num === S.myNode))) toast("Hay cambios sin guardar en la ficha: vuelve a abrirla y pulsa «Guardar».");
+  S.detail = null;
+  unwatchArmed = 0;
+});
 window.addEventListener("resize", () => { clearTimeout(liveT); liveT = setTimeout(drawCharts, 200); });
 
 /* ───────────── modo «Servidor» ───────────── */
