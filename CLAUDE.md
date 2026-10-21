@@ -120,8 +120,11 @@ con Tasmota/ESPHome, Zigbee por zigbee2mqtt, ESPHome, Home Assistant…).
 - Se desarrolla en la rama `mapa`; se publica subiendo `mapa:main`. GitHub Pages sirve `main` desde la raíz.
 - **Copia de pruebas**: compilar y copiar `codigo/dist/app` a `beta/` **sin `sw.js`** (para no tocar la app
   instalada), con un `beta/README.md` que lo explique. Commit «… (en pruebas en /beta/)».
-- **Pruebas del servidor**: si la app normal no cambia (capturas IGUALES), se sube solo `mapa` y Dani instala con
-  `… instalar.sh | sudo bash -s -- --rama mapa`; cuando confirma, se publica la versión.
+- **Pruebas del servidor**: si la app normal no cambia (capturas IGUALES), se sube solo `mapa` y Dani instala con el
+  instalador **de la rama**: `wget -qO- …/vigia-mesh/mapa/codigo/servidor/instalar.sh | sudo bash -s -- --rama mapa`
+  (el de `main` solo baja el programa de la rama). Cuando confirma, se publica la versión.
+- **`INSTALADOR=` en `instalar.sh`**: subirlo cada vez que cambia lo que hace el instalador. Si el programa descargado
+  trae uno más nuevo, el instalador que corre sigue con ese (`--programa`), pero eso solo lo hacen los de la 2 en adelante.
 - **Publicar una versión**: subir la versión en los `package.json` (`codigo/`, `nucleo/`, `app/`, `servidor/`) y
   `APP_VERSION` en `app.js`; compilar; copiar `codigo/dist/app/*` a la raíz; borrar `beta/`. Commit «Vigía Mesh X.Y: …».
 

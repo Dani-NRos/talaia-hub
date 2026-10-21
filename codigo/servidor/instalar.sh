@@ -23,6 +23,11 @@
 # servicio vigia-mosquitto (path + oneshot, como root) se los pasa a Mosquitto.
 set -euo pipefail
 
+# Sube cada vez que cambia lo que hace el instalador. Si el programa que se descarga trae uno más nuevo (pasa al
+# instalar otra rama con el instalador de main), se sigue con ese.
+INSTALADOR=2
+ARGS=("$@")
+
 REPO="Dani-NRos/vigia-mesh"
 RAMA="main"
 BASE="/opt/vigia"
@@ -33,7 +38,7 @@ SERVICIO="vigia-servidor"
 NODE_DIST="${VIGIA_NODE_DIST:-https://nodejs.org/dist}"
 MOSQ_CONF="/etc/mosquitto/conf.d/vigia.conf"
 MOSQ_PW="/etc/mosquitto/vigia.passwd"
-TCP="" PUERTO="" RECONFIGURAR=0 DESINSTALAR=0 BORRAR=0 CODIGO_LOCAL="" NODE_LOCAL="" SIN_SYSTEMD=0 SIN_MOSQUITTO=0
+TCP="" PUERTO="" RECONFIGURAR=0 DESINSTALAR=0 BORRAR=0 CODIGO_LOCAL="" NODE_LOCAL="" SIN_SYSTEMD=0 SIN_MOSQUITTO=0 PROGRAMA=""
 
 ayuda() {
   cat <<'FIN'
@@ -63,6 +68,7 @@ while [ $# -gt 0 ]; do
     --node-local) NODE_LOCAL="${2:?falta la carpeta}"; shift 2 ;;
     --sin-systemd) SIN_SYSTEMD=1; shift ;;
     --sin-mosquitto) SIN_MOSQUITTO=1; shift ;;
+    --programa) PROGRAMA="${2:?falta la carpeta}"; shift 2 ;; # interna: el programa ya descargado (al seguir con otro instalador)
     -h|--help) ayuda; exit 0 ;;
     *) falla "opción desconocida: $1 (mira --help)" ;;
   esac
@@ -152,7 +158,10 @@ export PATH="$BASE/node/bin:$PATH"
 
 # ── programa ──
 mkdir -p "$BASE/versiones"
-if [ -n "$CODIGO_LOCAL" ]; then
+if [ -n "$PROGRAMA" ]; then
+  [ -f "$PROGRAMA/servidor/package.json" ] || falla "$PROGRAMA no es una copia del programa"
+  DEST="$PROGRAMA"
+elif [ -n "$CODIGO_LOCAL" ]; then
   [ -f "$CODIGO_LOCAL/codigo/servidor/package.json" ] || falla "$CODIGO_LOCAL no parece el repositorio de Vigía"
   ID="local-$(date +%Y%m%d-%H%M%S)"
   DEST="$BASE/versiones/$ID"
@@ -168,6 +177,12 @@ else
   TMPC="$(mktemp -d)"
   bajar "https://codeload.github.com/$REPO/tar.gz/$REF" | tar -xz -C "$TMPC" --strip-components=1 || falla "no se pudo descargar el programa de GitHub"
   mkdir -p "$DEST" && cp -a "$TMPC/codigo/." "$DEST/" && rm -rf "$TMPC"
+fi
+# Si el programa trae un instalador más nuevo que este, se sigue con el suyo (con lo ya descargado).
+NUEVO="$(sed -nE 's/^INSTALADOR=([0-9]+).*/\1/p' "$DEST/servidor/instalar.sh" 2>/dev/null | head -1)"
+if [ -z "$PROGRAMA" ] && [ -n "$NUEVO" ] && [ "$NUEVO" -gt "$INSTALADOR" ]; then
+  dice "Este programa trae un instalador más nuevo: sigo con ese."
+  exec bash "$DEST/servidor/instalar.sh" "${ARGS[@]}" --programa "$DEST"
 fi
 dice "Instalando lo que necesita el servidor y compilando la pantalla…"
 (cd "$DEST" && "$BASE/node/bin/npm" ci --omit=dev -w @vigia/servidor -w @vigia/app --no-audit --no-fund --loglevel=error) || falla "npm no pudo instalar las dependencias"
