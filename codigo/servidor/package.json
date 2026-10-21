@@ -1,6 +1,6 @@
 {
   "name": "@vigia/servidor",
-  "version": "1.16.0",
+  "version": "1.17.0",
   "private": true,
   "description": "Vigía servidor: el motor de Vigía Mesh funcionando 24/7 en Linux, con histórico en SQLite",
   "license": "GPL-3.0-only",
