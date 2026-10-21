@@ -73,7 +73,15 @@ function raw(tel) {
   return out;
 }
 
-export const metricMeta = (k) => METRICS[k] || { label: k, unit: "", dec: 1, hyst: 0, order: 99 };
+// Métricas que no son de Meshtastic: los datos MQTT de los paneles del servidor («mq3» → Temperatura nevera, °C…).
+// Las pone el servidor (y la pantalla, con lo que le cuenta él); en la app sin servidor está vacío.
+const EXTRA = new Map();
+export function registrarMetricas(metas) {
+  EXTRA.clear();
+  for (const [k, m] of Object.entries(metas || {})) EXTRA.set(k, m);
+}
+
+export const metricMeta = (k) => EXTRA.get(k) || METRICS[k] || { label: k, unit: "", dec: 1, hyst: 0, order: 99 };
 
 export const sortMetrics = (keys) => [...keys].sort((a, b) => metricMeta(a).order - metricMeta(b).order);
 

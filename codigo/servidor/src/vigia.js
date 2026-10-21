@@ -11,7 +11,7 @@ import { describirReceptor } from "./config.js";
 import os from "node:os";
 import { crearServicioMqtt, migrar as migrarMqtt } from "./mqtt.js";
 import { crearSalidaHA } from "./homeassistant.js";
-import { crearEstacion } from "./estacion.js";
+import { crearPaneles, migrarEstacion } from "./paneles.js";
 import { crearBrokerLocal } from "./mosquitto.js";
 
 const GUARDAR_NODOS_MS = 30000; // la lista de nodos (cientos) se guarda como mucho cada 30 s
@@ -39,6 +39,8 @@ export async function crearVigia(config, registro, opts = {}) {
   S.infoAsked = almacen.leer("infoAsk", {}) || {};
   S.traces = almacen.leer("traces", {}) || {};
   S.lora = almacen.leer("lora", null);
+  migrarMqtt(almacen); // la configuración de la 1.16 (un broker)…
+  migrarEstacion({ almacen, S, registro }); // …y su estación, que pasa al panel del receptor
   // Si el disco falla, se apunta y se sigue vigilando.
   S.store = {
     ...almacen.lecturas,
@@ -164,12 +166,11 @@ export async function crearVigia(config, registro, opts = {}) {
   }, config.receptor, opts.receptorOpts);
 
   /* ── MQTT: varios brokers (el de este equipo, si lo hay, y los que se añadan), Home Assistant y la estación ── */
-  migrarMqtt(almacen); // la configuración de la 1.16 (un broker): antes de leer la de la estación
   const local = config.mosquitto ? crearBrokerLocal({ config, almacen, registro }) : null;
   let mqtt = null;
-  const estacion = crearEstacion({ S, motor, eventos, almacen, registro, receptor: () => receptor, brokers: () => mqtt?.brokers() || [] });
+  const paneles = crearPaneles({ S, motor, eventos, almacen, registro, receptor: () => receptor, brokers: () => mqtt?.brokers() || [] });
   mqtt = await crearServicioMqtt({ S, motor, eventos, almacen, registro }, {
-    crearSalidaHA, clienteId: `vigia-servidor-${os.hostname()}`, enganches: [estacion.enganchar], local, usos: estacion.usos,
+    crearSalidaHA, clienteId: `vigia-servidor-${os.hostname()}`, enganches: [paneles.enganchar], local, usos: paneles.usos,
   });
 
   /* ── tareas periódicas ── */
@@ -189,7 +190,7 @@ export async function crearVigia(config, registro, opts = {}) {
   // Resumen cada hora en el diario: para ver de un vistazo que sigue vivo y oyendo la malla.
   async function resumen() {
     const hace = Date.now() - HOUR;
-    const oidos = [...S.nodes.values()].filter((n) => n.lastHeard >= hace).length;
+    const oidos = [...S.nodes.values()].filter((n) => n.num >= 0 && n.lastHeard >= hace).length;
     const lecturas = await almacen.lecturas.count(hace).catch(() => 0);
     const activas = [...S.active.values()];
     const estado = S.link.state === "ready" ? "conectado" : S.link.state === "idle" ? "parado" : "sin conexión, reintentando";
@@ -198,7 +199,7 @@ export async function crearVigia(config, registro, opts = {}) {
   const resumenId = setInterval(resumen, HOUR);
 
   return {
-    S, motor, acciones, almacen, eventos, mqtt, estacion,
+    S, motor, acciones, almacen, eventos, mqtt, paneles,
     get receptor() { return receptor; },
     /** Empieza a conectar con el receptor (y a reintentar mientras no se pare). */
     arrancar() {
@@ -206,14 +207,14 @@ export async function crearVigia(config, registro, opts = {}) {
       registro.info(`Avisos por la malla: ${S.settings.mesh?.enabled ? "encendidos" : "apagados"}`);
       receptor.start();
       mqtt.arrancar();
-      estacion.arrancar();
+      paneles.arrancar();
     },
     async detener() {
       if (cerrado) return;
       clearInterval(offlineId);
       clearInterval(podarId);
       clearInterval(resumenId);
-      estacion.parar();
+      paneles.parar();
       await mqtt.parar(); // antes de cerrar: deja dicho «offline» a Home Assistant
       await receptor.disconnect();
       motor.resetAsks(); // peticiones a medias: sus temporizadores ya no deben tocar nada

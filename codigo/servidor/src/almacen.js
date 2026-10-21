@@ -79,6 +79,16 @@ export function abrirAlmacen(ruta) {
       return n;
     },
     async clear() { q.vaciar.run(); total = 0; },
+    /** Las lecturas de una métrica de un nodo pasan a llamarse de otra forma (al cambiar cómo se guarda un dato). */
+    renombrar(node, de, a) { return Number(db.prepare("UPDATE OR IGNORE lecturas SET metrica = ? WHERE nodo = ? AND metrica = ?").run(a, node, de).changes); },
+    /** Borra las lecturas de una métrica de un nodo (un dato que se quita) o de todo un nodo (metric null). */
+    borrar(node, metric = null) {
+      const n = Number((metric == null
+        ? db.prepare("DELETE FROM lecturas WHERE nodo = ?").run(node)
+        : db.prepare("DELETE FROM lecturas WHERE nodo = ? AND metrica = ?").run(node, metric)).changes);
+      if (total != null) total -= n;
+      return n;
+    },
   };
 
   return {

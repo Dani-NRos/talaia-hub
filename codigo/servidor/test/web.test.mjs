@@ -130,6 +130,29 @@ test("órdenes: los avisos del motor vuelven a quien pulsó; datos no válidos s
   assert.match(r.json.error, /orden desconocida/);
 });
 
+test("órdenes de los paneles: crear uno sin nodo (con su número), renombrar, límite y quitarlo", async (t) => {
+  const { base, vigia } = await montar(t);
+  let r = await orden(base, { orden: "crearPanel", nombre: "Enchufe del taller", tipo: "tasmota" });
+  assert.equal(r.json.ok, true);
+  assert.equal(r.json.num, -1); // la pantalla lo necesita para abrir su ficha
+  r = await orden(base, { orden: "crearPanel", nombre: 3, tipo: "tasmota" });
+  assert.equal(r.status, 400);
+  r = await orden(base, { orden: "renombrar", num: -1, nombre: "Taller" });
+  assert.equal(r.json.ok, true);
+  assert.equal(vigia.S.nodes.get(-1).long, "Taller");
+  r = await orden(base, { orden: "renombrar", num: CASETA, nombre: "Huerto" });
+  assert.equal(vigia.S.nodes.get(CASETA).alias, "Huerto");
+  r = await orden(base, { orden: "datosPanel", num: -1, datos: [{ tipo: "power", broker: "nadie", tema: "tele/enchufe/SENSOR", campo: "ENERGY.Power" }] });
+  assert.match(r.json.error, /broker/);
+  r = await orden(base, { orden: "limite", num: -1, metrica: "mq1", lado: "max", valor: 40 });
+  assert.equal(r.status, 200);
+  r = await orden(base, { orden: "quitarPanel", num: -1 });
+  assert.equal(r.json.ok, true);
+  assert.equal(vigia.S.nodes.has(-1), false);
+  r = await orden(base, { orden: "quitarPanel", num: CASETA });
+  assert.match(r.json.error, /no se puede quitar/);
+});
+
 test("una web ajena no puede mandar órdenes ni entrar con un nombre público", async (t) => {
   const { base, puerto } = await montar(t);
   // Sin JSON (lo que puede mandar un formulario de otra web sin preguntar al navegador).

@@ -12,7 +12,7 @@ import { crearRegistro } from "../src/registro.js";
 import { abrirAlmacen } from "../src/almacen.js";
 import { instantanea } from "../src/sincro.js";
 import { normalizarUrl, comprobarBroker, comprobarHA, migrarMqtt, coincide, textoError } from "../src/mqtt.js";
-import { NodoFalso, hasta, CASETA } from "./nodo-falso.mjs";
+import { NodoFalso, hasta, CASETA, ME } from "./nodo-falso.mjs";
 
 const ID = CASETA.toString(16).padStart(8, "0");
 const CFG = (tipo, ent, nodo = `vigia_${ID}`) => `homeassistant/${tipo}/${nodo}/${ent}/config`;
@@ -269,11 +269,12 @@ test("la configuración de la 1.16 (un broker y la estación) se migra al arranc
   const ha = await espia(t, puerto);
   const almacen = abrirAlmacen(":memory:");
   almacen.guardar("mqtt", { activado: true, url: `127.0.0.1:${puerto}`, usuario: "", clave: "", base: "vigia", ha: { activado: true, prefijo: "homeassistant" } });
+  almacen.guardar("my", ME);
   almacen.guardar("estacion", { activado: false, cada: 30, canal: 0, saltos: null, datos: [{ metrica: "temperature", tema: "ha/t", campo: "", unidad: "°C", caduca: 0 }] });
   const { vigia } = await montar(t, almacen);
   assert.deepEqual(vigia.S.mqtt.brokers.map((b) => [b.id, b.nombre]), [["b1", "Home Assistant"]]);
   assert.equal(vigia.S.mqtt.ha.broker, "b1");
-  assert.equal(vigia.S.estacion.datos[0].broker, "b1");
+  assert.equal(vigia.S.paneles.paneles[ME].datos[0].broker, "b1");
   await hasta(() => ha.json(CFG("sensor", "temperature")), 5000, "sigue publicando en HA");
-  assert.match((await vigia.mqtt.quitarBroker("b1")).error, /Lo usa: Home Assistant, la estación \(Temperatura\)/);
+  assert.match((await vigia.mqtt.quitarBroker("b1")).error, /Lo usa: Home Assistant, DNN 5 \(Temperatura\)/);
 });

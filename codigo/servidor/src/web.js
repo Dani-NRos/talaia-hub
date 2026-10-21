@@ -16,6 +16,7 @@ import net from "node:net";
 import os from "node:os";
 import fs from "node:fs";
 import path from "node:path";
+import { esClaveMqtt } from "@vigia/nucleo/mqtt-datos.js";
 import { ASK_ALL } from "@vigia/nucleo/motor.js";
 import { metricMeta } from "@vigia/nucleo/metrics.js";
 import { crearSincro, instantanea } from "./sincro.js";
@@ -29,7 +30,8 @@ const CSV_BLOQUE = 5000; // filas por bloque al exportar el histórico
 export class ErrorOrden extends Error {}
 
 /* ── comprobaciones de lo que llega ── */
-const esNodo = (n) => Number.isInteger(n) && n >= 0 && n <= 0xffffffff;
+const esNodo = (n) => Number.isInteger(n) && n >= 0 && n <= 0xffffffff; // un nodo Meshtastic
+const esPanel = (n) => esNodo(n) || (Number.isInteger(n) && n < 0 && n >= -1e6); // o un panel sin nodo (negativo)
 const esMetrica = (k) => typeof k === "string" && /^[A-Za-z0-9]{1,40}$/.test(k);
 const esValor = (v) => v === null || (typeof v === "number" && Number.isFinite(v));
 function exigir(cond, que) { if (!cond) throw new ErrorOrden(`orden no válida: ${que}`); }
@@ -48,13 +50,13 @@ function crearOrdenes(vigia) {
       return { ok: r.ok, toast: r.toast };
     },
     dejar: ({ num }) => { exigir(esNodo(num), "num"); return acciones.dejarDeVigilar(num); },
-    sinSenal: ({ num, valor }) => { exigir(esNodo(num), "num"); exigir(esValor(valor), "valor"); return acciones.ponerSinSenal(num, valor); },
+    sinSenal: ({ num, valor }) => { exigir(esPanel(num), "num"); exigir(esValor(valor), "valor"); return acciones.ponerSinSenal(num, valor); },
     limite: ({ num, metrica, lado, valor }) => {
-      exigir(esNodo(num), "num"); exigir(esMetrica(metrica), "metrica"); exigir(lado === "min" || lado === "max", "lado"); exigir(esValor(valor), "valor");
+      exigir(esPanel(num), "num"); exigir(esMetrica(metrica), "metrica"); exigir(lado === "min" || lado === "max", "lado"); exigir(esValor(valor), "valor");
       return acciones.ponerLimite(num, metrica, lado, valor);
     },
-    tendencia: ({ num, metrica, regla }) => { exigir(esNodo(num), "num"); exigir(esMetrica(metrica), "metrica"); exigir(regla && typeof regla === "object", "regla"); return acciones.ponerTendencia(num, metrica, regla); },
-    quitarTendencia: ({ num, metrica }) => { exigir(esNodo(num), "num"); exigir(esMetrica(metrica), "metrica"); return acciones.quitarTendencia(num, metrica); },
+    tendencia: ({ num, metrica, regla }) => { exigir(esPanel(num), "num"); exigir(esMetrica(metrica), "metrica"); exigir(regla && typeof regla === "object", "regla"); return acciones.ponerTendencia(num, metrica, regla); },
+    quitarTendencia: ({ num, metrica }) => { exigir(esPanel(num), "num"); exigir(esMetrica(metrica), "metrica"); return acciones.quitarTendencia(num, metrica); },
     valla: ({ num, radio }) => { exigir(esNodo(num), "num"); exigir(esValor(radio), "radio"); return acciones.fijarValla(num, radio); },
     radioValla: ({ num, radio }) => { exigir(esNodo(num), "num"); exigir(esValor(radio), "radio"); return acciones.radioValla(num, radio); },
     quitarValla: ({ num }) => { exigir(esNodo(num), "num"); return acciones.quitarValla(num); },
@@ -90,23 +92,30 @@ function crearOrdenes(vigia) {
     },
     usuarioBroker: ({ nombre, clave }) => { exigir(typeof nombre === "string" && typeof clave === "string", "usuario"); return vigia.mqtt.ponerUsuario(nombre, clave); },
     quitarUsuarioBroker: ({ nombre }) => { exigir(typeof nombre === "string", "nombre"); return vigia.mqtt.quitarUsuario(nombre); },
-    estacion: ({ cambio }) => {
+    crearPanel: ({ nombre, tipo }) => { exigir(typeof nombre === "string" && typeof tipo === "string", "panel"); return vigia.paneles.crearPanel({ nombre, tipo }); },
+    quitarPanel: ({ num }) => { exigir(esPanel(num), "num"); return vigia.paneles.quitarPanel(num); },
+    renombrar: ({ num, nombre }) => { exigir(esPanel(num), "num"); exigir(typeof nombre === "string", "nombre"); return vigia.paneles.renombrar(num, nombre); },
+    tipoPanel: ({ num, tipo }) => { exigir(esPanel(num), "num"); exigir(typeof tipo === "string", "tipo"); return vigia.paneles.tipoPanel(num, tipo); },
+    datosPanel: ({ num, datos }) => {
+      exigir(esPanel(num), "num");
+      exigir(Array.isArray(datos) && datos.length <= 40, "datos");
+      for (const d of datos) {
+        exigir(d && typeof d === "object" && Object.keys(d).every((k) => ["clave", "nombre", "tipo", "broker", "tema", "campo", "unidad", "caduca", "malla"].includes(k)), "dato");
+        for (const k of ["clave", "nombre", "tipo", "broker", "tema", "campo", "unidad"]) if (k in d) exigir(typeof d[k] === "string", `dato.${k}`);
+        if ("caduca" in d) exigir(Number.isInteger(d.caduca), "dato.caduca");
+        if ("malla" in d) exigir(typeof d.malla === "boolean", "dato.malla");
+      }
+      return vigia.paneles.guardarDatos(num, datos);
+    },
+    envioMalla: ({ cambio }) => {
       exigir(cambio && typeof cambio === "object" && !Array.isArray(cambio), "cambio");
-      exigir(Object.keys(cambio).every((k) => ["activado", "cada", "canal", "saltos", "datos"].includes(k)), "cambio");
+      exigir(Object.keys(cambio).every((k) => ["activado", "cada", "canal", "saltos"].includes(k)), "cambio");
       if ("activado" in cambio) exigir(typeof cambio.activado === "boolean", "activado");
       for (const k of ["cada", "canal", "saltos"]) if (k in cambio) exigir(cambio[k] === null || Number.isInteger(cambio[k]), k);
-      if ("datos" in cambio) {
-        exigir(Array.isArray(cambio.datos) && cambio.datos.length <= 30, "datos");
-        for (const d of cambio.datos) {
-          exigir(d && typeof d === "object" && Object.keys(d).every((k) => ["metrica", "broker", "tema", "campo", "unidad", "caduca"].includes(k)), "dato");
-          for (const k of ["metrica", "broker", "tema", "campo", "unidad"]) if (k in d) exigir(typeof d[k] === "string", `dato.${k}`);
-          if ("caduca" in d) exigir(Number.isInteger(d.caduca), "dato.caduca");
-        }
-      }
-      return vigia.estacion.configurar(cambio);
+      return vigia.paneles.configurarMalla(cambio);
     },
-    estacionBuscar: () => vigia.estacion.buscarTemas(),
-    estacionEnviar: () => vigia.estacion.enviarAhora(),
+    buscarTemas: () => vigia.paneles.buscarTemas(),
+    enviarMalla: () => vigia.paneles.enviarAhora(),
   };
 }
 
@@ -191,7 +200,7 @@ export function crearWeb(vigia, config, registro, opts = {}) {
     try {
       const r = await f(cuerpo);
       sincro.vaciar(); // que las pantallas vean el cambio ya, antes de la respuesta
-      json(res, 200, { ok: !!r?.ok, toast: r?.toast || avisos[0], error: r?.error, ...(r?.radio != null ? { radio: r.radio } : {}), ...(r?.valor != null ? { valor: r.valor } : {}), ...(r?.temas ? { temas: r.temas } : {}) });
+      json(res, 200, { ok: !!r?.ok, toast: r?.toast || avisos[0], error: r?.error, ...(r?.radio != null ? { radio: r.radio } : {}), ...(r?.valor != null ? { valor: r.valor } : {}), ...(r?.temas ? { temas: r.temas } : {}), ...(r?.num != null ? { num: r.num } : {}) });
     } catch (e) {
       if (e instanceof ErrorOrden) return json(res, 400, { ok: false, error: e.message });
       registro.error(`Orden «${cuerpo.orden}»: ${e.stack || e}`);
@@ -212,7 +221,7 @@ export function crearWeb(vigia, config, registro, opts = {}) {
   async function serie(url, res) {
     const num = Number(url.searchParams.get("nodo")), k = url.searchParams.get("metrica");
     const desde = Number(url.searchParams.get("desde") || 0), hasta = Number(url.searchParams.get("hasta") || Number.MAX_SAFE_INTEGER);
-    if (!esNodo(num) || !esMetrica(k) || !Number.isFinite(desde) || !Number.isFinite(hasta)) return json(res, 400, { error: "nodo, metrica, desde y hasta" });
+    if (!esPanel(num) || !esMetrica(k) || !Number.isFinite(desde) || !Number.isFinite(hasta)) return json(res, 400, { error: "nodo, metrica, desde y hasta" });
     json(res, 200, await S.store.series(num, k, desde, hasta));
   }
 
@@ -234,7 +243,10 @@ export function crearWeb(vigia, config, registro, opts = {}) {
     for (;;) {
       const filas = bloque.all(...ultimo, CSV_BLOQUE);
       for (const r of filas) {
-        txt += [new Date(r.t).toISOString(), `!${(r.nodo >>> 0).toString(16).padStart(8, "0")}`, nombre(r.nodo), r.metrica, String(r.v).replace(".", ","), metricMeta(r.metrica).unit].join(";") + "\n";
+        const id = r.nodo < 0 ? `panel${-r.nodo}` : `!${(r.nodo >>> 0).toString(16).padStart(8, "0")}`;
+        // Los datos MQTT, con su nombre («Temperatura nevera») en vez de su clave interna («mq3»).
+        const met = esClaveMqtt(r.metrica) ? `"${metricMeta(r.metrica).label.replaceAll('"', "'")}"` : r.metrica;
+        txt += [new Date(r.t).toISOString(), id, nombre(r.nodo), met, String(r.v).replace(".", ","), metricMeta(r.metrica).unit].join(";") + "\n";
       }
       if (filas.length < CSV_BLOQUE) break;
       const u = filas[filas.length - 1];
@@ -306,7 +318,10 @@ export function crearWeb(vigia, config, registro, opts = {}) {
       for (const [ev, f] of Object.entries(escuchas)) eventos.off(ev, f);
       for (const res of clientes) res.end();
       clientes.clear();
-      await new Promise((r) => servidor.close(() => r()));
+      const cerrado = new Promise((r) => servidor.close(() => r()));
+      // Sin esperar a las conexiones que quedan abiertas (las de las pantallas, de «keep-alive»): se para ya.
+      servidor.closeAllConnections();
+      await cerrado;
     },
   };
 }

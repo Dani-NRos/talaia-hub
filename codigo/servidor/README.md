@@ -158,7 +158,9 @@ nodos vigilados*, elige el broker de Home Assistant y pulsa *Guardar* (viene apa
      con el detalle en sus atributos) y su botón *Enterado*. La posición no se manda.
 
 Las alarmas y los límites se siguen poniendo en Vigía: Home Assistant los ve y puede dar «Enterado», pero no los
-cambia. Si dejas de vigilar un nodo, su dispositivo desaparece de Home Assistant. Si el servidor se apaga o se cae,
+cambia. Va solo lo de los nodos Meshtastic: los datos MQTT de los paneles y sus alarmas, no (ni cuentan en las
+alarmas activas, ni *Enterado todas* las da por vistas). Si renombras un nodo en Vigía, su dispositivo cambia de
+nombre. Si dejas de vigilar un nodo, su dispositivo desaparece de Home Assistant. Si el servidor se apaga o se cae,
 Home Assistant marca sus entidades como no disponibles. Vigía sigue sonando y avisando como siempre: Home Assistant es
 una salida más.
 
@@ -200,31 +202,47 @@ homeassistant/…/vigia_…/config   autodescubrimiento de Home Assistant (reten
 **Sin contraseña en la pantalla**: cualquiera en tu WiFi puede cambiar a qué broker se conecta el servidor o apagar
 MQTT (no ver la contraseña guardada).
 
-## De MQTT a la malla (una estación)
+## Paneles y datos por MQTT
 
-Los datos de una estación que lleguen por MQTT (una estación meteorológica en Home Assistant, un sensor de
-zigbee2mqtt…) salen cada cierto tiempo a la malla como **telemetría de ambiente del receptor**, como si tuviera esos
-sensores: la app de Meshtastic y Vigía los ven en sus gráficas. El servidor los guarda además como lecturas del
-receptor, así que tienen gráficas, alarmas (vigilando el receptor) e histórico como cualquier nodo.
+Con el servidor, el tablero no es solo de nodos Meshtastic: cualquier dispositivo que publique por MQTT (Shelly,
+Tasmota, Sonoff, Zigbee con zigbee2mqtt, ESPHome, Home Assistant…) puede tener su panel, con sus lecturas, gráficas,
+alarmas (también avisos por la malla) e histórico, como un nodo. Solo en el servidor: la app por Bluetooth no cambia.
 
-Se configura en Ajustes → *De MQTT a la malla* (viene apagado; hace falta algún broker conectado). Cada dato dice de
-qué broker viene, así que pueden mezclarse los de Home Assistant y los de un Shelly que publique en este servidor:
+- **Panel nuevo**: *Añadir panel*, encima de los sensores vigilados. Un nombre y qué es (solo para la etiqueta).
+- **Datos por MQTT**: en la ficha de cada panel (también en la de un nodo, para tener junto a él otro dato, como la
+  temperatura de dentro de la caseta). Cada dato lleva su nombre (puede haber varias temperaturas), qué es, de qué
+  broker viene, el tema y, si llega un JSON, el campo (`temperature`, o `ENERGY.Power` si va dentro de otro). Si el
+  viento llega en km/h o la temperatura en °F, se elige la unidad y Vigía la pasa a la suya. Debajo de cada dato se
+  ve el último valor que ha llegado. *Otro número* sirve para lo que no está en la lista (con la unidad que pongas).
+- **Buscar temas** escucha los brokers unos segundos y enseña los temas con números (se pueden filtrar). **Usar**
+  pone uno en la lista: adivina qué es por el nombre (temperature, humidity, Power…) y, si Home Assistant publica la
+  unidad, la elige; si no, el viento queda en km/h, lo normal en Home Assistant. Compruébalo.
+- **Lecturas**: el valor se ve y salta la alarma al momento; en el histórico se guarda uno por minuto como mucho.
+- **Nombre**: todos los paneles se pueden renombrar. El de un nodo es solo para Vigía (tablero, alarmas, avisos por
+  la malla y Home Assistant): su nombre de Meshtastic se queda como información y, con el nombre vacío, vuelve a él.
+- **Sin datos**: en un panel sin nodo, la alarma «no llega ningún dato en más de…» viene apagada, porque hay
+  dispositivos que solo publican cuando algo cambia.
+- **Quitar panel** (al final de su ficha) lo borra con su histórico. Al quitar un dato, se borra también el suyo.
 
-- **Cada** cuánto (por defecto, 30 minutos, a las en punto y a las y media), **por qué canal** y con **cuántos
-  saltos** (por defecto, los del receptor).
-- **Los datos**: qué es cada uno (temperatura, humedad, presión, viento, racha, lluvia…), el tema MQTT y, si llega
-  un JSON, el campo (`humidity`, o `datos.humedad` si va dentro de otro). Si el viento llega en km/h o la temperatura
-  en °F, se elige la unidad y Vigía la pasa a la de Meshtastic. Un valor imposible (la presión en Pa en vez de hPa)
-  no se manda. Debajo de cada dato se ve el último valor que ha llegado.
-- **Buscar temas** escucha el broker unos segundos y enseña los temas con números (se pueden filtrar). **Usar**
-  pone uno en la lista: adivina qué dato es por el nombre (temperature, humidity, pressure, wind_speed…) y, si
-  Home Assistant publica la unidad, la elige; si no, el viento queda en km/h, lo normal en Home Assistant. Compruébalo.
+La ubicación y el mapa siguen siendo solo de los nodos Meshtastic. A Home Assistant no van los datos MQTT ni sus
+alarmas: si los quieres allí, Home Assistant puede leerlos del broker donde se publican.
+
+## A la malla (el panel del receptor)
+
+Los datos MQTT del panel del receptor pueden salir a la malla cada cierto tiempo como **su telemetría de ambiente**,
+como si tuviera esos sensores: la app de Meshtastic y Vigía los ven en sus gráficas. Es lo de una estación del barrio
+en la misma ubicación que el nodo.
+
+- En cada dato del receptor, la casilla **A la malla**, y debajo de *Datos por MQTT*, **Mandar a la malla**: **cada**
+  cuánto (por defecto, 30 minutos, a las en punto y a las y media), **por qué canal** y con **cuántos saltos** (por
+  defecto, los del receptor). Viene apagado.
 - **Enviar ahora** manda lo que haya sin esperar (como mucho, uno por minuto).
 
 Lo que hay que saber:
 
-- **Un dato de cada tipo.** La telemetría de Meshtastic no lleva nombres: tiene un hueco por tipo de dato. Con un
-  receptor se manda una temperatura, una humedad… (una estación), no varias temperaturas.
+- **Un dato de cada tipo.** La telemetría de Meshtastic no lleva nombres: tiene un hueco por tipo de dato. Puede
+  haber varias temperaturas en el panel del receptor, pero solo una sale a la malla. Potencia, energía o CO₂ no tienen
+  hueco en la telemetría de ambiente: se ven en el panel, pero no salen.
 - **Salen como medidos por el receptor y en su posición.** Para una estación del barrio, bien; para datos de otro
   sitio, quien los vea en el mapa los pondrá donde está el receptor.
 - **Si el receptor tiene sensores de ambiente propios**, sus valores se mezclarían con los de la estación.
@@ -237,12 +255,16 @@ Lo que hay que saber:
 - **Lluvia 24 h** es «las últimas 24 horas»: si tu estación da «lluvia de hoy», saldrá con ese nombre.
 - En el diario sale cada fallo (una vez, no cada media hora) y cuando vuelve a salir bien.
 
+**Desde la 1.16**: la estación que estaba en Ajustes pasa sola al panel del receptor (que queda vigilado), con su
+histórico, su canal y sus saltos. Esos datos ya no van a Home Assistant como lecturas del receptor.
+
 **Desde Home Assistant**, sus sensores no salen por MQTT por su cuenta. Con `mqtt_statestream` en
 `configuration.yaml` (y reiniciar Home Assistant):
 
 ```yaml
 mqtt_statestream:
   base_topic: ha_estados
+  publish_attributes: true
   include:
     entities:
       - sensor.estacion_temperatura
@@ -251,6 +273,6 @@ mqtt_statestream:
       - sensor.estacion_viento
 ```
 
-Con `publish_attributes: true` (debajo de `base_topic`), sale también la unidad de cada uno y Vigía la elige sola.
-Cada uno sale en `ha_estados/sensor/estacion_temperatura/state` (retenido: Vigía lo tiene nada más conectar). No
-incluyas los sensores «Vigía · …»: Vigía rechaza sus propios temas para no mandar a la malla lo que ya viene de ella.
+Con `publish_attributes: true` sale también la unidad de cada uno y Vigía la elige sola. Cada uno sale en
+`ha_estados/sensor/estacion_temperatura/state` (retenido: Vigía lo tiene nada más conectar). No incluyas los sensores
+«Vigía · …»: Vigía rechaza sus propios temas para no volver a recibir lo que ya publica él.

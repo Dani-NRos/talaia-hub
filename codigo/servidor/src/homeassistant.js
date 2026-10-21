@@ -2,6 +2,7 @@
 //
 //  «Vigía servidor»                 receptor conectado, alarmas sin atender y activas, nodos oídos en la última hora,
 //                                   último aviso por la malla, un evento por alarma (para notificar) y «Enterado todas».
+//                                   Solo lo de los nodos Meshtastic: los datos MQTT de los paneles (y sus alarmas), no.
 //  «Vigía · Caseta huerto» (uno por nodo vigilado)
 //                                   un sensor por métrica, último oído, saltos y SNR; un sensor binario por cada alarma
 //                                   que tenga puesta (límite, cambio rápido, sin señal, valla) y su botón «Enterado».
@@ -17,8 +18,9 @@
 //   homeassistant/<tipo>/vigia_<id>/<entidad>/config   autodescubrimiento (retenido)
 import fs from "node:fs";
 import { metricMeta } from "@vigia/nucleo/metrics.js";
-import { hexId, trendKey } from "@vigia/nucleo/motor.js";
+import { hexId, trendKey, esAlarmaMqtt } from "@vigia/nucleo/motor.js";
 import { HOUR, isNum } from "@vigia/nucleo/textos.js";
+import { esClaveMqtt } from "@vigia/nucleo/mqtt-datos.js";
 
 const VERSION = JSON.parse(fs.readFileSync(new URL("../package.json", import.meta.url), "utf8")).version;
 const REPO = "https://github.com/Dani-NRos/vigia-mesh";
@@ -47,6 +49,7 @@ const corta = (s, n = 250) => (s && s.length > n ? `${s.slice(0, n - 1)}…` : s
 export function alarmasPosibles(num, w, S) {
   const out = [];
   for (const [k, r] of Object.entries(w?.rules || {})) {
+    if (esClaveMqtt(k)) continue; // los datos MQTT no van a Home Assistant (los lee él de su broker)
     const l = metricMeta(k).label;
     if (isNum(r.max)) out.push({ slug: `${k}_alta`, key: `${num}|${k}|high`, nombre: `${l} alta` });
     if (isNum(r.min)) out.push({ slug: `${k}_baja`, key: `${num}|${k}|low`, nombre: `${l} baja` });
@@ -83,10 +86,11 @@ export function crearSalidaHA({ S, motor, eventos, registro }, conexion, { base 
   const origen = { name: "Vigía servidor", sw: VERSION, url: REPO };
   const dispServidor = { identifiers: ["vigia_servidor"], name: "Vigía servidor", manufacturer: "Vigía Mesh", model: "Vigía servidor", sw_version: VERSION, configuration_url: REPO };
   const dispNodo = (num, n) => ({
-    identifiers: [`vigia_${idNodo(num)}`], name: `Vigía · ${n?.long || hexId(num)}`, manufacturer: "Meshtastic",
+    identifiers: [`vigia_${idNodo(num)}`], name: `Vigía · ${n?.alias || n?.long || hexId(num)}`, manufacturer: "Meshtastic",
     ...(n?.hw ? { model: n.hw } : {}), via_device: "vigia_servidor",
   });
-  const vigilados = () => Object.keys(S.cfg.watched).map(Number);
+  // Solo nodos Meshtastic: los paneles sin nodo (números negativos) son datos MQTT, que no van a Home Assistant.
+  const vigilados = () => Object.keys(S.cfg.watched).map(Number).filter((num) => num >= 0);
 
   /* ── autodescubrimiento: lo que debería haber publicado ahora ── */
   function deseado() {
@@ -107,6 +111,7 @@ export function crearSalidaHA({ S, motor, eventos, registro }, conexion, { base 
       const n = S.nodes.get(num), id = idNodo(num), nodo = `vigia_${id}`, dev = dispNodo(num, n);
       const nd = (ent, cfg) => ({ unique_id: `vigia_${id}_${ent}`, device: dev, state_topic: T.nodo(num), ...cfg });
       for (const k of Object.keys(n?.metrics || {})) {
+        if (esClaveMqtt(k)) continue;
         const m = metricMeta(k);
         pon("sensor", nodo, k, nd(k, {
           name: m.label, value_template: `{{ value_json.m.${k} }}`, state_class: "measurement", suggested_display_precision: m.dec,
@@ -155,10 +160,12 @@ export function crearSalidaHA({ S, motor, eventos, registro }, conexion, { base 
   }
 
   /* ── estados ── */
+  /** Las alarmas activas que ve Home Assistant: las de los nodos (no las de los datos MQTT). */
+  const deNodos = () => [...S.active.values()].filter((x) => !esAlarmaMqtt(x));
   function estadoNodo(num) {
     const n = S.nodes.get(num);
     const m = {};
-    for (const [k, x] of Object.entries(n?.metrics || {})) m[k] = k === "batteryLevel" && x.v > 100 ? 100 : x.v; // 101: enchufado
+    for (const [k, x] of Object.entries(n?.metrics || {})) if (!esClaveMqtt(k)) m[k] = k === "batteryLevel" && x.v > 100 ? 100 : x.v; // 101: enchufado
     const a = {}, d = {};
     for (const p of alarmasPosibles(num, S.cfg.watched[num], S)) {
       const al = S.active.get(p.key);
@@ -168,7 +175,7 @@ export function crearSalidaHA({ S, motor, eventos, registro }, conexion, { base 
     return { m, oido: iso(n?.lastHeard), saltos: n?.hops ?? null, snr: n?.snr ?? null, a, d };
   }
   function estadoServidor() {
-    const activas = [...S.active.values()];
+    const activas = deNodos();
     const ml = S.meshLast;
     return {
       receptor: S.link.state === "ready" ? "ON" : "OFF",
@@ -197,9 +204,9 @@ export function crearSalidaHA({ S, motor, eventos, registro }, conexion, { base 
   function contarOidos() {
     const hace = Date.now() - HOUR;
     oidos = 0;
-    for (const n of S.nodes.values()) if (n.lastHeard >= hace) oidos++;
+    for (const n of S.nodes.values()) if (n.num >= 0 && n.lastHeard >= hace) oidos++;
   }
-  const marcarNodo = (num) => { if (S.cfg.watched[num]) { sucios.add(num); programar(); } };
+  const marcarNodo = (num) => { if (num >= 0 && S.cfg.watched[num]) { sucios.add(num); programar(); } };
   const marcarVigilados = () => { for (const num of vigilados()) sucios.add(num); programar(); };
   const marcarServidor = () => { servidorSucio = true; programar(); };
   const marcarConfig = () => { configSucia = true; programar(); };
@@ -211,7 +218,7 @@ export function crearSalidaHA({ S, motor, eventos, registro }, conexion, { base 
     ultimoLog = S.log[0] || null;
     const TIPO = { raise: "alarma", clear: "resuelta", ack: "vista" };
     for (const e of nuevas.reverse()) {
-      if (!TIPO[e.type]) continue;
+      if (!TIPO[e.type] || e.mqtt) continue; // las de los datos MQTT no van a Home Assistant
       // De una alarma que salta, también el dato de ahora («Ahora 31,4 °C.»), para el aviso al móvil.
       const al = e.type === "raise" ? [...S.active.values()].find((x) => (x.num ?? null) === e.num && e.text.startsWith(motor.alarmTitle(x))) : null;
       conexion.publicar(T.evento, {
@@ -262,9 +269,11 @@ export function crearSalidaHA({ S, motor, eventos, registro }, conexion, { base 
       motor.ack(a.key);
     }),
     conexion.suscribir(T.todas, () => {
-      if (![...S.active.values()].some((x) => !x.acked)) return;
+      // Todas las que ve Home Assistant: las de los datos MQTT no le llegan, así que tampoco las da por vistas.
+      const suyas = deNodos().filter((x) => !x.acked);
+      if (!suyas.length) return;
       registro.info("Home Assistant: Enterado todas");
-      motor.ackAll();
+      for (const x of suyas) motor.ack(x.key);
     }),
     // HA avisa así al arrancar: hay que volver a contarle todo (no siempre guarda lo retenido).
     conexion.suscribir(`${prefijo}/status`, (tema, carga) => {

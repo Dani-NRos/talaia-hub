@@ -26,6 +26,8 @@ codigo/                 raíz de npm workspaces: npm install, npm test, npm run 
     src/textos.js       tiempos y textos comunes (dur, ago, stamp…)
     src/canales.js      qué canal es privado; recorte a 200 bytes
     src/tramas.js       tramas del puerto serie (0x94 0xC3), troceado propio, latido, despertar, fabricantes USB
+    src/mqtt-datos.js   datos MQTT: tipos y unidades, qué parece cada tema, leer el valor de un JSON, comprobar la
+                        configuración (también lo que puede salir a la malla); metrics.js registra sus métricas
     src/metrics.js trend.js delivery.js route.js geo.js pb.js
   app/                  la PWA (@vigia/app)
     src/app.js          pantalla; crea el motor con ganchos (redibujar, guardar en localStorage, sonar…) y radio.
@@ -44,11 +46,13 @@ codigo/                 raíz de npm workspaces: npm install, npm test, npm run 
     src/mosquitto.js    el broker de este equipo: usuarios (cifrado de mosquitto_passwd: $7$, PBKDF2-SHA512) que Vigía
                         escribe en <datos>/mosquitto/passwd; vigia-mosquitto.path (root) los pasa a Mosquitto y recarga
     src/homeassistant.js  salida a Home Assistant por MQTT con autodescubrimiento (los temas, arriba del fichero)
-    src/estacion.js     de MQTT a la malla: datos de una estación que salen como telemetría del receptor y se guardan
-                        como lecturas suyas (lo común con la pantalla, en nucleo/src/estacion.js)
+    src/paneles.js      paneles: nombres, paneles sin nodo (números negativos: -1, -2…), datos MQTT de cada panel
+                        (claves «mq1», «mq2»…: lecturas, alarmas e histórico como una métrica más; una lectura por
+                        minuto) y lo del receptor que sale a la malla como su telemetría; migra la estación de la 1.16
+                        (lo común con la pantalla, en nucleo/src/mqtt-datos.js)
     instalar.sh sistema/  instalador (Node propio en /opt/vigia, Mosquitto por apt), servicios systemd, regla de udev
     test/nodo-falso.mjs nodo Meshtastic simulado (protobuf de verdad) por TCP o puerto virtual
-    test/mqtt.test.mjs estacion.test.mjs  con un broker en memoria (aedes) y un «Home Assistant» de mentira
+    test/mqtt.test.mjs paneles.test.mjs  con un broker en memoria (aedes) y un «Home Assistant» de mentira
     test/mosquitto.test.mjs  con un Mosquitto de verdad si está instalado (apt install mosquitto)
   herramientas/         comprobaciones con Playwright (capturas antes/después, nodo por cable simulado, servidor de
                         punta a punta con MQTT): ver herramientas/LEEME.md
@@ -110,6 +114,10 @@ con Tasmota/ESPHome, Zigbee por zigbee2mqtt, ESPHome, Home Assistant…).
 - **Brokers**: Mosquitto propio en el BMAX (instalador), **con usuario y contraseña**, fáciles de cambiar desde
   Vigía; Vigía usa a la vez el suyo y otros (el de HA). Cada broker se apunta una vez; en cada dato se elige cuál, y se
   puede añadir uno desde el propio panel.
+- Hecho así (fase 2): un panel sin nodo es un «nodo» de número negativo en `S.nodes` (con `fuente: "mqtt"`,
+  `tipoPanel`) vigilado con «sin datos» apagado; el nombre de Vigía de un nodo va en `n.alias` (el de Meshtastic sigue
+  en `n.long`). Las alarmas de datos MQTT no van a Home Assistant (ni eventos, ni cuenta, ni «Enterado todas»): el
+  registro las marca con `mqtt: true`. Los paneles sin nodo no salen en «Resto de la malla» ni en el mapa.
 - Fases: 1) brokers (Mosquitto propio + varios); 2) paneles, nombres, datos MQTT numéricos, estación al panel del
   receptor; 3) ON/OFF; 4) control; 5) descubrimiento automático; 6) **controlar interruptores desde la malla** (a Dani
   le interesa mucho). Más adelante: un segundo receptor 868 con firmware propio para estaciones meteorológicas

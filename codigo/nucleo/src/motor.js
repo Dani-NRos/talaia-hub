@@ -35,6 +35,7 @@ import { trendCheck } from "./trend.js";
 import { newDelivery, deliveryStep } from "./delivery.js";
 import { channelPrivacy, fitBytes } from "./canales.js";
 import { MIN, HOUR, isNum, validT, hhmm, dur, ago, stamp, trendDec, fmtTrend, trendVerb, hoursText } from "./textos.js";
+import { esClaveMqtt } from "./mqtt-datos.js";
 
 /* ───────────── constantes ───────────── */
 export const MESH_DEFAULT = () => ({ enabled: false, channel: null, node: null, onClear: false });
@@ -69,6 +70,8 @@ export const MESH_CONFIRM = 90000;
 export const seriesKey = (num, metric) => `${num}|${metric}`;
 export const trendKey = (num, k) => `${num}|${k}|trend`;
 export const hexId = (num) => `!${(num >>> 0).toString(16).padStart(8, "0")}`;
+/** Alarma de un dato MQTT (de un panel sin nodo o de un dato MQTT en el de un nodo): no va a Home Assistant. */
+export const esAlarmaMqtt = (al) => al.num < 0 || esClaveMqtt(al.metric || "");
 
 /** Lo que el motor necesita en S. La app y el servidor le añaden lo suyo. */
 export function estadoInicial() {
@@ -127,7 +130,10 @@ export function crearMotor(S, g = {}) {
     if (!n.metrics) n.metrics = {};
     return n;
   }
-  const nodeName = (num) => (S.nodes.get(num)?.long) || hexId(num);
+  // El nombre que le haya puesto el usuario (paneles del servidor) o el suyo de Meshtastic.
+  const nodeName = (num) => (S.nodes.get(num)?.alias || S.nodes.get(num)?.long) || hexId(num);
+  // Paneles sin nodo (servidor: datos que llegan por MQTT): números negativos, que ningún nodo Meshtastic puede tener.
+  const sinNodo = (num) => num < 0;
   const isWatched = (num) => !!S.cfg.watched[num];
 
   function touch(num, t) {
@@ -287,9 +293,10 @@ export function crearMotor(S, g = {}) {
       const a = S.active.get(key);
       if (a.kind === "offline" && !isWatched(a.num)) clearAlarm(key, { silent: true });
     }
-    if (!linkKnown()) return; // sin receptor no sé si los nodos callan
+    const radio = linkKnown(); // sin receptor no sé si los nodos callan (los paneles sin nodo no dependen de él)
     for (const [numStr, w] of Object.entries(S.cfg.watched)) {
       const num = Number(numStr);
+      if (!radio && !sinNodo(num)) continue;
       const n = S.nodes.get(num);
       const key = `${num}||offline`;
       const lim = isNum(w.offlineMin) ? w.offlineMin : S.settings.defaultOfflineMin;
@@ -312,7 +319,7 @@ export function crearMotor(S, g = {}) {
     }
     const al = { key, ...a, since: isNum(a.t) ? a.t : Date.now(), acked: false, late: !!opts.replay };
     S.active.set(key, al);
-    addLog("raise", alarmTitle(al) + (al.late ? " (recibida al reconectar)" : ""), al.num);
+    addLog("raise", alarmTitle(al) + (al.late ? " (recibida al reconectar)" : ""), al.num, marcaMqtt(al));
     saveActive();
     if (!opts.silent) fireAlarm(al);
     if (!opts.silent) meshNotify("raise", al);
@@ -323,7 +330,7 @@ export function crearMotor(S, g = {}) {
     const al = S.active.get(key);
     if (!al) return;
     S.active.delete(key);
-    if (!info.silent) addLog("clear", clearText(al, info), al.num);
+    if (!info.silent) addLog("clear", clearText(al, info), al.num, marcaMqtt(al));
     if (!info.silent) meshNotify("clear", al, info);
     saveActive();
     render();
@@ -333,7 +340,7 @@ export function crearMotor(S, g = {}) {
     const al = S.active.get(key);
     if (!al || al.acked) return;
     al.acked = true;
-    addLog("ack", `Enterado: ${alarmTitle(al)}`, al.num);
+    addLog("ack", `Enterado: ${alarmTitle(al)}`, al.num, marcaMqtt(al));
     saveActive();
     render();
   }
@@ -344,7 +351,7 @@ export function crearMotor(S, g = {}) {
     if (al.kind === "link") return "Receptor desconectado";
     if (al.kind === "test") return "Alarma de prueba";
     const name = nodeName(al.num);
-    if (al.kind === "offline") return `${name} · Sin señal más de ${dur(al.limit * MIN)}`;
+    if (al.kind === "offline") return `${name} · ${sinNodo(al.num) ? "Sin datos" : "Sin señal"} más de ${dur(al.limit * MIN)}`;
     if (al.kind === "moved") return `${name} · Fuera de su sitio`;
     const m = metricMeta(al.metric);
     if (al.kind === "trend") {
@@ -372,15 +379,17 @@ export function crearMotor(S, g = {}) {
     if (al.kind === "link") return "Receptor conectado de nuevo";
     if (al.kind === "test") return "Alarma de prueba cerrada";
     const name = nodeName(al.num);
-    if (al.kind === "offline") return `${name} · Vuelve a dar señal`;
+    if (al.kind === "offline") return `${name} · ${sinNodo(al.num) ? "Vuelven a llegar datos" : "Vuelve a dar señal"}`;
     if (al.kind === "moved") return `${name} · De vuelta en su sitio${isNum(info.v) ? ` (a ${fmtDist(info.v)})` : ""}`;
     const m = metricMeta(al.metric);
     if (al.kind === "trend") return `${name} · ${m.label} ya no ${trendVerb(al.dir)} tan rápido${isNum(info.v) ? ` (${fmtWithUnit(al.metric, info.v)})` : ""}`;
     return `${name} · ${m.label} de vuelta en rango${isNum(info.v) ? ` (${fmtWithUnit(al.metric, info.v)})` : ""}`;
   }
 
-  function addLog(type, text, num) {
-    S.log.unshift({ t: Date.now(), type, text, num: num ?? null });
+  // En el registro, las alarmas de datos MQTT llevan «mqtt» (solo con servidor: en la app no hay datos MQTT).
+  const marcaMqtt = (al) => (esAlarmaMqtt(al) ? { mqtt: true } : null);
+  function addLog(type, text, num, extra = null) {
+    S.log.unshift({ t: Date.now(), type, text, num: num ?? null, ...extra });
     if (S.log.length > 300) S.log.length = 300;
     saveLog();
   }
@@ -622,13 +631,13 @@ export function crearMotor(S, g = {}) {
     if (kind === "test") return `✓ Vigía: mensaje de prueba de avisos · ${now}`;
     const name = nodeName(al.num);
     if (kind === "clear") {
-      if (al.kind === "offline") return `✓ Vigía: ${name} vuelve a dar señal · ${now}`;
+      if (al.kind === "offline") return `✓ Vigía: ${name} ${sinNodo(al.num) ? "vuelve a mandar datos" : "vuelve a dar señal"} · ${now}`;
       if (al.kind === "moved") return `✓ Vigía: ${name} de vuelta en su sitio · ${now}`;
       if (al.kind === "trend") return `✓ Vigía: ${name} · ${metricMeta(al.metric).label} ya no ${trendVerb(al.dir)} tan rápido · ${now}`;
       return `✓ Vigía: ${name} · ${metricMeta(al.metric).label} de vuelta en rango${isNum(info?.v) ? ` (${fmtWithUnit(al.metric, info.v)})` : ""} · ${now}`;
     }
     const late = al.late ? " (con retraso)" : "";
-    if (al.kind === "offline") return `⚠ Vigía: ${name} sin señal desde las ${hhmm.format(new Date(al.value))} · ${now}`;
+    if (al.kind === "offline") return `⚠ Vigía: ${name} ${sinNodo(al.num) ? "sin datos" : "sin señal"} desde las ${hhmm.format(new Date(al.value))} · ${now}`;
     if (al.kind === "moved") {
       const n = S.nodes.get(al.num), f = S.cfg.watched[al.num]?.fence;
       const where = n?.pos ? ` · ${coordText(n.pos)}` : "";

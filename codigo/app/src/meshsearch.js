@@ -37,6 +37,11 @@ const hex = (num) => (num >>> 0).toString(16).padStart(8, "0");
  */
 export function matchScore(n, words, whole = words.join(" ")) {
   if (!words.length) return 0;
+  if (n.alias) {
+    // Renombrado en Vigía (servidor): vale tanto el nombre de Vigía como el de Meshtastic.
+    const a = matchScore({ ...n, long: n.alias, alias: null }, words, whole), b = matchScore({ ...n, alias: null }, words, whole);
+    return a == null ? b : b == null ? a : Math.min(a, b);
+  }
   const long = normalize(n.long), short = normalize(n.short);
   const id = `!${hex(n.num)}`;
   const hw = normalize(String(n.hw || "").replace(/_/g, " "));
@@ -99,7 +104,7 @@ export function searchNodes(nodes, { q = "", filters = new Set(), sort = "auto",
     hops: (a, b) => last(a.n.hops) - last(b.n.hops) || byRecent(a, b),
     dist: (a, b) => last(a.dist) - last(b.dist) || byRecent(a, b),
     snr: (a, b) => last(a.n.snr == null ? null : -a.n.snr) - last(b.n.snr == null ? null : -b.n.snr) || byRecent(a, b),
-    name: (a, b) => collator.compare(a.n.long || "", b.n.long || ""),
+    name: (a, b) => collator.compare(a.n.alias || a.n.long || "", b.n.alias || b.n.long || ""),
   }[sort] || byRecent;
   return out.sort(cmp);
 }

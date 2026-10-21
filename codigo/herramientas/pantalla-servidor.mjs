@@ -80,7 +80,13 @@ async function esperarTexto(page, re, que, ms = 8000) {
   while (Date.now() < fin) { if (re.test(await texto(page))) return; await sleep(100); }
   throw new Error(`no apareció en pantalla: ${que}`);
 }
-const paso = async (que, f) => { try { await f(); log(`✓ ${que}`); } catch (e) { log(`✗ ${que}: ${e.message}`); errores.push(`${que}: ${e.message}`); } };
+const paso = async (que, f) => {
+  try { await f(); log(`✓ ${que}`); } catch (e) {
+    log(`✗ ${que}: ${e.message}`);
+    errores.push(`${que}: ${e.message}`);
+    for (const [nombre, page] of [["pc", pc], ["movil", movil]]) await foto(page, `fallo-${nombre}`).catch(() => {}); // cómo estaba cada pantalla
+  }
+};
 
 const movil = await pantalla("móvil", { width: 400, height: 860 });
 const pc = await pantalla("pc", { width: 1200, height: 900 });
@@ -267,55 +273,81 @@ await paso("Enterado desde Home Assistant queda visto en las pantallas", async (
   if (!act.some((a) => a.acked)) throw new Error(`en el servidor: ${JSON.stringify(act.map((a) => [a.key, a.acked]))}`);
 });
 
-// La estación: lo que Home Assistant publica con mqtt_statestream (los nombres largos de Meteoclimatic de Dani) sale a
-// la malla como del receptor. La unidad del viento, con publish_attributes.
+// La estación, en el panel del receptor: lo que Home Assistant publica con mqtt_statestream (los nombres largos de
+// Meteoclimatic de Dani) sale a la malla como del receptor. La unidad del viento, con publish_attributes.
 const MC = (x) => `ha_estados/sensor/meteoclimatic_weather_for_alzira_ajuntament_valencia_espva4600000046600b_alzira_ajuntament_valencia_${x}`;
 for (const [x, v, u] of [["temperature", "19.6", "°C"], ["humidity", "64", "%"], ["pressure", "1014.8", "hPa"], ["wind_speed", "18", "km/h"], ["dew_point", "12.4", "°C"]]) {
   await ha.publishAsync(MC(`${x}/state`), v, { retain: true });
   await ha.publishAsync(MC(`${x}/unit_of_measurement`), JSON.stringify(u), { retain: true });
 }
 await ha.publishAsync("zigbee2mqtt/Salón", JSON.stringify({ temperature: 22.1, battery: 90 }), { retain: true });
-const fila = (page, i, k) => page.locator(`#estDatos .est-d:nth-child(${i + 1}) [data-est-k="${k}"]`);
+await ha.publishAsync("tele/enchufe/SENSOR", JSON.stringify({ Time: "2026-10-21T10:00:00", ENERGY: { Total: 12.5, Power: 45, Voltage: 231 } }), { retain: true });
+const fila = (page, i, k) => page.locator(`#datLista .est-d:nth-child(${i + 1}) [data-dat-k="${k}"]`);
+const estado = async () => (await fetch(`${URL0}api/estado`)).json();
+const usarEn = (page) => async (tema, campo = "") => {
+  await page.locator(`#datHallados li:has(.est-ht[title="${campo ? `${tema} · ${campo}` : tema}"]) [data-dat-usar]`).click();
+  await sleep(150);
+};
 
-await paso("estación desde Ajustes: se ve dónde va el tema; buscar, filtrar y «Usar» rellenan dato, tema y unidad", async () => {
-  await pc.click("#setBtn");
+await paso("datos MQTT en el panel del receptor: buscar, filtrar y «Usar»; dos temperaturas, solo una a la malla", async () => {
+  await pc.click(`[data-watch="${ME}"]`);
+  await esperarTexto(pc, /SENSORES VIGILADOS[\s\S]*DNN5/i, "el receptor vigilado");
+  await pc.click(`#cards .name-btn[data-open="${ME}"]`);
   await sleep(400);
-  if (!(await fila(pc, 0, "tema").isVisible())) throw new Error("sin datos, no se ve dónde poner el tema");
-  await fotoApartado(pc, "#estBox", "estacion-vacia");
-  await pc.click("[data-est-buscar]");
+  await fotoApartado(pc, "#datBox", "datos-vacio");
+  await pc.click("[data-dat-buscar]");
   await esperarTexto(pc, /Encontrados \d+ con números/, "temas encontrados");
-  await pc.fill("#estFiltro", "meteoclimatic");
+  await pc.fill("#filtroTemas", "meteoclimatic");
   await sleep(200);
-  const n = await pc.locator("#estHallados li").count();
+  const n = await pc.locator("#datHallados li").count();
   if (n !== 5) throw new Error(`con el filtro salen ${n}, no 5`);
-  await fotoApartado(pc, "#estBox", "estacion-encontrados");
-  const usar = async (tema) => { await pc.locator(`#estHallados li:has(.est-ht[title="${tema}"]) [data-est-usar]`).click(); await sleep(150); };
+  await fotoApartado(pc, "#datBox", "datos-encontrados");
+  const usar = usarEn(pc);
   await usar(MC("temperature/state"));
   // La humedad, la del Shelly, que publica en el broker de este servidor.
-  await pc.fill("#estFiltro", "shellies");
+  await pc.fill("#filtroTemas", "shellies");
   await esperarTexto(pc, /humidity\s*58 · parece humedad · en Este servidor/, "el Shelly, en el broker de este servidor");
   await usar("shellies/shellyht-1/sensor/humidity");
-  await pc.fill("#estFiltro", "meteoclimatic");
+  await pc.fill("#filtroTemas", "meteoclimatic");
   await sleep(150);
   for (const x of ["pressure", "wind_speed"]) await usar(MC(`${x}/state`));
-  const metricas = [];
-  for (let i = 0; i < 4; i++) metricas.push(await fila(pc, i, "metrica").inputValue());
-  if (metricas.join() !== "temperature,relativeHumidity,barometricPressure,windSpeed") throw new Error(`datos: ${metricas}`);
+  // Otra temperatura, la del salón (zigbee2mqtt): con su nombre, y no a la malla (ya hay una).
+  await pc.fill("#filtroTemas", "Salón");
+  await sleep(150);
+  await usar("zigbee2mqtt/Salón", "temperature");
+  await fila(pc, 4, "nombre").fill("Salón");
+  const tipos = [], malla = [];
+  for (let i = 0; i < 5; i++) { tipos.push(await fila(pc, i, "tipo").inputValue()); malla.push(await fila(pc, i, "malla").isChecked()); }
+  if (tipos.join() !== "temperature,relativeHumidity,barometricPressure,windSpeed,temperature") throw new Error(`datos: ${tipos}`);
+  if (malla.join() !== "true,true,true,true,false") throw new Error(`a la malla: ${malla}`);
   if ((await fila(pc, 3, "unidad").inputValue()) !== "km/h") throw new Error("el viento no quedó en km/h");
   if ((await fila(pc, 0, "tema").inputValue()) !== MC("temperature/state")) throw new Error("tema de la temperatura");
   if ((await fila(pc, 0, "broker").inputValue()) !== "b1" || (await fila(pc, 1, "broker").inputValue()) !== "local") throw new Error("brokers de los datos");
-  await pc.selectOption("#estCh", "1");
-  await pc.check("#estOn", { force: true });
-  await pc.click("[data-est-save]");
-  await esperarTexto(pc, /19,6 °C · ahora mismo/, "temperatura en Ajustes");
+  // Marcar también la del salón: dos del mismo tipo a la malla no puede ser.
+  await fila(pc, 4, "malla").check({ force: true });
+  await pc.click("[data-dat-save]");
+  await esperarTexto(pc, /dos datos de temperatura|una sola temperatura|Solo puede ir a la malla un/i, "error de dos temperaturas a la malla");
+  await fila(pc, 4, "malla").uncheck({ force: true });
+  await pc.click("[data-dat-save]");
+  await esperarTexto(pc, /19,6 °C · ahora mismo/, "temperatura en la ficha");
   await esperarTexto(pc, /5,0 m\/s \(18,0 km\/h\)/, "viento convertido");
+  await esperarTexto(pc, /22,1 °C · ahora mismo/, "la del salón");
+  await pc.selectOption("#mallaCh", "1");
+  await pc.check("#mallaOn", { force: true });
+  await pc.click("[data-malla-save]");
   await esperarTexto(pc, /Próximo envío a las \d\d:\d\d: «Temperatura 19,6 °C · Humedad 58 % · Presión 1015 hPa · Viento 5,0 m\/s»/, "próximo envío");
-  await fotoApartado(pc, "#estBox", "estacion-pc");
+  await fotoApartado(pc, "#datBox", "datos-receptor");
+  await fotoApartado(pc, "#mallaBox", "malla-receptor");
+  // En la tarjeta del receptor, como lecturas suyas (con su nombre la del salón).
+  await pc.keyboard.press("Escape");
+  await esperarTexto(pc, /DNN5[\s\S]*Salón\s*22,1/i, "la del salón en la tarjeta"); // las etiquetas, en mayúsculas
 });
 
 await paso("Enviar ahora: el nodo recibe la telemetría por el canal 1; las dos pantallas ven «repetido por la malla»", async () => {
+  await pc.click(`#cards .name-btn[data-open="${ME}"]`);
+  await sleep(300);
   const antes = nodo.paquetes(PORT.TELEMETRY_APP).length;
-  await pc.click("[data-est-send]");
+  await pc.click("[data-malla-send]");
   await nodo.esperar(() => nodo.paquetes(PORT.TELEMETRY_APP).length > antes, 5000, "telemetría de la estación");
   const p = nodo.paquetes(PORT.TELEMETRY_APP).at(-1);
   const tel = fromBinary(TEL.TelemetrySchema, p.payloadVariant.value.payload);
@@ -325,14 +357,60 @@ await paso("Enviar ahora: el nodo recibe la telemetría por el canal 1; las dos 
   const rout = toBinary(M.RoutingSchema, create(M.RoutingSchema, { variant: { case: "errorReason", value: 0 } }));
   nodo.paquete({ from: ME, payloadVariant: { case: "decoded", value: create(M.DataSchema, { portnum: PORT.ROUTING_APP, payload: rout, requestId: p.id }) } });
   await esperarTexto(pc, /Último \(a mano\), a las \d\d:\d\d: «Temperatura 19,6 °C[^»]*» → canal «avisos»: repetido por la malla/, "último envío en el PC");
-  await movil.click("#setBtn");
+  await movil.click(`#cards .name-btn[data-open="${ME}"]`);
   await esperarTexto(movil, /repetido por la malla\./, "último envío en el móvil");
-  await fotoApartado(movil, "#estBox", "estacion-movil");
+  await fotoApartado(movil, "#mallaBox", "malla-movil");
   await movil.keyboard.press("Escape");
   await pc.keyboard.press("Escape");
-  // Y es una lectura del receptor.
-  const yo = (await (await fetch(`${URL0}api/estado`)).json()).nodes.find((x) => x.num === ME);
-  if (yo?.metrics?.temperature?.v !== 19.6) throw new Error(`receptor: ${JSON.stringify(yo?.metrics)}`);
+  // Y son lecturas del receptor (con su clave de dato MQTT).
+  const st = await estado();
+  const d = st.paneles.paneles[ME].datos.find((x) => x.tipo === "temperature" && x.malla);
+  const yo = st.nodes.find((x) => x.num === ME);
+  if (yo?.metrics?.[d.clave]?.v !== 19.6) throw new Error(`receptor: ${JSON.stringify(yo?.metrics)}`);
+});
+
+await paso("renombrar un nodo desde el móvil: sale con su nombre nuevo en el PC y en Home Assistant", async () => {
+  await movil.click(`#cards .name-btn[data-open="${CASETA}"]`);
+  await sleep(300);
+  await esperarTexto(movil, /Su nombre en Meshtastic es «Caseta huerto»/, "su nombre de Meshtastic");
+  await movil.fill("#pnNombre", "Huerto");
+  await movil.click("[data-pn-nombre]");
+  await esperarTexto(movil, /Ahora se llama «Huerto»/, "aviso del nombre");
+  await movil.keyboard.press("Escape");
+  await esperarTexto(pc, /SENSORES VIGILADOS[\s\S]*Huerto/i, "el nombre nuevo en el PC");
+  await esperarMqtt(() => JSON.parse(visto.get(`homeassistant/sensor/vigia_${ID}/temperature/config`) || "{}").device?.name === "Vigía · Huerto", "dispositivo renombrado en HA");
+});
+
+await paso("panel nuevo sin nodo (Tasmota): sus datos, una alarma y nada a Home Assistant", async () => {
+  await pc.click("[data-panel-nuevo]");
+  await pc.fill("#npNombre", "Enchufe del taller");
+  await pc.selectOption("#npTipo", "tasmota");
+  await pc.click("[data-panel-crear]");
+  await esperarTexto(pc, /Enchufe del taller[\s\S]*Tasmota · datos por MQTT/, "su ficha");
+  if (await pc.locator("#detail [data-ask-box]").count()) throw new Error("un panel sin nodo no pide datos por la malla");
+  await pc.click("[data-dat-buscar]");
+  await esperarTexto(pc, /Encontrados \d+ con números/, "temas encontrados");
+  await pc.fill("#filtroTemas", "enchufe");
+  await esperarTexto(pc, /Power\s*45 · parece potencia/, "la potencia del enchufe");
+  const usar = usarEn(pc);
+  await usar("tele/enchufe/SENSOR", "ENERGY.Power");
+  await usar("tele/enchufe/SENSOR", "ENERGY.Total");
+  if (await pc.locator("#datBox [data-dat-k=malla]").count()) throw new Error("solo el receptor manda a la malla");
+  await pc.click("[data-dat-save]");
+  await esperarTexto(pc, /45 W · ahora mismo/, "la potencia en la ficha");
+  await fotoApartado(pc, "#detail .sheet-b", "panel-enchufe");
+  // Límite de potencia: la alarma, con el nombre del panel.
+  await pc.locator('#detail tr:has(th:text("Potencia")) [data-side="max"]').fill("40");
+  await pc.keyboard.press("Tab");
+  await esperarTexto(movil, /Enchufe del taller · Potencia por encima de 40 W/, "la alarma en el móvil");
+  await pc.keyboard.press("Escape");
+  await esperarTexto(movil, /Enchufe del taller[\s\S]*Potencia\s*45/i, "la tarjeta en el móvil");
+  await foto(movil, "movil-paneles");
+  const temas = [...visto.keys()];
+  if (temas.some((t) => /mq\d/.test(t))) throw new Error(`a Home Assistant van datos MQTT: ${temas.filter((t) => /mq\d/.test(t))}`);
+  if ([...visto.values()].some((c) => c.includes("Enchufe del taller"))) throw new Error("el panel sin nodo (o su alarma) ha ido a Home Assistant");
+  const sv = JSON.parse(visto.get("vigia/servidor/estado"));
+  if (sv.activas !== 1) throw new Error(`Home Assistant cuenta ${sv.activas} alarmas activas, no 1 (la del huerto)`);
 });
 
 await paso("gráfica: serie desde el servidor", async () => {
@@ -348,7 +426,20 @@ await paso("al reiniciar el servidor se acuerda de todo y las pantallas vuelven 
   srv = arrancarServidor();
   await esperarTexto(movil, /DNN5 conectado/, "reconectado", 20000);
   const t = await texto(movil);
-  if (!/Caseta huerto/.test(t) || !/por encima de 30/.test(t)) throw new Error("se ha perdido el vigilado o la alarma");
+  if (!/Huerto/.test(t) || !/por encima de 30/.test(t)) throw new Error("se ha perdido el vigilado o la alarma");
+  if (!/Enchufe del taller[\s\S]*Potencia/i.test(t)) throw new Error("se ha perdido el panel del enchufe");
+});
+await paso("quitar el panel del enchufe desde el móvil", async () => {
+  await movil.click("#cards .name-btn:text('Enchufe del taller')");
+  await sleep(300);
+  await movil.click("[data-panel-quitar]");
+  await movil.click("[data-panel-quitar]");
+  await esperarTexto(movil, /Panel «Enchufe del taller» quitado/, "aviso");
+  await sleep(500);
+  if (await pc.locator("#cards .name-btn:text('Enchufe del taller')").count()) throw new Error("sigue en el PC");
+  const st = await estado();
+  if (st.nodes.some((x) => x.num < 0) || Object.keys(st.cfg.watched).some((k) => Number(k) < 0)) throw new Error("sigue en el servidor");
+  if (st.active.some((a) => a.num < 0)) throw new Error("su alarma sigue activa");
 });
 await foto(movil, "movil-tras-reinicio");
 await paso("al pararse avisa a Home Assistant (offline) y al volver se conecta solo (online)", async () => {

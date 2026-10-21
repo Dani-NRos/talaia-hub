@@ -7,12 +7,21 @@
  * Devuelve { orden(datos) → Promise<{ ok, toast?, error? }>, cerrar() }.
  */
 export function conectarServidor(h) {
-  const es = new EventSource("api/eventos");
-  // EventSource vuelve a conectar solo (el servidor pide 3 s) y, al volver, llega otra vez la foto completa.
-  es.addEventListener("estado", (e) => { h.onConexion?.(true); h.onEstado(JSON.parse(e.data)); });
-  es.addEventListener("cambio", (e) => h.onCambio(JSON.parse(e.data)));
-  es.addEventListener("alarma", (e) => h.onAlarma?.(JSON.parse(e.data)));
-  es.addEventListener("error", () => h.onConexion?.(false));
+  let es = null, otra = null, cerrada = false;
+  function abrir() {
+    es = new EventSource("api/eventos");
+    // EventSource vuelve a conectar solo (el servidor pide 3 s) y, al volver, llega otra vez la foto completa.
+    es.addEventListener("estado", (e) => { h.onConexion?.(true); h.onEstado(JSON.parse(e.data)); });
+    es.addEventListener("cambio", (e) => h.onCambio(JSON.parse(e.data)));
+    es.addEventListener("alarma", (e) => h.onAlarma?.(JSON.parse(e.data)));
+    es.addEventListener("error", () => {
+      h.onConexion?.(false);
+      // Si el navegador se rinde (le llega algo que no son eventos, como la página de error de un proxy mientras el
+      // servidor arranca), no vuelve a intentarlo: se abre otra conexión.
+      if (es.readyState === EventSource.CLOSED && !cerrada) { clearTimeout(otra); otra = setTimeout(abrir, 3000); }
+    });
+  }
+  abrir();
 
   async function orden(datos) {
     try {
@@ -23,7 +32,7 @@ export function conectarServidor(h) {
       return { ok: false, error: "Sin conexión con el servidor." };
     }
   }
-  return { orden, cerrar: () => es.close() };
+  return { orden, cerrar: () => { cerrada = true; clearTimeout(otra); es.close(); } };
 }
 
 /** Histórico guardado en el servidor, con la misma forma que el de la app (store.js). */
