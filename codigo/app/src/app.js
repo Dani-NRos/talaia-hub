@@ -1,38 +1,28 @@
 import { metricMeta, sortMetrics, fmtValue, fmtWithUnit, fmtNum, fmtLimit, registrarMetricas } from "@vigia/nucleo/metrics.js";
 import { createMapView } from "./map.js";
+import { ctx } from "./ctx.js";
+import { $, $$, esc, setHTML, LS, parseNum, ICON } from "./ui.js";
+import { requestBlock, requestStatus, positionBlock, refreshPosition, copyText, switchHTML, patchSwitches } from "./views/node-parts.js";
+import { boardHTML, renderCards, toggleCard, toggleAllCards, moveCard, panelState, metaLine, stateRuleText, trendShort, displayName, saveCardUi } from "./views/dashboard.js";
 import { relays, snrQuality, loraSf, weakest, UNKNOWN_NODE, PRESET_NAME } from "@vigia/nucleo/route.js";
-import { distM, compass, precisionM, fmtDist, coordText, mapsUrl, SOURCE } from "@vigia/nucleo/geo.js";
+import { fmtDist } from "@vigia/nucleo/geo.js";
 import { trendDefault, parseTrendRule } from "@vigia/nucleo/trend.js";
 import { searchNodes, highlight, tokens, FILTERS, SORTS } from "./meshsearch.js";
 import { conectarServidor, crearStoreRemoto } from "./remoto.js";
-import { t, setLang, getLang, LANGS } from "./i18n.js";
+import { t as tr, setLang, getLang, LANGS } from "./i18n.js";
 import { initShell, go, isView, setAlarms, relabel, getTheme, setTheme } from "./shell.js";
 import { MIN, HOUR, DAY, isNum, hhmm, dShort, ago, stamp, dur, trendDec, fmtTrend, trendVerb, hoursText, lastWindow } from "@vigia/nucleo/textos.js";
 import { TIPOS, LISTA_TIPOS, TIPOS_PANEL, NOMBRES_ESTADO, tipoMalla, esEstado, unidades, adivinarTipo, adivinarEstado, proponerOrden, unidadDe, textoDato, metasDe, MALLA_MAX_SALTOS } from "@vigia/nucleo/mqtt-datos.js";
-import { crearMotor, estadoInicial, MESH_HOURLY, ASK, ASK_ALL, askKey, RE, seriesKey, trendKey, estadoKey, hexId } from "@vigia/nucleo/motor.js";
+import { crearMotor, estadoInicial, MESH_HOURLY, askKey, seriesKey, trendKey, estadoKey, hexId } from "@vigia/nucleo/motor.js";
 
 /* ───────────── utilidades ───────────── */
-const $ = (s, r = document) => r.querySelector(s);
-const $$ = (s, r = document) => [...r.querySelectorAll(s)];
-const esc = (s) => String(s ?? "").replace(/[&<>"']/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[c]));
 const APP_VERSION = "1.20.0";
 const REPO_URL = "https://github.com/Dani-NRos/talaia-hub";
 const ISSUES_URL = `${REPO_URL}/issues`;
 
-const LS = {
-  get(k, d) { try { const v = localStorage.getItem(k); return v == null ? d : JSON.parse(v); } catch { return d; } },
-  set(k, v) { try { localStorage.setItem(k, JSON.stringify(v)); } catch { /* sin almacenamiento */ } },
-  del(k) { try { localStorage.removeItem(k); } catch { /* nada */ } },
-};
 
 const wday = new Intl.DateTimeFormat("es-ES", { weekday: "short" });
 
-function parseNum(s) {
-  const x = String(s ?? "").trim().replace(",", ".");
-  if (x === "") return null;
-  const n = Number(x);
-  return Number.isFinite(n) ? n : NaN;
-}
 
 /* ───────────── estado ───────────── */
 const DEFAULT_SETTINGS = { sound: true, wake: false, retentionDays: 30, defaultOfflineMin: 75, mesh: null };
@@ -59,7 +49,7 @@ let mapView = null; // se crea al abrir el mapa por primera vez
 const motor = crearMotor(S, {
   cambio: () => render(),
   lectura(num) { if (S.detail && S.detail.num === num) refreshDetailLive(); refreshFull(num); },
-  posicion: (num) => refreshPos(num),
+  posicion: (num) => refreshPosition(num),
   peticion: (num) => refreshAsk(num),
   peticionEstado: (num) => patchAskStatus(num),
   ruta() { if (mapView && isView("map")) mapView.update(); },
@@ -75,11 +65,11 @@ const motor = crearMotor(S, {
 });
 const {
   node, isWatched, trendNow, raise,
-  ack, unacked, alarmTitle, alarmDetail, canAsk, askVisible, askFailText, receptorUsesPki, keyNeeded,
-  staleKeyFail, hopName, meshCfg,
+  ack, unacked, alarmTitle, alarmDetail, canAsk, receptorUsesPki, hopName, meshCfg,
 } = motor;
 let servidor = null; // modo «Servidor»: la conexión con él
 const orden = (datos) => servidor.orden(datos);
+Object.assign(ctx, { S, motor, orden, toast: (m) => toast(m), render: () => render(), sparkHTML, sparkStateHTML: sparkEstadoHTML });
 
 /* ───────────── persistencia: solo lo de este aparato ───────────── */
 function saveSettings() { LS.set("vigia.settings", S.settings); }
@@ -92,56 +82,16 @@ function trendNowText(num, k, rule) {
   if (r.change <= 0) return `Ahora: no ${rule.dir === "down" ? "ha bajado" : "ha subido"} ${lastWindow(rule.hours)}.`;
   return `Ahora: ${rule.dir === "down" ? "ha bajado" : "ha subido"} ${fmtTrend(k, r.change, trendDec(k, r.change))} ${lastWindow(rule.hours)}.`;
 }
-/** Para la tarjeta: «↓3/3 h». */
-const trendShort = (k, rule) => `${rule.dir === "down" ? "↓" : "↑"}${fmtLimit(k, rule.delta)}/${hoursText(rule.hours)}`;
 
 /* ───────────── pedir datos a un nodo ───────────── */
-function askChips(num) {
-  const ok = canAsk();
-  return Object.entries(ASK).map(([type, a]) => {
-    const r = S.req.get(askKey(num, type));
-    const st = askVisible(r) && !staleKeyFail(r) ? r.state : "";
-    return `<button type="button" class="ask-b${st ? ` is-${st}` : ""}" data-ask="${type}" data-num="${num}" title="${esc(a.what)}"${!ok || st === "wait" ? " disabled" : ""}>${a.label}</button>`;
-  }).join("");
-}
-function askStatus(num, types = Object.keys(ASK_ALL).filter((t) => t !== "pos" && t !== "route")) {
-  return types.map((type) => S.req.get(askKey(num, type))).filter((r) => askVisible(r) && !staleKeyFail(r)).sort((a, b) => b.t0 - a.t0).map((r) => {
-    const l = ASK_ALL[r.type].label;
-    const secs = Math.round((Date.now() - r.t0) / 1000);
-    if (r.state === "wait" && r.type === "route") return `<span class="s-wait">Trazando la ruta… ${secs} s</span>`;
-    if (r.state === "wait") return `<span class="s-wait">${l}: ${r.acked ? "la petición llegó, esperando respuesta" : "esperando respuesta"}… ${secs} s</span>`;
-    if (r.state === "ok" && r.type === "route") return "";
-    if (r.state === "ok" && r.type === "pos") return `<span class="s-ok">${l}: ${r.noLoc ? "el nodo no comparte su ubicación en este canal" : `recibida a las ${hhmm.format(new Date(r.tDone))}`}</span>`;
-    if (r.state === "ok" && r.type === "info") return `<span class="s-ok">${l}: recibida a las ${hhmm.format(new Date(r.tDone))}${r.gotKey ? ", clave guardada" : ", pero ese nodo no tiene clave (firmware anterior a 2.5)"}</span>`;
-    if (r.state === "ok") return `<span class="s-ok">${l}: recibido a las ${hhmm.format(new Date(r.tDone))}, tardó ${Math.max(1, Math.round((r.tDone - r.t0) / 1000))} s</span>`;
-    return `<span class="s-fail">${l}: ${esc(askFailText(r.why, r))}</span>`;
-  }).join("");
-}
-function keyRow(num, sheet) {
-  if (num === S.myNode) return "";
-  const need = keyNeeded(num);
-  if (!sheet && !need) return "";
-  const n = S.nodes.get(num);
-  const r = S.req.get(askKey(num, "info"));
-  const waiting = r?.state === "wait";
-  const theyLack = Object.keys(ASK).some((t) => { const q = S.req.get(askKey(num, t)); return askVisible(q) && q.state === "fail" && q.why === RE.PKI_UNKNOWN_PUBKEY && !staleKeyFail(q); });
-  const txt = need && theyLack ? "Este nodo no tiene la clave de tu receptor y no puede leer tus peticiones. Pedir su ficha se la envía, aunque no conteste."
-    : need ? "Tu receptor no tiene la clave de este nodo y no le puede pedir datos."
-    : n?.key ? "Tu receptor tiene la clave de este nodo."
-    : "La ficha trae el nombre y la clave del nodo.";
-  return `<div class="key-row${need ? " need" : ""}"><span>${txt}</span><button type="button" class="btn ghost sm" data-ask="info" data-num="${num}"${!canAsk() || waiting ? " disabled" : ""}>${waiting ? "Pidiendo ficha…" : "Pedir ficha del nodo"}</button></div>`;
-}
-function askBlock(num, sheet = false) {
-  return `<span class="ask-l">Pedir datos ahora</span><div class="ask-row">${askChips(num)}</div>${keyRow(num, sheet)}<p class="ask-st" data-ask-st="${num}">${askStatus(num)}</p>`;
-}
 function refreshAsk(num) {
-  for (const el of $$(`[data-ask-box="${num}"]`)) el.innerHTML = askBlock(num, el.dataset.sheet === "1");
+  for (const el of $$(`[data-ask-box="${num}"]`)) el.innerHTML = requestBlock(num, el.dataset.sheet === "1");
   for (const el of $$(`[data-route-box="${num}"]`)) el.innerHTML = routeBlock(num);
 }
 function patchAskStatus(num) {
-  for (const el of $$(`[data-ask-st="${num}"]`)) el.innerHTML = askStatus(num);
-  for (const el of $$(`[data-pos-st="${num}"]`)) el.innerHTML = askStatus(num, ["pos"]);
-  for (const el of $$(`[data-route-st="${num}"]`)) el.innerHTML = askStatus(num, ["route"]);
+  for (const el of $$(`[data-ask-st="${num}"]`)) el.innerHTML = requestStatus(num);
+  for (const el of $$(`[data-pos-st="${num}"]`)) el.innerHTML = requestStatus(num, ["pos"]);
+  for (const el of $$(`[data-route-st="${num}"]`)) el.innerHTML = requestStatus(num, ["route"]);
 }
 
 /* ───────────── ruta por la malla (traceroute) ───────────── */
@@ -173,7 +123,7 @@ function routeBlock(num) {
   const tr = S.traces[num];
   const sf = loraSf(S.lora);
   let h = `<div class="blk-h"><h3>Ruta por la malla</h3><button type="button" class="mini" data-ask="route" data-num="${num}"${!canAsk() || waiting ? " disabled" : ""}>${waiting ? "Trazando…" : tr ? "Volver a trazar" : "Trazar ruta"}</button></div>`;
-  h += `<p class="ask-st" data-route-st="${num}">${askStatus(num, ["route"])}</p>`;
+  h += `<p class="ask-st" data-route-st="${num}">${requestStatus(num, ["route"])}</p>`;
   if (tr) {
     h += `<p class="meta">Trazada ${esc(ago(tr.t))} (${esc(stamp(tr.t))}) · contestó en ${Math.max(1, Math.round(tr.ms / 1000))} s</p>`;
     h += `<div class="rt-cols">${legHTML("Ida", tr.fwd, sf)}${tr.back ? legHTML("Vuelta", tr.back, sf) : `<div class="rt"><h4>Vuelta</h4><p class="hint">Sin datos: algún nodo del camino tiene un firmware anterior a 2.5.</p></div>`}</div>`;
@@ -188,65 +138,13 @@ function routeBlock(num) {
 }
 
 /* ───────────── bloque de ubicación ───────────── */
-function fenceLine(num) {
-  const w = S.cfg.watched[num], n = S.nodes.get(num);
-  if (!w?.fence || !n?.pos) return "";
-  const d = distM(w.fence, n.pos);
-  const r = `valla de ${fmtDist(w.fence.r)}`;
-  if (S.active.has(`${num}||moved`)) return `<p class="fence bad">Fuera de su sitio: a ${fmtDist(d)} al ${compass(w.fence, n.pos)} · ${r}</p>`;
-  if (d > w.fence.r) return `<p class="fence warn">Posible movimiento: a ${fmtDist(d)} al ${compass(w.fence, n.pos)}. Esperando otra posición para confirmar · ${r}</p>`;
-  return `<p class="fence ok">En su sitio${d >= 1 ? ` · a ${fmtDist(d)}` : ""} · ${r}</p>`;
-}
-function posMeta(p) {
-  const pm = precisionM(p.bits);
-  return [pm ? `±${fmtDist(pm)}` : p.bits >= 32 ? "precisión completa" : "", ago(p.t)].filter(Boolean).join(" · ");
-}
-function posBlock(num, sheet = false) {
-  const n = S.nodes.get(num), p = n?.pos;
-  const w = S.cfg.watched[num];
-  const r = S.req.get(askKey(num, "pos"));
-  const waiting = r?.state === "wait";
-  const askBtn = `<button type="button" class="mini" data-ask="pos" data-num="${num}"${!canAsk() || waiting ? " disabled" : ""}>${waiting ? "Pidiendo…" : "Pedir posición"}</button>`;
-  let h = `<div class="pos-top"><span class="pos-l">Ubicación</span>${p ? `<span class="pos-m">${esc(posMeta(p))}</span>` : ""}</div>`;
-  if (p) {
-    const c = coordText(p);
-    h += `<code class="pos-c">${c}</code><div class="pos-row"><button type="button" class="mini" data-copy="${c}">Copiar</button><button type="button" class="mini" data-map-focus="${num}">Ver en el mapa</button><a class="mini" href="${mapsUrl(p)}" target="_blank" rel="noopener" title="Abre Google Maps; necesita internet">Google Maps</a>${sheet ? askBtn : ""}</div>`;
-  } else {
-    h += `<div class="pos-row"><span class="hint">Este nodo aún no ha compartido su ubicación.</span>${askBtn}</div>`;
-  }
-  h += `<p class="ask-st" data-pos-st="${num}">${askStatus(num, ["pos"])}</p>`;
-  if (!sheet) return h + fenceLine(num);
-  if (p) {
-    const facts = [SOURCE[p.src] ? `Origen: ${SOURCE[p.src]}` : "", isNum(p.alt) ? `Altitud ${fmtNum(p.alt, 0)} m` : "", `Posición de las ${stamp(p.t)}`].filter(Boolean);
-    h += `<p class="hint">${esc(facts.join(" · "))}</p>`;
-  }
-  if (!w) return h;
-  // valla antirrobo (solo nodos vigilados)
-  const f = w.fence;
-  const pm = p ? precisionM(p.bits) : null;
-  const rVal = f ? f.r : Math.max(200, pm ? Math.ceil((pm * 2) / 50) * 50 : 0);
-  h += `<div class="fence-box"><h4>Valla antirrobo</h4>`;
-  h += f ? fenceLine(num) + `<p class="hint">Su sitio: ${coordText(f)}, fijado ${esc(stamp(f.at))}.</p>`
-    : `<p class="hint">Fija su sitio y un radio. Si dos posiciones seguidas caen fuera, salta la alarma.</p>`;
-  h += `<div class="off-row"><label for="fence-r">Radio</label><span class="inp-u"><input id="fence-r" class="inp" inputmode="numeric" autocomplete="off" value="${rVal}"><span>m</span></span></div>`;
-  h += `<div class="btns"><button type="button" class="btn ${f ? "ghost" : "primary"} sm" data-fence-set="${num}"${p ? "" : " disabled"}>${f ? "Mover su sitio a la posición actual" : "Fijar su sitio en la posición actual"}</button>${f ? `<button type="button" class="btn danger-ghost sm" data-fence-del="${num}">Quitar valla</button>` : ""}</div>`;
-  if (p?.src === 1) h += `<p class="warn-t">Este nodo tiene la posición fijada a mano: si se lo llevan seguirá mandando las mismas coordenadas. Para él, la alarma útil es la de «sin señal».</p>`;
-  if (pm && pm > (f ? f.r : rVal) / 2) h += `<p class="warn-t">Este nodo comparte su posición con ±${fmtDist(pm)} de precisión: no se notan movimientos menores. Para afinar, que la comparta en un canal privado con precisión completa.</p>`;
-  return h + `</div>`;
-}
-function refreshPos(num) {
-  for (const el of $$(`[data-pos-box="${num}"]`)) {
-    if (el.contains(document.activeElement) && document.activeElement.matches("input")) continue; // no pisar lo que se escribe
-    el.innerHTML = posBlock(num, el.dataset.sheet === "1");
-  }
-}
 
 async function setFence(num) {
   const r = parseNum($("#fence-r")?.value);
   const res = await orden({ orden: "valla", num, radio: r });
   if (res.error) return toast(res.error);
   if (!res.ok) return;
-  refreshPos(num);
+  refreshPosition(num);
   render();
   toast(res.toast);
 }
@@ -256,35 +154,16 @@ async function setFenceRadius(num, input) {
   if (res.error) { if (res.radio != null) input.value = res.radio; return toast(res.error); }
   if (!res.ok) return;
   input.blur();
-  refreshPos(num);
+  refreshPosition(num);
   render();
   toast(res.toast);
 }
 async function delFence(num) {
   if (!(await orden({ orden: "quitarValla", num })).ok) return;
-  refreshPos(num);
+  refreshPosition(num);
   render();
 }
 
-async function copyText(text, btn) {
-  try {
-    await navigator.clipboard.writeText(text);
-  } catch {
-    // Respaldo: seleccionar el texto para copiarlo a mano o con execCommand.
-    const ta = document.createElement("textarea");
-    ta.value = text;
-    ta.setAttribute("readonly", "");
-    ta.style.cssText = "position:fixed;opacity:0;left:0;top:0";
-    document.body.append(ta);
-    ta.select();
-    let ok = false;
-    try { ok = document.execCommand("copy"); } catch { /* sin portapapeles */ }
-    ta.remove();
-    if (!ok) return toast(`No se pudo copiar. Coordenadas: ${text}`);
-  }
-  if (btn) { btn.textContent = "Copiado"; setTimeout(() => { if (btn.isConnected) btn.textContent = "Copiar"; }, 1600); }
-  toast("Coordenadas copiadas");
-}
 // Solo se reescribe el texto de estado cada segundo, para no robar toques a los botones.
 setInterval(() => {
   const waiting = new Set([...S.req.values()].filter((r) => r.state === "wait").map((r) => r.num));
@@ -443,7 +322,7 @@ let filtroTemas = "";
 const HALLADOS_VISTOS = 40; // de lo encontrado, cuántos se enseñan (filtrando se llega al resto)
 const MALLA_CADA_TXT = { 15: "15 minutos", 30: "30 minutos", 60: "1 hora", 180: "3 horas" };
 const CADUCA_TXT = { 0: "Si deja de llegar, mandar el último", 60: "No mandarlo si lleva 1 h sin llegar", 180: "No mandarlo si lleva 3 h sin llegar", 720: "No mandarlo si lleva 12 h sin llegar", 1440: "No mandarlo si lleva 24 h sin llegar" };
-const nom = (n) => n?.alias || n?.long || ""; // el nombre que se ve: el de Vigía, o el de Meshtastic
+const nom = displayName; // el nombre que se ve: el de Vigía, o el de Meshtastic
 const panelCfg = (num) => S.paneles?.paneles?.[num] || null;
 /** Para un dato nuevo: el broker que no es el de este servidor (de momento, el de HA) o el que haya. */
 const brokerPorDefecto = () => { const b = mqttBrokers(); return (b.find((x) => !x.local) || b[0])?.id || ""; };
@@ -1064,7 +943,7 @@ function estadoSVG(tramos, metric, from, to, W, H = 64) {
 function sparkEstadoHTML(series, metric, cur) {
   const W = 300, H = 46, now = Date.now(), from = now - DAY;
   const tramos = tramosEstado(series, from, now, cur);
-  if (!tramos.length) return `<div class="spark spark-empty"><span>Aún sin histórico</span></div>`;
+  if (!tramos.length) return `<div class="spark spark-empty"><span>${esc(tr("card.noHistory"))}</span></div>`;
   const x = (t) => ((t - from) / (now - from)) * W;
   return `<div class="spark"><svg viewBox="0 0 ${W} ${H}" preserveAspectRatio="none" aria-hidden="true">${tramos.map((s) => `<rect class="eb ${s.v ? "on" : "off"}" x="${x(s.a).toFixed(1)}" y="8" width="${Math.max(0.5, x(s.b) - x(s.a)).toFixed(1)}" height="${H - 16}"/>`).join("")}</svg></div>`;
 }
@@ -1075,7 +954,7 @@ function sparkHTML(series, metric, rule) {
   const now = Date.now(), from = now - DAY;
   const ser = series.filter((p) => p.t >= from && !(metric === "batteryLevel" && p.v > 100));
   const dom = yDomain(ser, metric, rule);
-  if (!dom || ser.length < 2 || ser[ser.length - 1].t - ser[0].t < 45 * MIN) return `<div class="spark spark-empty"><span>Aún sin histórico</span></div>`;
+  if (!dom || ser.length < 2 || ser[ser.length - 1].t - ser[0].t < 45 * MIN) return `<div class="spark spark-empty"><span>${esc(tr("card.noHistory"))}</span></div>`;
   const [lo, hi] = dom;
   const x = (t) => ((t - from) / (now - from)) * W;
   const y = (v) => 2 + ((hi - v) / (hi - lo)) * (H - 4);
@@ -1111,16 +990,6 @@ function render() {
   });
 }
 
-const ICON = {
-  server: `<svg viewBox="0 0 24 24" aria-hidden="true"><rect x="4" y="4" width="16" height="6.5" rx="1.5" fill="none" stroke="currentColor" stroke-width="1.7"/><rect x="4" y="13.5" width="16" height="6.5" rx="1.5" fill="none" stroke="currentColor" stroke-width="1.7"/><circle cx="8" cy="7.25" r="1.1" fill="currentColor"/><circle cx="8" cy="16.75" r="1.1" fill="currentColor"/></svg>`,
-  gear: `<svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 15.2a3.2 3.2 0 1 0 0-6.4 3.2 3.2 0 0 0 0 6.4Z" fill="none" stroke="currentColor" stroke-width="1.8"/><path d="M19.4 13.5a7.6 7.6 0 0 0 0-3l2-1.6-2-3.4-2.4.9a7.5 7.5 0 0 0-2.6-1.5L14 2.4h-4l-.4 2.5A7.5 7.5 0 0 0 7 6.4l-2.4-.9-2 3.4 2 1.6a7.6 7.6 0 0 0 0 3l-2 1.6 2 3.4 2.4-.9a7.5 7.5 0 0 0 2.6 1.5l.4 2.5h4l.4-2.5a7.5 7.5 0 0 0 2.6-1.5l2.4.9 2-3.4-2-1.6Z" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linejoin="round"/></svg>`,
-  close: `<svg viewBox="0 0 24 24" aria-hidden="true"><path d="M6 6l12 12M18 6L6 18" stroke="currentColor" stroke-width="2" stroke-linecap="round"/></svg>`,
-  chevron: `<svg viewBox="0 0 24 24" aria-hidden="true"><path d="M6 9l6 6 6-6" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/></svg>`,
-  expand: `<svg viewBox="0 0 24 24" aria-hidden="true"><path d="M4 9V4h5M20 9V4h-5M4 15v5h5M20 15v5h-5" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/></svg>`,
-  grip: `<svg viewBox="0 0 24 24" aria-hidden="true"><g fill="currentColor"><circle cx="9" cy="6" r="1.6"/><circle cx="15" cy="6" r="1.6"/><circle cx="9" cy="12" r="1.6"/><circle cx="15" cy="12" r="1.6"/><circle cx="9" cy="18" r="1.6"/><circle cx="15" cy="18" r="1.6"/></g></svg>`,
-  up: `<svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 19V5M6 11l6-6 6 6" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/></svg>`,
-  down: `<svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 5v14M6 13l6 6 6-6" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/></svg>`,
-};
 
 /** Barra de arriba: primero, si hay conexión con el servidor; después, cómo está su receptor. */
 function renderTop() {
@@ -1128,56 +997,24 @@ function renderTop() {
   const st = !S.servidorOk ? "noserver" : S.link.state;
   // On a phone the short label leaves room for the section's name.
   let label, short;
-  const name = S.nodes.get(S.myNode)?.short || t("link.receiver");
-  if (!S.servidorOk) [label, short] = [t("link.noServer"), t("link.short.noServer")];
-  else if (st === "ready") [label, short] = [t("link.ready", { name }), name];
-  else if (st === "configuring") [label, short] = [S.link.extra?.packets ? t("link.readingN", { n: S.link.extra.packets }) : t("link.reading"), t("link.short.reading")];
-  else if (st === "reconnecting" || st === "connecting") [label, short] = S.trouble?.kind === "unplugged" ? [t("link.unplugged"), t("link.short.unplugged")] : [t("link.lost"), t("link.short.lost")];
-  else [label, short] = [t("link.stopped"), t("link.short.stopped")];
+  const name = S.nodes.get(S.myNode)?.short || tr("link.receiver");
+  if (!S.servidorOk) [label, short] = [tr("link.noServer"), tr("link.short.noServer")];
+  else if (st === "ready") [label, short] = [tr("link.ready", { name }), name];
+  else if (st === "configuring") [label, short] = [S.link.extra?.packets ? tr("link.readingN", { n: S.link.extra.packets }) : tr("link.reading"), tr("link.short.reading")];
+  else if (st === "reconnecting" || st === "connecting") [label, short] = S.trouble?.kind === "unplugged" ? [tr("link.unplugged"), tr("link.short.unplugged")] : [tr("link.lost"), tr("link.short.lost")];
+  else [label, short] = [tr("link.stopped"), tr("link.short.stopped")];
   b.dataset.state = st;
   b.setAttribute("aria-label", label);
   setHTML(b, `<span class="ld"></span>${ICON.server}<span class="lt">${esc(label)}</span><span class="lt-s" aria-hidden="true">${esc(short)}</span>`);
 }
 
 function renderBoard() {
-  const list = [...S.active.values()].sort((a, b) => (a.acked - b.acked) || (b.since - a.since));
-  const watchedN = Object.keys(S.cfg.watched).length;
-  let html = "";
-  if (list.length) {
-    const open = list.filter((a) => !a.acked).length;
-    const cls = open ? "crit" : "seen";
-    html += `<div class="board ${cls}"><div class="board-h"><h2>${open ? (open === 1 ? "1 alarma sin atender" : `${open} alarmas sin atender`) : (list.length === 1 ? "1 alarma vista, sigue activa" : `${list.length} alarmas vistas, siguen activas`)}</h2>${open > 1 ? `<button class="btn on-dark" data-ackall>Enterado todas</button>` : ""}</div><ul class="al-list">`;
-    for (const a of list) {
-      html += `<li class="al${a.acked ? " acked" : ""}" data-kind="${a.kind}"><div class="al-main"${a.num != null ? ` data-open="${a.num}"` : ""}><strong>${esc(alarmTitle(a))}</strong><span>${esc(alarmDetail(a))}${a.late ? " Recibida al reconectar." : ""}</span></div><div class="al-side"><span class="al-t">desde ${esc(stamp(a.since))}</span>${a.acked ? `<span class="al-ok">Visto</span>` : `<button class="btn on-dark" data-ack="${esc(a.key)}">Enterado</button>`}</div></li>`;
-    }
-    html += `</ul></div>`;
-  } else {
-    let lastT = 0;
-    for (const num of Object.keys(S.cfg.watched)) lastT = Math.max(lastT, S.nodes.get(Number(num))?.lastHeard || 0);
-    const parts = watchedN
-      ? [`${watchedN} ${watchedN === 1 ? "nodo vigilado" : "nodos vigilados"}`, lastT ? `último dato ${ago(lastT)}` : "sin datos aún"]
-      : ["Ningún nodo vigilado todavía"];
-    html += `<div class="board calm"><span class="calm-dot"></span><div><h2>${watchedN ? "Todo en orden" : "Elige qué vigilar"}</h2><p>${esc(parts.join(" · "))}</p></div></div>`;
-  }
-  const tHTML = troubleHTML();
-  html += tHTML;
-  if (!tHTML && S.link.state !== "ready" && !S.active.has("link")) {
-    const msg = S.link.state === "idle"
-      ? "Sin receptor conectado. Mientras tanto ves los últimos datos guardados y no puedo saber si un nodo deja de emitir."
-      : "Esperando al receptor. Las alarmas de nodo sin señal están en pausa hasta que vuelva.";
-    html += `<div class="notice"><p>${esc(msg)}</p></div>`;
-  }
+  const html = boardHTML();
   setHTML($("#board"), html);
   setHTML($("#alarmBoard"), html);
 }
 
 /* ───────────── cuando el servidor o su receptor no conectan ───────────── */
-function troubleHTML() {
-  if (!S.servidorOk) return `<div class="trouble" role="status"><h2>Sin conexión con el servidor</h2><p>Esta pantalla no llega al servidor de Vigía. Lo vuelve a intentar sola cada pocos segundos. Mientras tanto, el servidor sigue vigilando.</p><ol><li>Comprueba que este aparato está en la red de casa (o en Tailscale).</li><li>Si el servidor se ha reiniciado, espera un momento.</li></ol></div>`;
-  const tr = S.trouble;
-  if (!tr || S.link.state === "ready" || tr.count < 2) return "";
-  return `<div class="trouble" role="status"><h2>El servidor no conecta con su receptor</h2><p>${esc(tr.detail || tr.kind)}. ${esc(tr.consejo || "")} <span class="tr-n">${tr.count} intentos seguidos.</span></p><div class="btns"><button class="btn primary" data-retry>Reintentar ahora</button><button class="btn ghost" data-diag>Ver diagnóstico</button></div></div>`;
-}
 
 /* ───────────── diagnóstico de conexión ───────────── */
 function pushDiag(e) {
@@ -1213,211 +1050,17 @@ function issueUrl() {
   return url;
 }
 
-function nodeState(num) {
-  const al = [...S.active.values()].filter((a) => a.num === num);
-  if (al.some((a) => a.kind === "moved")) return ["crit", "Fuera de sitio"];
-  if (al.some((a) => a.kind === "high" || a.kind === "low" || a.kind === "trend" || a.kind === "estado")) return ["crit", "Alarma"];
-  const n = S.nodes.get(num);
-  if (al.some((a) => a.kind === "conexion") || n?.conectado === false) return ["off", "Sin conexión"]; // lo dice el dispositivo
-  if (al.some((a) => a.kind === "offline")) return ["off", num < 0 ? "Sin datos" : "Sin señal"];
-  if (!n || !n.lastHeard) return ["none", "Sin datos"];
-  return ["ok", "Normal"];
-}
 
-/** Cuándo se oyó por última vez (en un panel sin nodo, cuándo llegó su último dato por MQTT). */
-const vistoTxt = (n) => (n.num < 0
-  ? [n.conectado === false ? `desconectado ${ago(n.conectadoT)}` : "", n.lastHeard ? `último dato ${ago(n.lastHeard)}` : "sin datos todavía"].filter(Boolean).join(" · ")
-  : n.lastHeard ? `visto ${ago(n.lastHeard)}` : "sin señal registrada");
-/** El dato de un panel por su clave (para saber si se puede encender y apagar). */
-const datoDe = (num, k) => panelCfg(num)?.datos?.find((d) => d.clave === k) || null;
-/**
- * Interruptor de un estado que se puede encender y apagar desde Vigía (servidor): manda la orden al pulsar, sin
- * confirmación; «Enviando…» hasta que el dispositivo dice que lo ha hecho; si no contesta, lo dice.
- */
-function interruptorHTML(num, k) {
-  if (!datoDe(num, k)?.orden) return "";
-  const m = metricMeta(k), cur = S.nodes.get(num)?.metrics?.[k];
-  const o = S.paneles?.ordenes?.[k];
-  const on = cur?.v === 1;
-  const txt = o?.enviando ? "Enviando…" : o?.error ? `${o.error}` : "";
-  return `<span class="tgl-w" data-sw="${k}"><button type="button" class="tgl${on ? " on" : ""}${o?.enviando ? " env" : ""}" role="switch" aria-checked="${on}" data-orden="${k}" data-num="${num}"${o?.enviando ? " disabled" : ""} aria-label="${esc(m.label)}: ${esc(m.estados?.[on ? 1 : 0] ? `pasar a ${m.estados[on ? 1 : 0]}` : "cambiar")}"><span class="tgl-ui"></span></button>${txt ? `<span class="tgl-t${o?.error ? " warn-t" : ""}">${esc(txt)}</span>` : ""}</span>`;
-}
 async function mandarOrden(num, k) {
   const cur = S.nodes.get(num)?.metrics?.[k];
   const res = await orden({ orden: "mandar", num, clave: k, v: cur?.v === 1 ? 0 : 1 });
   if (!res.ok && res.error) toast(res.error);
 }
-/** Los interruptores de la ficha y de la pantalla completa, al día (sin redibujar lo demás). */
-function patchInterruptores() {
-  for (const el of $$("[data-sw]")) {
-    const box = el.closest("[data-sw-num]");
-    if (!box) continue;
-    const html = interruptorHTML(Number(box.dataset.swNum), el.dataset.sw);
-    if (html && el.outerHTML !== html) el.outerHTML = html;
-  }
-}
 
-/** Lo que se ve de la alarma de un estado: «avisa: Abierta +10 min». */
-const estadoReglaTxt = (k, r) => (r ? `avisa: ${metricMeta(k).estados[r.cuando ? 0 : 1]}${r.min ? ` +${dur(r.min * MIN)}` : ""}` : "");
-function metaLine(n) {
-  const bits = [vistoTxt(n)];
-  if (isNum(n.hops)) bits.push(n.hops === 0 ? "directo" : `${n.hops} ${n.hops === 1 ? "salto" : "saltos"}`);
-  if (isNum(n.snr) && n.snr !== 0) bits.push(`SNR ${fmtNum(n.snr, 1)} dB`);
-  return bits.join(" · ");
-}
 
 /* ───────────── tarjetas de los nodos vigilados ───────────── */
-function saveUi() { LS.set("vigia.cards", S.ui); }
-/** Nodos vigilados en el orden elegido; los que aún no tienen sitio van al final, por nombre. */
-function watchedOrder() {
-  const pos = new Map(S.ui.order.map((n, i) => [n, i]));
-  const at = (n) => (pos.has(n) ? pos.get(n) : Infinity);
-  return Object.keys(S.cfg.watched).map(Number)
-    .sort((a, b) => at(a) - at(b) || nom(S.nodes.get(a)).localeCompare(nom(S.nodes.get(b)), "es"));
-}
-/** Batería para la tarjeta contraída: «88 %», «USB» o nada. */
-function batteryHTML(num) {
-  const b = S.nodes.get(num)?.metrics?.batteryLevel;
-  if (!b || !isNum(b.v)) return "";
-  const usb = b.v > 100;
-  const r = S.cfg.watched[num]?.rules?.batteryLevel || {};
-  const low = !usb && ((isNum(r.min) && b.v < r.min) || b.v <= 15);
-  const lvl = usb ? 1 : Math.max(0, Math.min(1, b.v / 100));
-  const icon = `<svg viewBox="0 0 26 14" aria-hidden="true"><rect x=".75" y=".75" width="21.5" height="12.5" rx="2.5" fill="none" stroke="currentColor" stroke-width="1.5"/><rect x="23" y="4.5" width="2.2" height="5" rx="1" fill="currentColor"/><rect x="2.75" y="2.75" width="${(17.5 * lvl).toFixed(1)}" height="8.5" rx="1" fill="currentColor"/></svg>`;
-  return `<span class="bat${low ? " low" : ""}" title="Batería">${icon}${usb ? "USB" : `${fmtNum(b.v, 0)} %`}</span>`;
-}
-function cardHead(num, n, st, stLabel, min) {
-  const meta = min ? vistoTxt(n) : metaLine(n);
-  return `<header class="card-h"><span class="tag">${esc(n.short)}</span><h3><button type="button" class="name-btn" data-open="${num}" aria-label="Abrir ficha de ${esc(nom(n))}, estado ${stLabel}">${esc(nom(n))}</button></h3><p class="meta">${esc(meta)}${min ? batteryHTML(num) : ""}</p><span class="pill p-${st}">${stLabel}</span><button type="button" class="icon-btn tg" data-card-toggle="${num}" aria-expanded="${!min}" aria-label="${min ? "Expandir" : "Contraer"} ${esc(nom(n))}">${ICON.chevron}</button></header>`;
-}
 
-function renderCards() {
-  const el = $("#cards");
-  const nums = watchedOrder();
-  $("#watchCount").textContent = nums.length ? String(nums.length) : "";
-  const tools = $("#cardTools");
-  tools.hidden = false;
-  const allMin = nums.length > 0 && nums.every((n) => S.ui.collapsed[n]);
-  const nuevo = `<button type="button" class="btn ghost sm" data-panel-nuevo>Añadir panel</button>`;
-  setHTML(tools, S.ordering
-    ? `<button type="button" class="btn primary sm" data-order-done>Listo</button>`
-    : `${nums.length ? `<button type="button" class="btn ghost sm" data-cards-all>${allMin ? "Expandir todas" : "Contraer todas"}</button>` : ""}${nums.length > 1 ? `<button type="button" class="btn ghost sm" data-order>Ordenar</button>` : ""}${nuevo}`);
-  el.classList.toggle("ordering", S.ordering);
-  if (!nums.length) {
-    setHTML(el, `<div class="empty"><p><strong>Aquí aparecerán tus sensores.</strong> En “Resto de la malla” toca <em>Vigilar</em> en un nodo para fijarlo aquí y ponerle alarmas de umbral y de nodo sin señal. Para un dispositivo que publica por MQTT (Shelly, Tasmota, Zigbee…), pulsa <em>Añadir panel</em>.</p></div>`);
-    return;
-  }
-  if (S.ordering) {
-    if (drag) return; // no se repinta mientras se arrastra
-    setHTML(el, `<ol class="ord-list" aria-label="Orden de las tarjetas">${nums.map((num, i) => {
-      const n = node(num);
-      return `<li class="ord-row" data-num="${num}"><span class="ord-pos">${i + 1}</span><span class="tag sm">${esc(n.short)}</span><span class="ord-n">${esc(nom(n))}</span>
-        <button type="button" class="icon-btn sm" data-move="${num}" data-dir="-1" aria-label="Subir ${esc(nom(n))}"${i === 0 ? " disabled" : ""}>${ICON.up}</button><button type="button" class="icon-btn sm" data-move="${num}" data-dir="1" aria-label="Bajar ${esc(nom(n))}"${i === nums.length - 1 ? " disabled" : ""}>${ICON.down}</button><span class="ord-grip" data-drag title="Arrastra para mover" aria-hidden="true">${ICON.grip}</span></li>`;
-    }).join("")}</ol><p class="hint">Arrastra cada nodo por el asa o usa las flechas. El orden se guarda solo.</p>`);
-    return;
-  }
-  setHTML(el, nums.map((num) => {
-    const n = node(num);
-    const w = S.cfg.watched[num];
-    const [st, stLabel] = nodeState(num);
-    if (S.ui.collapsed[num]) return `<article class="card min st-${st}" data-open="${num}">${cardHead(num, n, st, stLabel, true)}</article>`;
-    const keys = sortMetrics(Object.keys(n.metrics).filter((k) => !metricMeta(k).minor));
-    const readings = keys.map((k) => {
-      const m = metricMeta(k), r = (w.rules || {})[k] || {};
-      const v = n.metrics[k].v;
-      if (m.estados) { // un estado ON/OFF: su nombre, y su aviso o desde cuándo está así
-        const bad = S.active.has(estadoKey(num, k));
-        const lim = estadoReglaTxt(k, r.estado) || (n.metrics[k].desde ? `desde las ${hhmm.format(new Date(n.metrics[k].desde))}` : "");
-        return `<div class="rd${bad ? " bad" : ""}"><span class="rd-l">${esc(m.label)}</span><span class="rd-v est">${esc(fmtValue(k, v))}</span>${interruptorHTML(num, k)}<span class="rd-lim">${esc(lim) || "&nbsp;"}</span></div>`;
-      }
-      const bad = (isNum(r.max) && v > r.max) || (isNum(r.min) && v < r.min) || S.active.has(trendKey(num, k));
-      const lim = [isNum(r.min) ? `mín ${fmtLimit(k, r.min)}` : "", isNum(r.max) ? `máx ${fmtLimit(k, r.max)}` : "", r.trend ? trendShort(k, r.trend) : ""].filter(Boolean).join(" · ");
-      const unit = k === "batteryLevel" && v > 100 ? "" : m.unit;
-      return `<div class="rd${bad ? " bad" : ""}"><span class="rd-l">${esc(m.label)}</span><span class="rd-v">${fmtValue(k, v)}${unit ? `<small>${esc(unit)}</small>` : ""}</span><span class="rd-lim">${lim || "&nbsp;"}</span></div>`;
-    }).join("");
-    const sparkMetric = ["temperature", "batteryLevel", "relativeHumidity"].find((k) => n.metrics[k]) || keys.find((k) => !metricMeta(k).estados) || keys[0];
-    const fullBtn = `<button type="button" class="mini full-btn" data-full="${num}" title="Ver este nodo a pantalla completa">${ICON.expand}Pantalla completa</button>`;
-    const sparkSer = S.recent.get(seriesKey(num, sparkMetric)) || [];
-    const spark = sparkMetric
-      ? `<div class="spark-wrap"><div class="spark-top"><span class="spark-cap">${esc(metricMeta(sparkMetric).label)} · 24 h</span>${fullBtn}</div>${metricMeta(sparkMetric).estados ? sparkEstadoHTML(sparkSer, sparkMetric, n.metrics[sparkMetric]) : sparkHTML(sparkSer, sparkMetric, (w.rules || {})[sparkMetric])}</div>`
-      : `<div class="spark-top">${fullBtn}</div>`;
-    return `<article class="card st-${st}" data-open="${num}">
-      ${cardHead(num, n, st, stLabel, false)}
-      ${readings ? `<div class="rds">${readings}</div>` : `<p class="no-rd">${num < 0 ? "Aún no ha llegado ningún dato. Añádelos en su ficha." : "Este nodo aún no ha mandado telemetría."}</p>`}
-      ${n.pos ? `<div class="pos" data-pos-box="${num}">${posBlock(num)}</div>` : ""}
-      ${spark}
-      ${num < 0 ? "" : `<div class="ask" data-ask-box="${num}">${askBlock(num)}</div>`}
-    </article>`;
-  }).join(""));
-}
 
-function toggleCard(num) {
-  if (S.ui.collapsed[num]) delete S.ui.collapsed[num]; else S.ui.collapsed[num] = true;
-  saveUi();
-  renderCards();
-  $(`[data-card-toggle="${num}"]`)?.focus();
-}
-function toggleAllCards() {
-  const nums = watchedOrder();
-  const allMin = nums.every((n) => S.ui.collapsed[n]);
-  S.ui.collapsed = allMin ? {} : Object.fromEntries(nums.map((n) => [n, true]));
-  saveUi();
-  renderCards();
-}
-
-/* ── ordenar: flechas y arrastre (ratón y dedo) ── */
-let drag = null;
-function setOrder(nums) {
-  S.ui.order = nums;
-  saveUi();
-}
-function moveCard(num, dir) {
-  const nums = watchedOrder();
-  const i = nums.indexOf(num), j = i + dir;
-  if (i < 0 || j < 0 || j >= nums.length) return;
-  [nums[i], nums[j]] = [nums[j], nums[i]];
-  setOrder(nums);
-  renderCards();
-  const b = $(`[data-move="${num}"][data-dir="${dir}"]`);
-  if (b && !b.disabled) b.focus(); else $(`[data-move="${num}"][data-dir="${-dir}"]`)?.focus();
-}
-function renumber(list) {
-  [...list.children].forEach((row, i, all) => {
-    row.querySelector(".ord-pos").textContent = String(i + 1);
-    row.querySelector('[data-dir="-1"]').disabled = i === 0;
-    row.querySelector('[data-dir="1"]').disabled = i === all.length - 1;
-  });
-}
-document.addEventListener("pointerdown", (ev) => {
-  const h = ev.target.closest?.("[data-drag]");
-  if (!h || !S.ordering) return;
-  const row = h.closest(".ord-row");
-  ev.preventDefault();
-  h.setPointerCapture(ev.pointerId);
-  drag = { row, list: row.parentElement, y0: ev.clientY, h: h };
-  row.classList.add("dragging");
-});
-document.addEventListener("pointermove", (ev) => {
-  if (!drag) return;
-  const { row, list } = drag;
-  let dy = ev.clientY - drag.y0;
-  // Al pasar la mitad de la fila vecina, se cambian de sitio.
-  const next = row.nextElementSibling, prev = row.previousElementSibling;
-  if (dy > 0 && next && dy > next.offsetHeight / 2) { list.insertBefore(next, row); drag.y0 += next.offsetHeight; dy = ev.clientY - drag.y0; renumber(list); }
-  else if (dy < 0 && prev && -dy > prev.offsetHeight / 2) { list.insertBefore(row, prev); drag.y0 -= prev.offsetHeight; dy = ev.clientY - drag.y0; renumber(list); }
-  row.style.transform = `translateY(${dy}px)`;
-});
-function endDrag() {
-  if (!drag) return;
-  const { row, list } = drag;
-  row.style.transform = "";
-  row.classList.remove("dragging");
-  drag = null;
-  setOrder([...list.children].map((r) => Number(r.dataset.num)));
-  renderCards();
-}
-document.addEventListener("pointerup", endDrag);
-document.addEventListener("pointercancel", endDrag);
 
 /* ───────────── un nodo a pantalla completa ───────────── */
 const FULL_RANGES = { "24h": DAY, "7d": 7 * DAY, "30d": 30 * DAY };
@@ -1450,17 +1093,17 @@ function fullTiles(num) {
   return keys.map((k) => {
     const m = metricMeta(k), r = (w.rules || {})[k] || {}, cur = n.metrics[k];
     const bad = (isNum(r.max) && cur.v > r.max) || (isNum(r.min) && cur.v < r.min) || S.active.has(trendKey(num, k)) || S.active.has(estadoKey(num, k));
-    const lim = m.estados ? estadoReglaTxt(k, r.estado) || (cur.desde ? `desde las ${hhmm.format(new Date(cur.desde))}` : "")
+    const lim = m.estados ? stateRuleText(k, r.estado) || (cur.desde ? `desde las ${hhmm.format(new Date(cur.desde))}` : "")
       : [isNum(r.min) ? `mín ${fmtLimit(k, r.min)}` : "", isNum(r.max) ? `máx ${fmtLimit(k, r.max)}` : "", r.trend ? trendShort(k, r.trend) : ""].filter(Boolean).join(" · ");
     const unit = k === "batteryLevel" && cur.v > 100 ? "" : m.unit;
-    return `<div class="nv-tile${bad ? " bad" : ""}"><span class="nv-l">${esc(m.label)}</span>${m.estados ? interruptorHTML(num, k) : ""}<span class="nv-v${m.estados ? " est" : ""}">${esc(fmtValue(k, cur.v))}${unit ? `<small>${esc(unit)}</small>` : ""}</span><span class="nv-s">${lim ? `<span class="nv-lim">${esc(lim)}</span>` : ""}<span data-fmm="${k}"></span><span>${esc(ago(cur.t))}</span></span></div>`;
+    return `<div class="nv-tile${bad ? " bad" : ""}"><span class="nv-l">${esc(m.label)}</span>${m.estados ? switchHTML(num, k) : ""}<span class="nv-v${m.estados ? " est" : ""}">${esc(fmtValue(k, cur.v))}${unit ? `<small>${esc(unit)}</small>` : ""}</span><span class="nv-s">${lim ? `<span class="nv-lim">${esc(lim)}</span>` : ""}<span data-fmm="${k}"></span><span>${esc(ago(cur.t))}</span></span></div>`;
   }).join("");
 }
 function renderFull() {
   if (!S.full) return;
   const { num, range } = S.full;
   const n = node(num);
-  const [st, stLabel] = nodeState(num);
+  const [st, stLabel] = panelState(num);
   const alarms = fullAlarms(num);
   const keys = sortMetrics(Object.keys(n.metrics).filter((k) => !metricMeta(k).minor));
   const seg = Object.keys(FULL_RANGES).map((r) => `<button type="button" data-full-range="${r}" aria-pressed="${r === range}">${r === "24h" ? "24 h" : r === "7d" ? "7 días" : "30 días"}</button>`).join("");
@@ -1483,7 +1126,7 @@ function fullAlarms(num) {
 function refreshFull(num) {
   if (!S.full || (num != null && S.full.num !== num) || !$("#nodeview").open) return;
   const n = node(S.full.num);
-  const [st, stLabel] = nodeState(S.full.num);
+  const [st, stLabel] = panelState(S.full.num);
   const pill = $("[data-full-pill]");
   if (pill) { pill.className = `pill p-${st}`; pill.textContent = stLabel; }
   const meta = $("[data-full-meta]");
@@ -1523,10 +1166,10 @@ async function drawFullCharts() {
 }
 
 /* ───────────── resto de la malla y buscador ───────────── */
-function setHTML(el, html) { if (el._h !== html) { el.innerHTML = html; el._h = html; } } // sin repintar si no cambia
-const markHTML = (text, words) => highlight(text, words).map((p) => (p.hit ? `<mark>${esc(p.text)}</mark>` : esc(p.text))).join("");
 
 /** Chips de filtro y orden. Se crean una vez y luego solo se cambia su estado, para no perder el foco. */
+const markHTML = (text, words) => highlight(text, words).map((p) => (p.hit ? `<mark>${esc(p.text)}</mark>` : esc(p.text))).join("");
+
 function renderMeshTools() {
   const v = S.meshView;
   const box = $("#meshFilters");
@@ -1662,10 +1305,10 @@ function renderDetail() {
     : [hexId(num), n.hw ? n.hw.replaceAll("_", " ") : "", n.num === S.myNode ? "tu receptor" : ""]).filter(Boolean).join(" · ");
   let body = "";
   if (!sinNodo) {
-    body += `<section class="blk"><h3>Pedir datos ahora</h3><div class="ask in-sheet" data-ask-box="${num}" data-sheet="1">${askBlock(num, true)}</div>
+    body += `<section class="blk"><h3>Pedir datos ahora</h3><div class="ask in-sheet" data-ask-box="${num}" data-sheet="1">${requestBlock(num, true)}</div>
     <p class="hint">La petición sale por LoRa desde tu receptor y el nodo contesta con una lectura recién tomada. Si está dormido para ahorrar batería o fuera de alcance, no contesta.</p></section>`;
     body += `<section class="blk"><div class="route-box" data-route-box="${num}">${routeBlock(num)}</div></section>`;
-    body += `<section class="blk"><div class="pos in-sheet" data-pos-box="${num}" data-sheet="1">${posBlock(num, true)}</div></section>`;
+    body += `<section class="blk"><div class="pos in-sheet" data-pos-box="${num}" data-sheet="1">${positionBlock(num, true)}</div></section>`;
   }
   if (w) {
     const off = isNum(w.offlineMin) ? w.offlineMin : S.settings.defaultOfflineMin;
@@ -1780,7 +1423,7 @@ function estadosAlarmaHTML(num, keys) {
   return `<div class="est-al">${ks.map((k) => {
     const m = metricMeta(k), r = w?.rules?.[k]?.estado, cur = n?.metrics?.[k];
     const opt = (v) => `<option value="${v}"${r?.cuando === v ? " selected" : ""}>Avisar cuando: ${esc(m.estados[v ? 0 : 1])}</option>`;
-    return `<div class="est-al-r${S.active.has(estadoKey(num, k)) ? " bad" : ""}" data-sw-num="${num}"><span class="est-al-n">${esc(m.label)} <b data-now="${k}">${cur ? esc(fmtValue(k, cur.v)) : "—"}</b>${interruptorHTML(num, k)}</span>
+    return `<div class="est-al-r${S.active.has(estadoKey(num, k)) ? " bad" : ""}" data-sw-num="${num}"><span class="est-al-n">${esc(m.label)} <b data-now="${k}">${cur ? esc(fmtValue(k, cur.v)) : "—"}</b>${switchHTML(num, k)}</span>
       <select class="inp sel" data-est-cuando="${k}" aria-label="Cuándo avisar de ${esc(m.label)}"><option value=""${r ? "" : " selected"}>No avisar</option>${opt(1)}${opt(0)}</select>
       <span class="inp-u"><span>más de</span><input class="inp" data-est-min="${k}" inputmode="numeric" autocomplete="off" placeholder="0" value="${r?.min || ""}" aria-label="Minutos que tiene que durar para avisar de ${esc(m.label)}"><span>min</span></span></div>`;
   }).join("")}</div>
@@ -1884,7 +1527,7 @@ async function unwatch(num) {
   // Lo de la pantalla (tarjeta contraída, orden) es de este aparato.
   delete S.ui.collapsed[num];
   S.ui.order = S.ui.order.filter((n) => n !== num);
-  saveUi();
+  saveCardUi();
   render();
 }
 
@@ -1965,17 +1608,17 @@ function openSettings() { go("settings"); }
 /** Language and theme of this screen. */
 function screenSection() {
   const langs = LANGS.map((l) => `<option value="${l.code}"${l.code === getLang() ? " selected" : ""}>${l.name}</option>`).join("");
-  const themes = ["auto", "light", "dark"].map((v) => `<option value="${v}"${v === getTheme() ? " selected" : ""}>${esc(t(`screen.theme.${v}`))}</option>`).join("");
-  return `<section class="blk"><h3>${esc(t("screen.title"))}</h3>
-      <div class="set-row"><label for="setLang">${esc(t("screen.lang"))}</label><select id="setLang" class="inp sel lang">${langs}</select></div>
-      <div class="set-row"><label for="setTheme">${esc(t("screen.theme"))}</label><select id="setTheme" class="inp sel theme">${themes}</select></div>
-      <p class="hint">${esc(t("screen.hint"))}</p>
+  const themes = ["auto", "light", "dark"].map((v) => `<option value="${v}"${v === getTheme() ? " selected" : ""}>${esc(tr(`screen.theme.${v}`))}</option>`).join("");
+  return `<section class="blk"><h3>${esc(tr("screen.title"))}</h3>
+      <div class="set-row"><label for="setLang">${esc(tr("screen.lang"))}</label><select id="setLang" class="inp sel lang">${langs}</select></div>
+      <div class="set-row"><label for="setTheme">${esc(tr("screen.theme"))}</label><select id="setTheme" class="inp sel theme">${themes}</select></div>
+      <p class="hint">${esc(tr("screen.hint"))}</p>
     </section>`;
 }
 
 /** Automations: what they will be, until 2.1. */
 function renderSoon() {
-  $("#soon").innerHTML = `<span class="soon-tag">${esc(t("auto.soon"))}</span><p>${esc(t("auto.lead"))}</p><p>${esc(t("auto.example"))}</p>`;
+  $("#soon").innerHTML = `<span class="soon-tag">${esc(tr("auto.soon"))}</span><p>${esc(tr("auto.lead"))}</p><p>${esc(tr("auto.example"))}</p>`;
 }
 
 /* ───────────── Enterado y peticiones: van al servidor ───────────── */
@@ -2022,7 +1665,7 @@ document.addEventListener("click", async (ev) => {
   if ("cardToggle" in ds) return toggleCard(Number(ds.cardToggle));
   if ("cardsAll" in ds) return toggleAllCards();
   if ("order" in ds) { S.ordering = true; renderCards(); return $("#cards .ord-row [data-move]")?.focus(); }
-  if ("orderDone" in ds) { S.ordering = false; renderCards(); return toast("Orden guardado"); }
+  if ("orderDone" in ds) { S.ordering = false; renderCards(); return toast(tr("dash.orderSaved")); }
   if ("move" in ds) return moveCard(Number(ds.move), Number(ds.dir));
   if ("full" in ds) return openFull(Number(ds.full));
   if ("fullRange" in ds) {
@@ -2214,7 +1857,12 @@ document.addEventListener("change", async (ev) => {
   if (t.closest(".tr-form")) return; // se guarda con el botón
   if (t.matches("[data-est-cuando], [data-est-min]")) return guardarEstado(t);
   if (t.matches("#detail .inp")) return saveRuleFromInput(t);
-  if (t.id === "setLang") { setLang(t.value); relabel(); renderSoon(); render(); return renderSettings(); }
+  if (t.id === "setLang") {
+    setLang(t.value);
+    registrarMetricas(metasDe(S.paneles?.paneles)); // names of the MQTT data and of their states, in the new language
+    relabel(); renderSoon(); render();
+    return renderSettings();
+  }
   if (t.id === "setTheme") return setTheme(t.value);
   if (t.id === "setSound") { S.settings.sound = t.checked; saveSettings(); if (t.checked) { unlockAudio(); beep(); } return; }
   if (t.id === "setWake") { S.settings.wake = t.checked; saveSettings(); return applyWake(); }
@@ -2292,10 +1940,10 @@ function refrescarAbiertos(p) {
       drawCharts();
     } else {
       if (p.nodes?.some((n) => n.num === num) || p.rows?.some((r) => r.node === num)) refreshDetailLive();
-      if ("req" in p || "traces" in p) { refreshAsk(num); refreshPos(num); }
+      if ("req" in p || "traces" in p) { refreshAsk(num); refreshPosition(num); }
     }
     if ("paneles" in p || "mqtt" in p || "channels" in p) patchPaneles(); // valores, nombres de los brokers, canales
-    if ("paneles" in p || p.nodes?.some((n) => n.num === num)) patchInterruptores();
+    if ("paneles" in p || p.nodes?.some((n) => n.num === num)) patchSwitches();
   }
   if (S.full && (p.nodes || p.rows || "active" in p)) refreshFull(S.full.num);
   if (isView("settings")) {

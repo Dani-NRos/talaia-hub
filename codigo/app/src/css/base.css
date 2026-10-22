@@ -16,6 +16,9 @@
   --crit: #c2410c;        /* signal, dark enough for text and as a background */
   --on-crit: #fff6ef;
   --signal: #e2531b;      /* signal for small marks: the lamp, badges */
+  --alarm-bg: var(--crit);  /* the alarm notice: solid signal by day… */
+  --alarm-ink: var(--on-crit);
+  --alarm-title: var(--on-crit);
   --off: #686684;
   --rail: #22372a;        /* forest: the navigation */
   --rail-ink: #e7e1cc;
@@ -39,6 +42,7 @@
     --bg: #0e1410; --surface: #151d17; --surface-2: #1c261f; --line: #2b372d; --ink: #e4decb; --ink-2: #a2a58f;
     --accent: #b4c27b; --on-accent: #151b0e; --ok: #79c08a; --warn: #e2a33e; --crit: #ff6b2b; --on-crit: #1c0a02;
     --signal: #ff6b2b; --off: #a9a8c8; --rail: #0a0f0b; --rail-ink: #d6cfb8; --rail-ink-2: #858a77; --rail-on: #b4c27b;
+    --alarm-bg: #2d150a; --alarm-ink: var(--ink); --alarm-title: #ff8a52; /* …an ember at night, so it does not dazzle */
     --shadow: none;
     color-scheme: dark;
   }
@@ -47,6 +51,7 @@
   --bg: #0e1410; --surface: #151d17; --surface-2: #1c261f; --line: #2b372d; --ink: #e4decb; --ink-2: #a2a58f;
   --accent: #b4c27b; --on-accent: #151b0e; --ok: #79c08a; --warn: #e2a33e; --crit: #ff6b2b; --on-crit: #1c0a02;
   --signal: #ff6b2b; --off: #a9a8c8; --rail: #0a0f0b; --rail-ink: #d6cfb8; --rail-ink-2: #858a77; --rail-on: #b4c27b;
+  --alarm-bg: #2d150a; --alarm-ink: var(--ink); --alarm-title: #ff8a52; /* …an ember at night, so it does not dazzle */
   --shadow: none;
   color-scheme: dark;
 }
@@ -62,3 +67,30 @@ button, input, select { font: inherit; color: inherit; }
 
 .icon-btn { display: inline-grid; place-items: center; width: 40px; height: 40px; border-radius: var(--r); border: 1px solid var(--line); background: var(--surface); color: var(--ink); cursor: pointer; flex: none; text-decoration: none; }
 .icon-btn svg { width: 20px; height: 20px; }
+
+/* buttons */
+.btn { display: inline-flex; align-items: center; justify-content: center; gap: 6px; min-height: 40px; padding: 0 16px; border-radius: var(--r); border: 1px solid var(--line); background: var(--surface); color: var(--ink); font: 600 14px/1 var(--f-body); cursor: pointer; white-space: nowrap; }
+.btn.primary { background: var(--accent); border-color: var(--accent); color: var(--on-accent); }
+.btn.ghost { background: transparent; }
+.btn.on-dark { background: transparent; border-color: color-mix(in oklab, currentColor 55%, transparent); color: inherit; }
+.btn.danger-ghost { background: transparent; border-color: color-mix(in oklab, var(--crit) 50%, var(--line)); color: var(--crit); }
+.btn.sm { min-height: 34px; padding: 0 12px; font-size: 13.5px; }
+.btn svg { width: 18px; height: 18px; flex: none; }
+.btn.sm svg { width: 16px; height: 16px; }
+.btn:hover:not(:disabled) { border-color: var(--accent); }
+.btn.primary:hover:not(:disabled) { filter: brightness(1.08); }
+.btn:active:not(:disabled) { transform: translateY(1px); }
+.btn:disabled { opacity: .5; cursor: not-allowed; }
+.mini { display: inline-flex; align-items: center; gap: 6px; min-height: 32px; padding: 0 10px; border-radius: 6px; border: 1px solid var(--line); background: transparent; color: var(--accent); font: 600 13px/1 var(--f-body); text-decoration: none; cursor: pointer; white-space: nowrap; }
+.mini:hover:not(:disabled) { border-color: var(--accent); }
+.mini:disabled { opacity: .45; cursor: not-allowed; }
+
+/* a section inside a view: heading, count and tools */
+.sec { margin-top: 28px; }
+.sec-h { display: flex; align-items: baseline; gap: 10px; margin-bottom: 12px; }
+.sec-h h2 { font: 700 17px/1.2 var(--f-body); color: var(--ink); }
+.count { font: 500 12px/1 var(--f-mono); color: var(--ink-2); padding: 3px 7px; border: 1px solid var(--line); border-radius: 999px; }
+.count:empty { display: none; }
+.empty { padding: 18px 20px; border: 1px dashed var(--line); border-radius: var(--r); background: var(--surface); }
+.empty p { max-width: 62ch; color: var(--ink-2); }
+.empty strong { color: var(--ink); }

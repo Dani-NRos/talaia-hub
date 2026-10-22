@@ -1,4 +1,6 @@
 // Cálculos de posición: distancia, rumbo, precisión de Meshtastic y formato.
+import { fmtNum } from "./metrics.js";
+import { tx } from "./idioma.js";
 
 const R = 6371008.8; // radio medio de la Tierra, m
 const rad = (d) => (d * Math.PI) / 180;
@@ -10,13 +12,13 @@ export function distM(a, b) {
   return 2 * R * Math.asin(Math.min(1, Math.sqrt(h)));
 }
 
-const ROSE = ["N", "NE", "E", "SE", "S", "SO", "O", "NO"];
+const rose = () => tx("geo.rose").split(" ");
 /** Dirección de a hacia b en 8 puntos de la rosa de los vientos. */
 export function compass(a, b) {
   const y = Math.sin(rad(b.lon - a.lon)) * Math.cos(rad(b.lat));
   const x = Math.cos(rad(a.lat)) * Math.sin(rad(b.lat)) - Math.sin(rad(a.lat)) * Math.cos(rad(b.lat)) * Math.cos(rad(b.lon - a.lon));
   const deg = ((Math.atan2(y, x) * 180) / Math.PI + 360) % 360;
-  return ROSE[Math.round(deg / 45) % 8];
+  return rose()[Math.round(deg / 45) % 8];
 }
 
 /**
@@ -28,11 +30,9 @@ export function precisionM(bits) {
   return 23300 / 2 ** (bits - 10);
 }
 
-const nf = (d) => new Intl.NumberFormat("es-ES", { minimumFractionDigits: d, maximumFractionDigits: d });
-const nf0 = nf(0), nf1 = nf(1);
 export function fmtDist(m) {
-  if (m < 1000) return `${nf0.format(m < 100 ? Math.round(m) : Math.round(m / 10) * 10)} m`;
-  return `${(m < 10000 ? nf1 : nf0).format(m / 1000)} km`;
+  if (m < 1000) return `${fmtNum(m < 100 ? Math.round(m) : Math.round(m / 10) * 10, 0)} m`;
+  return `${fmtNum(m / 1000, m < 10000 ? 1 : 0)} km`;
 }
 
 /** Coordenadas con punto decimal, como las entienden los mapas al pegarlas. */

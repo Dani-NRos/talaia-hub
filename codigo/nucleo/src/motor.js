@@ -36,19 +36,25 @@ import { newDelivery, deliveryStep } from "./delivery.js";
 import { channelPrivacy, fitBytes } from "./canales.js";
 import { MIN, HOUR, isNum, validT, hhmm, dur, ago, stamp, trendDec, fmtTrend, trendVerb, hoursText } from "./textos.js";
 import { esClaveMqtt } from "./mqtt-datos.js";
+import { tx } from "./idioma.js";
 
 /* ───────────── constantes ───────────── */
 export const MESH_DEFAULT = () => ({ enabled: false, channel: null, node: null, onClear: false });
 
 // Telemetría: cada tipo es un campo del mensaje Telemetry; se pide mandando ese campo vacío con want_response.
+// Names in the core's language (idioma.js: «ask.env», «ask.env.what»…).
+const askNames = (type, extra = {}) => Object.defineProperties(extra, {
+  label: { get: () => tx(`ask.${type}`), enumerable: true },
+  what: { get: () => tx(`ask.${type}.what`), enumerable: true },
+});
 export const ASK = {
-  env:    { label: "Ambiente", what: "Temperatura, humedad y presión", field: 3, variant: "environmentMetrics" },
-  device: { label: "Batería",  what: "Batería, tensión y uso del canal", field: 2, variant: "deviceMetrics" },
-  air:    { label: "Aire",     what: "CO₂ y partículas", field: 4, variant: "airQualityMetrics" },
-  power:  { label: "Energía",  what: "Tensión y corriente de los canales INA", field: 5, variant: "powerMetrics" },
+  env:    askNames("env", { field: 3, variant: "environmentMetrics" }),
+  device: askNames("device", { field: 2, variant: "deviceMetrics" }),
+  air:    askNames("air", { field: 4, variant: "airQualityMetrics" }),
+  power:  askNames("power", { field: 5, variant: "powerMetrics" }),
 };
 // Ficha del nodo (NodeInfo): nombre y clave pública. Sin la clave, el receptor no le manda peticiones.
-export const ASK_ALL = { ...ASK, info: { label: "Ficha" }, pos: { label: "Posición" }, route: { label: "Ruta" } };
+export const ASK_ALL = { ...ASK, info: askNames("info"), pos: askNames("pos"), route: askNames("route") };
 const ASK_BY_VARIANT = Object.fromEntries(Object.entries(ASK).map(([k, a]) => [a.variant, k]));
 export const ASK_TIMEOUT = 60000, ASK_COOLDOWN = 30000, INFO_COOLDOWN = 60000, ASK_SHOW = 10 * MIN, TRACE_GAP = 30000;
 export const RE = Protobuf.Mesh.Routing_Error;
@@ -346,7 +352,7 @@ export function crearMotor(S, g = {}) {
     }
     const al = { key, ...a, since: isNum(a.t) ? a.t : Date.now(), acked: false, late: !!opts.replay };
     S.active.set(key, al);
-    addLog("raise", alarmTitle(al) + (al.late ? " (recibida al reconectar)" : ""), al.num, marcaMqtt(al));
+    addLog("raise", alarmTitle(al) + (al.late ? tx("al.late") : ""), al.num, marcaMqtt(al));
     saveActive();
     if (!opts.silent) fireAlarm(al);
     if (!opts.silent) meshNotify("raise", al);
@@ -367,56 +373,66 @@ export function crearMotor(S, g = {}) {
     const al = S.active.get(key);
     if (!al || al.acked) return;
     al.acked = true;
-    addLog("ack", `Enterado: ${alarmTitle(al)}`, al.num, marcaMqtt(al));
+    addLog("ack", tx("al.ack", { title: alarmTitle(al) }), al.num, marcaMqtt(al));
     saveActive();
     render();
   }
   function ackAll() { for (const k of S.active.keys()) ack(k); }
   const unacked = () => [...S.active.values()].filter((a) => !a.acked);
 
+  // Texts of an alarm, in the core's language (idioma.js).
   function alarmTitle(al) {
-    if (al.kind === "link") return "Receptor desconectado";
-    if (al.kind === "test") return "Alarma de prueba";
+    if (al.kind === "link") return tx("al.link");
+    if (al.kind === "test") return tx("al.test");
     const name = nodeName(al.num);
-    if (al.kind === "offline") return `${name} · ${sinNodo(al.num) ? "Sin datos" : "Sin señal"} más de ${dur(al.limit * MIN)}`;
-    if (al.kind === "moved") return `${name} · Fuera de su sitio`;
-    if (al.kind === "conexion") return `${name} · Sin conexión`;
+    if (al.kind === "offline") return tx(sinNodo(al.num) ? "al.offlineData" : "al.offline", { name, d: dur(al.limit * MIN) });
+    if (al.kind === "moved") return tx("al.moved", { name });
+    if (al.kind === "conexion") return tx("al.conexion", { name });
     const m = metricMeta(al.metric);
-    if (al.kind === "estado") return `${name} · ${m.label}: ${fmtValue(al.metric, al.value)}${al.limit ? ` más de ${dur(al.limit * MIN)}` : ""}`;
+    if (al.kind === "estado") return tx(al.limit ? "al.estadoFor" : "al.estado", { name, label: m.label, state: fmtValue(al.metric, al.value), d: al.limit ? dur(al.limit * MIN) : "" });
     if (al.kind === "trend") {
-      const sign = al.dir === "down" ? "−" : "+";
-      return `${name} · ${m.label} ${al.dir === "down" ? "bajando" : "subiendo"} rápido (${sign}${fmtTrend(al.metric, al.value, trendDec(al.metric, al.value))} en ${dur(al.to.t - al.from.t)})`;
+      const change = fmtTrend(al.metric, al.value, trendDec(al.metric, al.value));
+      return tx(al.dir === "down" ? "al.trendDown" : "al.trendUp", { name, label: m.label, change, d: dur(al.to.t - al.from.t) });
     }
-    return `${name} · ${m.label} ${al.kind === "high" ? "por encima de" : "por debajo de"} ${fmtLimit(al.metric, al.limit, true)}`;
+    return tx(al.kind === "high" ? "al.high" : "al.low", { name, label: m.label, limit: fmtLimit(al.metric, al.limit, true) });
   }
   function alarmDetail(al) {
-    if (al.kind === "link") return `Reintentando la conexión${S.device?.kind === "serial" ? " por cable" : S.device?.kind === "tcp" ? " por la red" : " Bluetooth"}. Las alarmas de nodo sin señal quedan en pausa.`;
-    if (al.kind === "test") return "Así suena y se ve un aviso. Pulsa Enterado para callarlo.";
-    if (al.kind === "offline") return `Último dato ${ago(al.value)} (${stamp(al.value)}).`;
-    if (al.kind === "conexion") return `El dispositivo dice que se ha desconectado (${stamp(al.value)}).`;
-    if (al.kind === "estado") return `${fmtValue(al.metric, al.value)} desde ${stamp(al.desde)}.`;
+    if (al.kind === "link") return tx(S.device?.kind === "serial" ? "al.d.link.serial" : S.device?.kind === "tcp" ? "al.d.link.tcp" : "al.d.link.ble");
+    if (al.kind === "test") return tx("al.d.test");
+    if (al.kind === "offline") return tx("al.d.offline", { ago: ago(al.value), stamp: stamp(al.value) });
+    if (al.kind === "conexion") return tx("al.d.conexion", { stamp: stamp(al.value) });
+    if (al.kind === "estado") return tx("al.d.estado", { state: fmtValue(al.metric, al.value), stamp: stamp(al.desde) });
     if (al.kind === "moved") {
       const n = S.nodes.get(al.num), f = S.cfg.watched[al.num]?.fence;
-      const dir = n?.pos && f ? ` al ${compass(f, n.pos)}` : "";
-      return `Está a ${fmtDist(al.value)}${dir} de su sitio (valla de ${fmtDist(al.limit)}). Posición de las ${n?.pos ? hhmm.format(new Date(n.pos.t)) : "—"}.`;
+      const dir = n?.pos && f ? tx("al.d.movedDir", { dir: compass(f, n.pos) }) : "";
+      return tx("al.d.moved", { dist: fmtDist(al.value), dir, fence: fmtDist(al.limit), time: n?.pos ? hhmm.format(new Date(n.pos.t)) : "—" });
     }
     if (al.kind === "trend") {
       const d = trendDec(al.metric, al.value);
-      return `De ${fmtTrend(al.metric, al.from.v, d)} a las ${stamp(al.from.t)} a ${fmtTrend(al.metric, al.to.v, d)} a las ${stamp(al.to.t)}. Avisa si ${trendVerb(al.dir)} ${fmtLimit(al.metric, al.limit, true)} o más en ${hoursText(al.hours)}.`;
+      return tx("al.d.trend", {
+        from: fmtTrend(al.metric, al.from.v, d), fromT: stamp(al.from.t), to: fmtTrend(al.metric, al.to.v, d), toT: stamp(al.to.t),
+        verb: trendVerb(al.dir), limit: fmtLimit(al.metric, al.limit, true), hours: hoursText(al.hours),
+      });
     }
-    return `Ahora ${fmtWithUnit(al.metric, al.value)}.`;
+    return tx("al.d.value", { value: fmtWithUnit(al.metric, al.value) });
   }
   function clearText(al, info) {
-    if (al.kind === "link") return "Receptor conectado de nuevo";
-    if (al.kind === "test") return "Alarma de prueba cerrada";
+    if (al.kind === "link") return tx("al.c.link");
+    if (al.kind === "test") return tx("al.c.test");
     const name = nodeName(al.num);
-    if (al.kind === "offline") return `${name} · ${sinNodo(al.num) ? "Vuelven a llegar datos" : "Vuelve a dar señal"}`;
-    if (al.kind === "moved") return `${name} · De vuelta en su sitio${isNum(info.v) ? ` (a ${fmtDist(info.v)})` : ""}`;
-    if (al.kind === "conexion") return `${name} · Conectado otra vez`;
+    if (al.kind === "offline") return tx(sinNodo(al.num) ? "al.c.offlineData" : "al.c.offline", { name });
+    if (al.kind === "moved") return isNum(info.v) ? tx("al.c.movedAt", { name, dist: fmtDist(info.v) }) : tx("al.c.moved", { name });
+    if (al.kind === "conexion") return tx("al.c.conexion", { name });
     const m = metricMeta(al.metric);
-    if (al.kind === "estado") return `${name} · ${m.label}: ${isNum(info.v) ? fmtValue(al.metric, info.v) : "ya no avisa"}${isNum(info.t) ? ` (tras ${dur(info.t - al.desde)})` : ""}`;
-    if (al.kind === "trend") return `${name} · ${m.label} ya no ${trendVerb(al.dir)} tan rápido${isNum(info.v) ? ` (${fmtWithUnit(al.metric, info.v)})` : ""}`;
-    return `${name} · ${m.label} de vuelta en rango${isNum(info.v) ? ` (${fmtWithUnit(al.metric, info.v)})` : ""}`;
+    if (al.kind === "estado") {
+      const state = isNum(info.v) ? fmtValue(al.metric, info.v) : tx("al.c.estadoOff");
+      return isNum(info.t) ? tx("al.c.estadoAfter", { name, label: m.label, state, d: dur(info.t - al.desde) }) : tx("al.c.estado", { name, label: m.label, state });
+    }
+    if (al.kind === "trend") {
+      const verb = trendVerb(al.dir);
+      return isNum(info.v) ? tx("al.c.trendAt", { name, label: m.label, verb, value: fmtWithUnit(al.metric, info.v) }) : tx("al.c.trend", { name, label: m.label, verb });
+    }
+    return isNum(info.v) ? tx("al.c.rangeAt", { name, label: m.label, value: fmtWithUnit(al.metric, info.v) }) : tx("al.c.range", { name, label: m.label });
   }
 
   // En el registro, las alarmas de datos MQTT llevan «mqtt» (solo con servidor: en la app no hay datos MQTT).
@@ -465,27 +481,27 @@ export function crearMotor(S, g = {}) {
 
   function askFailText(code, r) {
     switch (code) {
-      case RE.NO_RESPONSE: return "el nodo contesta que no tiene ese sensor";
-      case RE.MAX_RETRANSMIT: return "no llegó al nodo tras varios intentos";
-      case RE.NO_ROUTE: case RE.GOT_NAK: return "no hay ruta hasta el nodo";
-      case RE.NO_CHANNEL: return "el receptor no tiene el canal de ese nodo";
-      case E_NO_PUBKEY: return "tu receptor no tiene la clave de este nodo, pide su ficha";
-      case RE.PKI_UNKNOWN_PUBKEY: return "el nodo no tiene la clave de tu receptor, pedir su ficha se la envía";
-      case RE.PKI_FAILED: return "fallo de cifrado con ese nodo, pedir su ficha suele arreglarlo";
-      case RE.DUTY_CYCLE_LIMIT: return "el receptor ha agotado su tiempo de emisión, prueba en unos minutos";
-      case E_RATE_LIMIT: return "límite de uso del canal alcanzado, prueba en unos minutos";
-      case RE.TOO_LARGE: case RE.BAD_REQUEST: return "el nodo rechazó la petición";
+      case RE.NO_RESPONSE: return tx("ask.f.noResponse");
+      case RE.MAX_RETRANSMIT: return tx("ask.f.maxRetransmit");
+      case RE.NO_ROUTE: case RE.GOT_NAK: return tx("ask.f.noRoute");
+      case RE.NO_CHANNEL: return tx("ask.f.noChannel");
+      case E_NO_PUBKEY: return tx("ask.f.noPubkey");
+      case RE.PKI_UNKNOWN_PUBKEY: return tx("ask.f.unknownPubkey");
+      case RE.PKI_FAILED: return tx("ask.f.pkiFailed");
+      case RE.DUTY_CYCLE_LIMIT: return tx("ask.f.dutyCycle");
+      case E_RATE_LIMIT: return tx("ask.f.rateLimit");
+      case RE.TOO_LARGE: case RE.BAD_REQUEST: return tx("ask.f.rejected");
       case "timeout":
-        if (r?.acked && r.type === "info") return "el nodo la recibió y ya tiene la clave de tu receptor, pero no contestó: no repite su ficha a quien se la pidió en las últimas 12 h, ni si acaba de anunciarla";
-        if (r?.acked && r.type === "pos") return "el nodo la recibió pero no contestó; como mucho repite su posición cada 3 min";
-        if (r?.acked) return "el nodo la recibió pero no mandó datos";
-        if (r?.type === "info") return `sin respuesta en ${ASK_TIMEOUT / 1000} s. Aunque no conteste, si le llegó ya tiene la clave de tu receptor: vuelve a pedirle los datos`;
-        if (r?.type === "route") return `sin respuesta en ${Math.round(r.limit / 1000)} s: el nodo está fuera de alcance, apagado, más lejos que el límite de saltos de tu receptor${S.lora?.hopLimit ? ` (${S.lora.hopLimit})` : ""} o en otro canal; o la respuesta se perdió por el camino`;
-        return `sin respuesta en ${ASK_TIMEOUT / 1000} s`;
-      case "throttled": return "tu receptor solo lanza un traceroute cada 30 s; espera un poco y repite";
-      case "notice": return `el receptor no la envió: ${r?.notice || "sin motivo"}`;
-      case "send": return "no se pudo enviar al receptor";
-      default: return `error ${RE[code] ?? code}`;
+        if (r?.acked && r.type === "info") return tx("ask.f.infoAcked");
+        if (r?.acked && r.type === "pos") return tx("ask.f.posAcked");
+        if (r?.acked) return tx("ask.f.acked");
+        if (r?.type === "info") return tx("ask.f.infoTimeout", { s: ASK_TIMEOUT / 1000 });
+        if (r?.type === "route") return tx("ask.f.routeTimeout", { s: Math.round(r.limit / 1000), hops: S.lora?.hopLimit ? ` (${S.lora.hopLimit})` : "" });
+        return tx("ask.f.timeout", { s: ASK_TIMEOUT / 1000 });
+      case "throttled": return tx("ask.f.throttled");
+      case "notice": return tx("ask.f.notice", { why: r?.notice || tx("ask.f.noticeNone") });
+      case "send": return tx("ask.f.send");
+      default: return tx("ask.f.error", { code: RE[code] ?? code });
     }
   }
 

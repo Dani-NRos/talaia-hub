@@ -10,6 +10,7 @@
 // Aquí, lo que comparten el servidor (que los recibe) y la pantalla (que los configura): los tipos, sus unidades, cómo
 // se lee un valor, qué dato parece cada tema y cómo se comprueba la configuración. Sin dependencias.
 import { fmtNum } from "./metrics.js";
+import { getLanguage, tx } from "./idioma.js";
 
 /**
  * Tipos de dato. La unidad es la de Vigía (y la de Meshtastic, si sale a la malla); «otras», las que se convierten.
@@ -19,29 +20,34 @@ import { fmtNum } from "./metrics.js";
 const F = (v) => ((v - 32) * 5) / 9;
 const KMH = (v) => v / 3.6, MPH = (v) => v * 0.44704, MIL = (v) => v / 1000, X1000 = (v) => v * 1000, X10 = (v) => v * 10, IGUAL = (v) => v;
 export const TIPOS = {
-  temperature:        { label: "Temperatura",   unit: "°C",    dec: 1, hyst: 0.3,  otras: { "°F": F }, rango: [-90, 400], malla: true },
-  relativeHumidity:   { label: "Humedad",       unit: "%",     dec: 0, hyst: 2,    rango: [0, 100], malla: true },
-  barometricPressure: { label: "Presión",       unit: "hPa",   dec: 0, hyst: 1,    otras: { mbar: IGUAL }, rango: [300, 1100], malla: true },
-  windSpeed:          { label: "Viento",        unit: "m/s",   dec: 1, hyst: 0.5,  otras: { "km/h": KMH, mph: MPH }, rango: [0, 120], malla: true },
-  windGust:           { label: "Racha",         unit: "m/s",   dec: 1, hyst: 0.5,  otras: { "km/h": KMH, mph: MPH }, rango: [0, 150], malla: true },
-  rainfall1h:         { label: "Lluvia 1 h",    unit: "mm",    dec: 1, hyst: 0.2,  rango: [0, 500], malla: true },
-  rainfall24h:        { label: "Lluvia 24 h",   unit: "mm",    dec: 1, hyst: 0.5,  rango: [0, 2000], malla: true },
-  lux:                { label: "Luz",           unit: "lx",    dec: 0, hyst: 5,    rango: [0, 200000], malla: true },
-  soilTemperature:    { label: "Temp. suelo",   unit: "°C",    dec: 1, hyst: 0.3,  otras: { "°F": F }, rango: [-40, 70], malla: true },
-  soilMoisture:       { label: "Humedad suelo", unit: "%",     dec: 0, hyst: 2,    rango: [0, 100], malla: true },
-  power:              { label: "Potencia",      unit: "W",     dec: 0, hyst: 5,    otras: { kW: X1000 }, rango: [-1e6, 1e6] },
-  energy:             { label: "Energía",       unit: "kWh",   dec: 2, hyst: 0.01, otras: { Wh: MIL }, rango: [0, 1e9] },
-  voltage:            { label: "Tensión",       unit: "V",     dec: 1, hyst: 1,    rango: [0, 1000] },
-  currentA:           { label: "Corriente",     unit: "A",     dec: 2, hyst: 0.05, otras: { mA: MIL }, rango: [-1000, 1000] },
-  batteryLevel:       { label: "Batería",       unit: "%",     dec: 0, hyst: 2,    rango: [0, 101] },
-  co2:                { label: "CO₂",           unit: "ppm",   dec: 0, hyst: 20,   rango: [0, 50000] },
-  pm25Standard:       { label: "PM2,5",         unit: "µg/m³", dec: 0, hyst: 2,    rango: [0, 2000] },
-  distance:           { label: "Distancia",     unit: "mm",    dec: 0, hyst: 5,    otras: { cm: X10, m: X1000 }, rango: [0, 1e7], malla: true },
-  weight:             { label: "Peso",          unit: "kg",    dec: 2, hyst: 0.05, otras: { g: MIL }, rango: [0, 1e5], malla: true },
-  signal:             { label: "Señal",         unit: "dBm",   dec: 0, hyst: 3,    rango: [-150, 30] },
-  estado:             { label: "Estado ON/OFF", unit: "",      dec: 0, hyst: 0, binario: true }, // 1 y 0, con nombres
-  otro:               { label: "Otro número",   unit: "",      dec: 2, hyst: 0 }, // unidad libre, sin convertir
+  temperature:        { label: "Temperatura", en: "Temperature",   unit: "°C",    dec: 1, hyst: 0.3,  otras: { "°F": F }, rango: [-90, 400], malla: true },
+  relativeHumidity:   { label: "Humedad", en: "Humidity",       unit: "%",     dec: 0, hyst: 2,    rango: [0, 100], malla: true },
+  barometricPressure: { label: "Presión", en: "Pressure",       unit: "hPa",   dec: 0, hyst: 1,    otras: { mbar: IGUAL }, rango: [300, 1100], malla: true },
+  windSpeed:          { label: "Viento", en: "Wind",        unit: "m/s",   dec: 1, hyst: 0.5,  otras: { "km/h": KMH, mph: MPH }, rango: [0, 120], malla: true },
+  windGust:           { label: "Racha", en: "Gust",         unit: "m/s",   dec: 1, hyst: 0.5,  otras: { "km/h": KMH, mph: MPH }, rango: [0, 150], malla: true },
+  rainfall1h:         { label: "Lluvia 1 h", en: "Rain 1 h",    unit: "mm",    dec: 1, hyst: 0.2,  rango: [0, 500], malla: true },
+  rainfall24h:        { label: "Lluvia 24 h", en: "Rain 24 h",   unit: "mm",    dec: 1, hyst: 0.5,  rango: [0, 2000], malla: true },
+  lux:                { label: "Luz", en: "Light",           unit: "lx",    dec: 0, hyst: 5,    rango: [0, 200000], malla: true },
+  soilTemperature:    { label: "Temp. suelo", en: "Soil temp.",   unit: "°C",    dec: 1, hyst: 0.3,  otras: { "°F": F }, rango: [-40, 70], malla: true },
+  soilMoisture:       { label: "Humedad suelo", en: "Soil moisture", unit: "%",     dec: 0, hyst: 2,    rango: [0, 100], malla: true },
+  power:              { label: "Potencia", en: "Power",      unit: "W",     dec: 0, hyst: 5,    otras: { kW: X1000 }, rango: [-1e6, 1e6] },
+  energy:             { label: "Energía", en: "Energy",       unit: "kWh",   dec: 2, hyst: 0.01, otras: { Wh: MIL }, rango: [0, 1e9] },
+  voltage:            { label: "Tensión", en: "Voltage",       unit: "V",     dec: 1, hyst: 1,    rango: [0, 1000] },
+  currentA:           { label: "Corriente", en: "Current",     unit: "A",     dec: 2, hyst: 0.05, otras: { mA: MIL }, rango: [-1000, 1000] },
+  batteryLevel:       { label: "Batería", en: "Battery",       unit: "%",     dec: 0, hyst: 2,    rango: [0, 101] },
+  co2:                { label: "CO₂", en: "CO₂",           unit: "ppm",   dec: 0, hyst: 20,   rango: [0, 50000] },
+  pm25Standard:       { label: "PM2,5", en: "PM2.5",         unit: "µg/m³", dec: 0, hyst: 2,    rango: [0, 2000] },
+  distance:           { label: "Distancia", en: "Distance",     unit: "mm",    dec: 0, hyst: 5,    otras: { cm: X10, m: X1000 }, rango: [0, 1e7], malla: true },
+  weight:             { label: "Peso", en: "Weight",          unit: "kg",    dec: 2, hyst: 0.05, otras: { g: MIL }, rango: [0, 1e5], malla: true },
+  signal:             { label: "Señal", en: "Signal",         unit: "dBm",   dec: 0, hyst: 3,    rango: [-150, 30] },
+  estado:             { label: "Estado ON/OFF", en: "ON/OFF state", unit: "",      dec: 0, hyst: 0, binario: true }, // 1 y 0, con nombres
+  otro:               { label: "Otro número", en: "Other number",   unit: "",      dec: 2, hyst: 0 }, // unidad libre, sin convertir
 };
+// Names in the core's language: `label` reads the Spanish one or `en`.
+for (const t of Object.values(TIPOS)) {
+  const es = t.label;
+  Object.defineProperty(t, "label", { get: () => (getLanguage() === "en" ? t.en : es), enumerable: true });
+}
 export const LISTA_TIPOS = Object.keys(TIPOS);
 export const tipoMalla = (t) => !!TIPOS[t]?.malla;
 export const esEstado = (t) => !!TIPOS[t]?.binario;
@@ -49,15 +55,11 @@ export const esEstado = (t) => !!TIPOS[t]?.binario;
 export const unidades = (t) => (t === "otro" ? [] : [TIPOS[t].unit, ...Object.keys(TIPOS[t].otras || {})]);
 
 /** Cómo se llaman los dos estados (ON, OFF) de un dato ON/OFF. */
-export const NOMBRES_ESTADO = {
-  encendido: ["Encendido", "Apagado"],
-  abierta: ["Abierta", "Cerrada"],
-  abierto: ["Abierto", "Cerrado"],
-  agua: ["Hay agua", "Seco"],
-  movimiento: ["Movimiento", "Sin movimiento"],
-  si: ["Sí", "No"],
-  on: ["ON", "OFF"],
-};
+// The pairs are in idioma.js («st.abierta»: "Abierta|Cerrada"), in the core's language.
+export const NOMBRES_ESTADO = {};
+for (const k of ["encendido", "abierta", "abierto", "agua", "movimiento", "si", "on"]) {
+  Object.defineProperty(NOMBRES_ESTADO, k, { get: () => tx(`st.${k}`).split("|"), enumerable: true });
+}
 export const nombresEstado = (clave) => NOMBRES_ESTADO[clave] || NOMBRES_ESTADO.encendido;
 /** El nombre de un estado: 1 → «Abierta», 0 → «Cerrada». */
 export const textoEstado = (clave, v) => nombresEstado(clave)[v ? 0 : 1];

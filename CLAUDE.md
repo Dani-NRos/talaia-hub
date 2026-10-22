@@ -37,6 +37,9 @@ codigo/                 raíz de npm workspaces: npm install, npm test, npm run 
     src/acciones.js     lo que cambia el usuario (vigilar, límites, valla, ajustes…): igual en la app y el servidor
     src/receptor-base.js  ciclo de conexión, lectura inicial, reintentos y peticiones con id (app y servidor)
     src/textos.js       tiempos y textos comunes (dur, ago, stamp…)
+    src/idioma.js       idioma de los textos del núcleo (alarmas, tiempos, nombres de métricas, peticiones, estados):
+                        tx("clave"). La pantalla pone el de quien la mira; el servidor, el suyo (3.4). También los
+                        formatos de número (1015 hPa; miles a partir de cinco cifras) y de hora
     src/canales.js      qué canal es privado; recorte a 200 bytes
     src/tramas.js       tramas del puerto serie (0x94 0xC3), troceado propio, latido, despertar, fabricantes USB
     src/mqtt-datos.js   datos MQTT: tipos y unidades, qué parece cada tema, leer el valor de un JSON, comprobar la
@@ -49,7 +52,11 @@ codigo/                 raíz de npm workspaces: npm install, npm test, npm run 
                         idioma y tema)
     src/shell.js        el marco: barra de secciones, barra de arriba, qué sección se ve (#/dashboard, #/alarms,
                         #/nodes, #/map, #/automations, #/settings), pestaña del navegador y tema
-    src/i18n.js         idioma de cada pantalla (es/en): t("clave", valores); las secciones pasan aquí al reescribirse
+    src/i18n.js         idioma de cada pantalla (es/en): t("clave", valores); las secciones pasan aquí al reescribirse.
+                        En app.js se importa como `tr` (allí `t` es el elemento en los manejadores de eventos)
+    src/ctx.js ui.js    lo que comparten las secciones (estado, motor, orden, toast) y utilidades ($, esc, LS, iconos)
+    src/views/          una sección por fichero, en inglés: dashboard.js (aviso de alarmas y tarjetas),
+                        node-parts.js (pedir datos, ubicación y valla, interruptor: tarjeta y ficha)
     src/logo.js         la torre de vigilancia (logo, icono de la pestaña: su ventana se enciende con alarmas sin atender)
     src/css/            base.css (colores, letras), legacy.css (lo de la 1.x, sección a sección fuera), shell.css
     src/map.js mapdata.js meshsearch.js remoto.js
