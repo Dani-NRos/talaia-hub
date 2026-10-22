@@ -77,8 +77,8 @@ servidor, avisos por la malla y conexión con Home Assistant por MQTT (los nodos
 con sus lecturas, sus alarmas y «Enterado» desde Home Assistant). Sus paneles pueden mostrar también dispositivos
 que publican por MQTT (Shelly, Tasmota, Zigbee…), con sus valores o estados (encendido, abierta…), alarmas e
 histórico, y encenderlos y apagarlos desde la pantalla; y mandar a la malla, como telemetría
-de su nodo, los datos de una estación meteorológica que lleguen por MQTT. Se abre desde el navegador en la red de casa, con
-esta misma pantalla, y todos tus aparatos ven lo mismo. Instalación y detalles en
+de su nodo, los datos de una estación meteorológica que lleguen por MQTT. Se abre desde el navegador en la red de casa
+(o desde fuera, con Tailscale), con esta misma pantalla, y todos tus aparatos ven lo mismo. Instalación y detalles en
 [`codigo/servidor`](codigo/servidor/README.md).
 
 ## Código fuente
