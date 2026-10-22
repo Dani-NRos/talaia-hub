@@ -66,9 +66,8 @@ fs.writeFileSync(path.join(app, "index.html"), html);
 
 const version = Date.now().toString(36);
 fs.writeFileSync(path.join(app, "sw.js"), fs.readFileSync(path.join(root, "pwa/sw.js"), "utf8").replace("__VERSION__", version));
-for (const f of ["manifest.webmanifest", "icon-192.png", "icon-512.png", "icon-maskable-512.png", "README.md", "LICENSE"]) {
+// What the server serves next to the page so it can be installed as an app (over https, e.g. with Tailscale).
+for (const f of ["manifest.webmanifest", "icon-192.png", "icon-512.png", "icon-maskable-512.png"]) {
   fs.copyFileSync(path.join(root, "pwa", f), path.join(app, f));
 }
-// Capturas que enseña el README.
-if (fs.existsSync(path.join(root, "pwa/capturas"))) fs.cpSync(path.join(root, "pwa/capturas"), path.join(app, "capturas"), { recursive: true });
 console.log(`JS ${(js.length / 1024).toFixed(0)} KB · PWA ${(html.length / 1024).toFixed(0)} KB · versión ${version}`);

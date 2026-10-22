@@ -1,9 +1,16 @@
-# Vigía Mesh
+# Vigía servidor (camino de la 2.0)
 
-App web (PWA) de telemetría y alarmas para nodos Meshtastic, sin internet. Publicada en GitHub Pages:
-https://dani-nros.github.io/vigia-mesh/ . En pruebas: **Vigía servidor**, la misma lógica funcionando 24/7 en Linux
-(BMAX con Ubuntu, Raspberry Pi 4/5, Pi Zero 2 W), con histórico en SQLite y Home Assistant por MQTT. Después: acceso
-desde fuera con https (Tailscale), notificaciones push y MCP de lectura; luego Docker y complemento de HA.
+**Vigía servidor**: vigilancia 24/7 en Linux (BMAX con Ubuntu, Raspberry Pi 4/5, Pi Zero 2 W) de nodos Meshtastic y
+dispositivos MQTT, con histórico en SQLite, Home Assistant por MQTT y acceso desde fuera con Tailscale. Esta rama
+(`mapa`) es la de la **versión 2.0** (plan abajo): tendrá nombre nuevo y repositorio propio.
+
+Ramas del repositorio `vigia-mesh`:
+- `main`: la **app ligera** (PWA de Bluetooth y cable) **congelada en la 1.20**, publicada en GitHub Pages
+  (https://dani-nros.github.io/vigia-mesh/). Solo arreglos graves. No se renombra el repositorio: las URL de GitHub
+  Pages de un proyecto no se redirigen al renombrarlo y las apps instaladas dejarían de actualizarse. Por eso el
+  servidor se irá a un repositorio nuevo cuando tenga nombre.
+- `version-1.20`: el servidor y la app tal como estaban en la 1.20 (el proxy de esta sesión no deja subir etiquetas).
+- `mapa`: desarrollo de la 2.0 (solo el servidor).
 
 ## Normas de trabajo (de Dani)
 
@@ -11,8 +18,9 @@ desde fuera con https (Tailscale), notificaciones push y MCP de lectura; luego D
   Tampoco cambiar sus alarmas o sus nodos vigilados. Los selectores de Bluetooth y de puerto los maneja él.
 - **Una cosa cada vez**: terminar, probar y comprobar cada fase antes de seguir.
 - **Pruebas** automáticas con `node --test`; cuando haga falta, con su equipo real (lo prueba él).
-- **Cambios en la PWA**: primero una copia de pruebas en `/beta/`, luego publicar.
-- **Idioma**: textos de la app en español de España, claros y sin jerga. Mensajes de commit en español.
+- **Arreglos en la app ligera** (rama `main`): primero una copia de pruebas en `/beta/`, luego publicar.
+- **Idioma**: textos de la app en español de España, claros y sin jerga (hasta que llegue el inglés con el rediseño).
+  Desde la 2.0: código nuevo, comentarios nuevos y mensajes de commit en inglés.
 - **Sin complacencia**: si algo no tiene sentido o hay una opción mejor, decirlo; preguntar al decidir algo.
 
 ## Estructura
@@ -33,9 +41,10 @@ codigo/                 raíz de npm workspaces: npm install, npm test, npm run 
     src/app.js          pantalla; crea el motor con ganchos (redibujar, guardar en localStorage, sonar…) y radio.
                         Con window.__VIGIA_SERVIDOR (lo pone el servidor al servirla) arranca en modo «Servidor»:
                         estado del servidor por SSE y órdenes por POST (src/remoto.js)
-    src/receptor.js     conexión al nodo desde el navegador (Bluetooth o Web Serial)
-    src/ble.js serial.js store.js (IndexedDB) map.js mapdata.js meshsearch.js demo.js remoto.js
-    index.src.html build.mjs pwa/
+    src/receptor.js     conexión al nodo desde el navegador (Bluetooth o Web Serial): de la app ligera
+    src/ble.js serial.js store.js (IndexedDB) demo.js   también de la app ligera: se van con el rediseño
+    src/map.js mapdata.js meshsearch.js remoto.js
+    index.src.html build.mjs pwa/ (manifiesto, iconos y sw.js: la pantalla del servidor se instala como app)
   servidor/             Vigía servidor (@vigia/servidor), Node ≥ 22.13
     src/main.js         arranque (systemd o a mano); src/vigia.js: motor + receptor + SQLite + tareas periódicas
     src/receptor.js enlace.js puertos.js   nodo por USB (serialport, con binarios: no compila) o TCP 4403
@@ -54,14 +63,13 @@ codigo/                 raíz de npm workspaces: npm install, npm test, npm run 
     test/nodo-falso.mjs nodo Meshtastic simulado (protobuf de verdad) por TCP o puerto virtual
     test/mqtt.test.mjs paneles.test.mjs  con un broker en memoria (aedes) y un «Home Assistant» de mentira
     test/mosquitto.test.mjs  con un Mosquitto de verdad si está instalado (apt install mosquitto)
-  herramientas/         comprobaciones con Playwright (capturas antes/después, nodo por cable simulado, servidor de
-                        punta a punta con MQTT): ver herramientas/LEEME.md
+  herramientas/         pantalla-servidor.mjs: de punta a punta con Playwright (ver herramientas/LEEME.md)
   dist/app/             app compilada (no va al repo)
 ```
 
 El motor recibe el objeto de estado `S` (ver `estadoInicial()`) y ganchos; la app le añade a `S` lo de pantalla.
-No cambiar el formato de lo que se guarda en `localStorage` (`vigia.*`): la copia de `/beta/` comparte origen con la
-app instalada y lee y escribe los mismos datos.
+La app ligera congelada tiene su propia copia del código en `main`: aquí ya no hace falta mantener el formato de su
+`localStorage` ni que la app sin servidor quede igual.
 
 ### Decisiones del servidor (Dani, 18 oct. 2026)
 
@@ -150,7 +158,9 @@ con Tasmota/ESPHome, Zigbee por zigbee2mqtt, ESPHome, Home Assistant…).
   del servidor.
 - **Nombre nuevo** (sin «Mesh»: ya no es solo Meshtastic). A Dani no le gusta cómo suena «Vigía» (la g). Busca algo
   con o sin «Naika» (su marca: antes NaikaLabs en GitHub) que evoque red, vigilancia, nodo, telemetría…; le valen
-  palabras en euskera. Pendiente de decidir (candidatas: Talaia, Zaindari, Behatoki).
+  palabras en euskera. A Dani le gusta mucho **Talaia** (atalaya en euskera y en valenciano); falta una palabra
+  detrás, descriptiva, para diferenciarse y por temas legales (existió Talaia Networks, de monitorización de redes,
+  comprada por Auvik en 2018: mirar la EUIPO). Otras candidatas: Zaindari, Behatoki.
 - **Idioma**: README y documentación en inglés (con versión en español); la app en español e inglés (elegible),
   hecho junto al rediseño; código nuevo en inglés y lo existente se renombra por partes al reescribirlo, con las
   pruebas como red. Los commits pasan al inglés cuando empiece la v2.
@@ -160,29 +170,26 @@ con Tasmota/ESPHome, Zigbee por zigbee2mqtt, ESPHome, Home Assistant…).
   Logo: torre de vigilancia forestal geométrica que se lea a 16 px. Sin propuestas visuales previas (Dani se fía del
   planteamiento).
 - **Usuarios y contraseña** obligatorios antes de abrirlo al mundo; **Docker** para instalarlo fácil.
+- Paso 2 hecho (22 oct. 2026): `main` es la app ligera congelada (con aviso en su README), `version-1.20` guarda la
+  1.20 y `mapa` ya no lleva los ficheros compilados de la app ligera ni sus herramientas. Queda para cuando haya nombre:
+  crear el repositorio nuevo (lo crea Dani en GitHub) y llevar `mapa` allí con su historia. El código de la app ligera
+  que sigue en `app/src` (Bluetooth, cable, demo, IndexedDB) se quita con el rediseño (paso 3).
 - Orden: 1) nombre y política de idioma; 2) congelar la webapp y reorganizar el repositorio; 3) rediseño con los dos
   idiomas; 4) usuarios; 5) Docker y documentación en inglés → **2.0**. Las **automatizaciones** («si… entonces…»,
   centradas en la malla, con la fase 6 de control desde la malla dentro) → **2.1**. Nada de editor de flujos.
 
 ## Publicar
 
-- Se desarrolla en la rama `mapa`; se publica subiendo `mapa:main`. GitHub Pages sirve `main` desde la raíz.
-- **Copia de pruebas**: compilar y copiar `codigo/dist/app` a `beta/` **sin `sw.js`** (para no tocar la app
-  instalada), con un `beta/README.md` que lo explique. Commit «… (en pruebas en /beta/)».
-- **Pruebas del servidor**: si la app normal no cambia (capturas IGUALES), se sube solo `mapa` y Dani instala con el
-  instalador **de la rama**: `wget -qO- …/vigia-mesh/mapa/codigo/servidor/instalar.sh | sudo bash -s -- --rama mapa`
-  (el de `main` solo baja el programa de la rama). Cuando confirma, se publica la versión.
+- **Desarrollo de la 2.0** en `mapa`. Dani lo prueba instalando desde la rama:
+  `wget -qO- https://raw.githubusercontent.com/Dani-NRos/vigia-mesh/mapa/codigo/servidor/instalar.sh | sudo bash -s -- --rama mapa`
+  Ya **no** se sube `mapa:main` (`main` es la app ligera). La 2.0 se publicará en el repositorio nuevo; hasta entonces,
+  la versión estable del servidor es la 1.20 (instalador de `main`).
 - **`INSTALADOR=` en `instalar.sh`**: subirlo cada vez que cambia lo que hace el instalador. Si el programa descargado
   trae uno más nuevo, el instalador que corre sigue con ese (`--programa`), pero eso solo lo hacen los de la 2 en adelante.
-- **Publicar una versión**: subir la versión en los `package.json` (`codigo/`, `nucleo/`, `app/`, `servidor/`) y
-  `APP_VERSION` en `app.js`; compilar; copiar `codigo/dist/app/*` a la raíz; borrar `beta/`. Commit «Vigía Mesh X.Y: …».
-
-## Comprobar que la app no cambia
-
-Para cambios que no deberían verse (refactorizaciones), comparar capturas de la app compilada en modo demo con el
-reloj congelado, antes y después: Playwright con `page.clock.install` + `pauseAt`, bloqueando las teselas de
-OpenStreetMap y las fuentes de Google (si no, el resultado varía entre pasadas). Textos y `localStorage` idénticos;
-imágenes con tolerancia de suavizado.
+- **Arreglos en la app ligera**: rama desde `main`, compilar, copia en `beta/` sin `sw.js` (con `beta/README.md`),
+  Dani la prueba, y se publica en `main` (subir versión 1.20.x, compilar y copiar `codigo/dist/app/*` a la raíz,
+  borrar `beta/`). Las herramientas para comprobar que no cambia nada más (`capturar.mjs`, `real.mjs`,
+  `comparar.py`, con Playwright y el reloj congelado) están en `main`.
 
 ## Lo aprendido con la malla y el firmware (respetarlo)
 
