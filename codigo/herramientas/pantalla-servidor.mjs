@@ -165,7 +165,7 @@ await foto(movil, "movil-peticion");
 await movil.keyboard.press("Escape");
 
 await paso("avisos por la malla desde el servidor: canal privado", async () => {
-  await ir(pc, "settings");
+  await ir(pc, "settings/mesh");
   await pc.check("#meshOn", { force: true });
   await sleep(300);
   await pc.selectOption("#meshCh", "1");
@@ -181,7 +181,7 @@ await paso("avisos por la malla desde el servidor: canal privado", async () => {
   const rout = toBinary(M.RoutingSchema, create(M.RoutingSchema, { variant: { case: "errorReason", value: 0 } }));
   nodo.paquete({ from: ME, payloadVariant: { case: "decoded", value: create(M.DataSchema, { portnum: PORT.ROUTING_APP, payload: rout, requestId: p.id }) } });
   await sleep(800);
-  await ir(movil, "settings");
+  await ir(movil, "settings/mesh");
   await esperarTexto(movil, /Último: «⚠ Vigía: Caseta huerto · Temperatura 33,0 °C[\s\S]*repetido por la malla/, "último aviso en ajustes del móvil");
 });
 await foto(movil, "movil-ajustes");
@@ -211,7 +211,7 @@ async function fotoApartado(page, sel, nombre) {
 }
 
 await paso("MQTT desde Ajustes: añadir el broker de Home Assistant (con contraseña mal y bien) y publicar en él", async () => {
-  await ir(pc, "settings");
+  await ir(pc, "settings/mqtt");
   await esperarTexto(pc, /Este servidor[\s\S]*Conectado desde las/, "el broker de este servidor, conectado");
   await pc.locator("#mqttBox").screenshot({ path: path.join(out, "mqtt-inicio.png") });
   await pc.click("[data-brk-nuevo]");
@@ -261,7 +261,7 @@ await paso("broker de este servidor: un usuario creado desde Ajustes deja entrar
 await ir(pc, "dashboard");
 
 await paso("el móvil ve los mismos brokers (sin contraseñas)", async () => {
-  await ir(movil, "settings");
+  await ir(movil, "settings/mqtt");
   await esperarTexto(movil, /Home Assistant[\s\S]*Conectado desde las/, "Home Assistant en el móvil");
   await movil.click("#mqttBox summary:text('Usuarios de este broker')");
   await esperarTexto(movil, /Usuarios de este broker[\s\S]*shelly/, "el usuario en el móvil");

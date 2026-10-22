@@ -39,7 +39,7 @@ const fonts = [
   ["Overpass", "@fontsource-variable/overpass", "overpass-latin-wght-normal.woff2", "100 900", "U+0000-00B6,U+00B8-FFFF"],
   ["Overpass Mono", "@fontsource-variable/overpass-mono", "overpass-mono-latin-wght-normal.woff2", "300 700", null],
 ].map(([family, pkg, file, weight, range]) => `@font-face{font-family:"${family}";src:url(data:font/woff2;base64,${font(pkg, file)}) format("woff2");font-weight:${weight};font-style:normal;font-display:swap${range ? `;unicode-range:${range}` : ""}}`);
-const css = ["base.css", "forms.css", "legacy.css", "dashboard.css", "lists.css", "map.css", "sheet.css", "fullscreen.css", "shell.css"].map((f) => fs.readFileSync(path.join(root, "src/css", f), "utf8"));
+const css = ["base.css", "forms.css", "dashboard.css", "lists.css", "map.css", "sheet.css", "fullscreen.css", "settings.css", "shell.css"].map((f) => fs.readFileSync(path.join(root, "src/css", f), "utf8"));
 const src = fs.readFileSync(path.join(root, "index.src.html"), "utf8").replace("/*@CSS@*/", () => [...fonts, ...css].join("\n"));
 
 // title, links and style go to <head>

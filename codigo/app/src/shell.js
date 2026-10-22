@@ -1,5 +1,6 @@
 // The frame around the sections: navigation, top bar, which view is showing (by the address: #/dashboard,
-// #/alarms…), the browser tab and the theme. The sections themselves are drawn by app.js.
+// #/alarms…, and a part of it after another slash: #/settings/mqtt), the browser tab and the theme. The sections
+// themselves are drawn by app.js and views/.
 import { t } from "./i18n.js";
 import { logoSVG, setFavicon } from "./logo.js";
 
@@ -27,26 +28,35 @@ export function viewFromHash(hash = location.hash) {
   const v = /^#\/([a-z]+)/.exec(hash)?.[1];
   return VIEWS.includes(v) ? v : "dashboard";
 }
+/** The part of the view in the address (#/settings/mqtt → "mqtt"), or null. */
+export const subFromHash = (hash = location.hash) => /^#\/[a-z]+\/([a-z]+)/.exec(hash)?.[1] || null;
 export const currentView = () => current;
 export const isView = (v) => current === v;
+let currentSub = null;
 
-/** Goes to a view. If it is already showing, its enter hook runs again (to apply a new focus, for example). */
-export function go(view) {
-  if (viewFromHash() === view && current === view) return hooks.enter(view, { again: true });
-  location.hash = `#/${view}`;
+/** Goes to a view (and a part of it). If it is already showing, its enter hook runs again (a new focus, say). */
+export function go(view, sub = null) {
+  const hash = sub ? `#/${view}/${sub}` : `#/${view}`;
+  if (current === view && (location.hash === hash || (!sub && viewFromHash() === view))) return hooks.enter(view, { again: true, sub: sub ?? subFromHash() });
+  location.hash = hash;
 }
 
 function show() {
-  const next = viewFromHash();
-  if (next === current) return;
+  const next = viewFromHash(), sub = subFromHash();
+  if (next === current) {
+    // Another part of the same view (or the same one again): only its enter hook.
+    if (sub !== currentSub) { currentSub = sub; window.scrollTo(0, 0); hooks.enter(next, { again: true, sub }); }
+    return;
+  }
   const prev = current;
   current = next;
+  currentSub = sub;
   for (const el of document.querySelectorAll("[data-view]")) el.hidden = el.dataset.view !== next;
   renderNav();
   $("#topTitle").textContent = t(LABEL[next]);
   if (prev) hooks.leave(prev);
   window.scrollTo(0, 0);
-  hooks.enter(next, { again: false });
+  hooks.enter(next, { again: false, sub });
 }
 
 export function renderNav() {
@@ -96,7 +106,7 @@ export function relabel() {
   document.title = alarms ? t("title.alarm", { n: alarms }) : t("app.name");
 }
 
-/** hooks: { enter(view, { again }), leave(view) }. */
+/** hooks: { enter(view, { again, sub }), leave(view) }. */
 export function initShell(h) {
   hooks = { ...hooks, ...h };
   applyTheme();

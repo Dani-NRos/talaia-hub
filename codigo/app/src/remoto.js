@@ -1,6 +1,7 @@
 // Modo «Servidor»: la app abierta desde Vigía servidor. El estado (nodos, alarmas, registro, peticiones) es el del
 // servidor, que lo manda al conectar y después solo lo que cambia; lo que se pulsa va al servidor como una orden.
 // Las rutas son relativas («api/…») para que funcione también detrás de un proxy con prefijo.
+import { t } from "./i18n.js";
 
 /**
  * h: { onEstado(foto), onCambio(parche), onAlarma({ al, titulo, detalle }), onConexion(conectado) }
@@ -29,7 +30,7 @@ export function conectarServidor(h) {
       const j = await r.json().catch(() => ({}));
       return { ok: false, ...j };
     } catch {
-      return { ok: false, error: "Sin conexión con el servidor." };
+      return { ok: false, error: t("link.noServerOrder") };
     }
   }
   return { orden, cerrar: () => { cerrada = true; clearTimeout(otra); es.close(); } };

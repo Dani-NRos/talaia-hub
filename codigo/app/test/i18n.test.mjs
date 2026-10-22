@@ -33,3 +33,23 @@ test("the browser's language picks the default", () => {
   assert.equal(browserLang(["de-DE", "es"]), "es");
   assert.equal(browserLang([]), "en");
 });
+
+test("every text the screen asks for is in both languages, with the same placeholders", async () => {
+  const fs = await import("node:fs");
+  const path = await import("node:path");
+  const dir = new URL("../src/", import.meta.url).pathname;
+  const files = fs.readdirSync(dir, { recursive: true }).filter((f) => f.endsWith(".js")).map((f) => path.join(dir, f));
+  const used = new Set();
+  for (const f of files) {
+    const s = fs.readFileSync(f, "utf8");
+    for (const m of s.matchAll(/\btr?\(\s*"([\w.]+)"/g)) used.add(m[1]);
+    for (const m of s.matchAll(/\btr?\([^()]*?\?\s*"([\w.]+)"\s*:\s*"([\w.]+)"/g)) { used.add(m[1]); used.add(m[2]); }
+  }
+  // The tabs of Settings are asked for by name (`set.tab.${k}`): their list, from the source.
+  const tabs = /export const TABS = \[([^\]]+)\]/.exec(fs.readFileSync(path.join(dir, "views/settings.js"), "utf8"))[1].match(/[a-z]+/g);
+  for (const k of tabs) used.add(`set.tab.${k}`);
+  for (const lang of Object.keys(_dicts)) assert.deepEqual([...used].filter((k) => !(k in _dicts[lang])).sort(), [], `missing in ${lang}`);
+  const holes = (v) => (typeof v === "string" ? [...v.matchAll(/\{(\w+)\}/g)].map((m) => m[1]).sort().join(",") : "fn");
+  const differ = Object.keys(_dicts.es).filter((k) => holes(_dicts.es[k]) !== holes(_dicts.en[k]));
+  assert.deepEqual(differ, [], "different placeholders");
+});

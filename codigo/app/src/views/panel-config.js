@@ -22,12 +22,14 @@ const STALE = [0, 60, 180, 720, 1440];
 const S = () => ctx.S;
 const panelCfg = (num) => S().paneles?.paneles?.[num] || null;
 const brokers = () => S().mqtt?.brokers || [];
-export const brokerName = (id) => brokers().find((b) => b.id === id)?.nombre || t("pc.brokerGone");
+/** A broker's name on screen: this server's own, in the screen's language (its name comes from the server). */
+export const brokerLabel = (b) => (b.local ? t("set.mqtt.localName") : b.nombre);
+export const brokerName = (id) => { const b = brokers().find((x) => x.id === id); return b ? brokerLabel(b) : t("pc.brokerGone"); };
 /** For a new datum: the broker that isn't this server's (for now, Home Assistant's) or whichever there is. */
 const defaultBroker = () => { const b = brokers(); return (b.find((x) => !x.local) || b[0])?.id || ""; };
 function brokerOptions(sel) {
   const b = brokers();
-  let o = b.map((x) => `<option value="${esc(x.id)}"${x.id === sel ? " selected" : ""}>${esc(x.nombre)}</option>`).join("");
+  let o = b.map((x) => `<option value="${esc(x.id)}"${x.id === sel ? " selected" : ""}>${esc(brokerLabel(x))}</option>`).join("");
   if (sel && !b.some((x) => x.id === sel)) o += `<option value="${esc(sel)}" selected>${esc(t("pc.brokerGone"))}</option>`;
   return o || `<option value="">${esc(t("pc.addBrokerFirst"))}</option>`;
 }
@@ -234,13 +236,13 @@ function meshStateHTML() {
   if (!(panelCfg(S().myNode)?.datos || []).some((d) => d.malla)) out.push(esc(t("pc.mesh.noneMarked")));
   if (!m.activado) out.push(esc(t("pc.mesh.off")));
   else if (m.proximo) {
-    out.push(esc(t("pc.mesh.next", { time: hhmm.format(new Date(m.proximo)), what: m.previo?.texto ? `«${m.previo.texto}»` : t("pc.mesh.nothingFresh") })));
+    out.push(esc(t("pc.mesh.next", { time: hhmm.format(new Date(m.proximo)), what: m.previo?.texto ? t("pc.mesh.quoted", { text: m.previo.texto }) : t("pc.mesh.nothingFresh") })));
     if (m.previo?.faltan?.length) out.push(`<span class="warn-t">${esc(t("pc.mesh.missing"))}</span> ${esc(m.previo.faltan.join(", "))}.`);
   }
   const u = m.ultimo;
   if (u) {
     const cls = u.ok === true ? "okt" : u.ok === false ? "warn-t" : "";
-    const what = u.texto ? `: «${u.texto}» → ${u.destino}` : "";
+    const what = u.texto ? `: ${t("pc.mesh.quoted", { text: u.texto })} → ${u.destino}` : "";
     out.push(`${esc(t(u.manual ? "pc.mesh.lastManual" : "pc.mesh.last", { time: hhmm.format(new Date(u.t)), what }))}: <strong class="${cls}">${esc(u.resultado)}</strong>.`);
   }
   return out.join("<br>");

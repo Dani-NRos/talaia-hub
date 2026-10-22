@@ -1,8 +1,8 @@
 // A look at the screen: every section on a computer and on a phone, by day and at night, with a simulated node
 // (a watched sensor with an alarm, the receiver, a neighbour). To review the design, not to test behaviour.
 // Usage: npm run build && node herramientas/vistazo.mjs <output folder> [views…] [--en]
-// Views: the sections, and also "sheet" (the sensor's sheet, whole), "receiver" (the receiver's sheet, with what it
-// sends to the mesh) and "full" (the sensor full screen).
+// Views: the sections (Settings, each of its parts), and also "sheet" (the sensor's sheet, whole), "receiver" (the
+// receiver's sheet, with what it sends to the mesh) and "full" (the sensor full screen).
 import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
@@ -81,6 +81,14 @@ for (const [size, viewport] of Object.entries(SIZES)) {
         await page.screenshot({ path: file });
         await page.keyboard.press("Escape");
         await sleep(200);
+        continue;
+      }
+      if (v === "settings") {
+        for (const part of ["mesh", "mqtt", "receiver", "system", "screen"]) {
+          await page.evaluate((x) => { location.hash = `#/settings/${x}`; }, part);
+          await sleep(400);
+          await page.screenshot({ path: path.join(out, `${size}-${scheme}-settings-${part}.png`), fullPage: true });
+        }
         continue;
       }
       await page.evaluate((x) => { location.hash = `#/${x}`; }, v);

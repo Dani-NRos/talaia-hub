@@ -52,7 +52,8 @@ codigo/                 raíz de npm workspaces: npm install, npm test, npm run 
                         localStorage, solo lo de cada aparato (sonido, pantalla encendida, tarjetas, buscador, mapa,
                         idioma y tema)
     src/shell.js        el marco: barra de secciones, barra de arriba, qué sección se ve (#/dashboard, #/alarms,
-                        #/nodes, #/map, #/automations, #/settings), pestaña del navegador y tema
+                        #/nodes, #/map, #/automations, #/settings) y qué apartado (#/settings/mqtt), pestaña del
+                        navegador y tema
     src/i18n.js         idioma de cada pantalla (es/en): t("clave", valores); las secciones pasan aquí al reescribirse.
                         En app.js se importa como `tr` (allí `t` es el elemento en los manejadores de eventos)
     src/ctx.js ui.js    lo que comparten las secciones (estado, motor, orden, toast) y utilidades ($, esc, LS, iconos)
@@ -62,12 +63,14 @@ codigo/                 raíz de npm workspaces: npm install, npm test, npm run 
                         ficha: peticiones, ruta, ubicación, alarmas, cambio rápido, estados, gráficas), panel-config.js
                         (en la ficha de un panel vigilado: nombre, datos MQTT, conexión, lo que sale a la malla; y
                         «Panel nuevo»; lo cambiado sin guardar se queda si se vuelve a abrir el mismo), fullscreen.js
-                        (un panel a pantalla completa, con la pantalla encendida)
+                        (un panel a pantalla completa, con la pantalla encendida), settings.js (Ajustes, en
+                        apartados; el diagnóstico de conexión)
+    src/alerts.js       cómo avisa esta pantalla: sonido, vibración, notificación, pantalla encendida
     src/charts.js       gráficas en SVG (con ejes, la de las tarjetas y la barra de los estados ON/OFF)
     src/logo.js         la torre de vigilancia (logo, icono de la pestaña: su ventana se enciende con alarmas sin atender)
     src/css/            base.css (colores, letras, botones), forms.css (bloques y casillas: ficha y Ajustes),
-                        dashboard.css lists.css map.css sheet.css fullscreen.css shell.css; legacy.css, solo lo
-                        que queda de Ajustes hasta la 3.3e. El orden, en build.mjs
+                        dashboard.css lists.css map.css sheet.css fullscreen.css settings.css shell.css. El orden,
+                        en build.mjs
     src/map.js mapdata.js meshsearch.js remoto.js
     index.src.html build.mjs pwa/ (manifiesto, iconos y sw.js: la pantalla del servidor se instala como app)
   servidor/             Vigía servidor (@vigia/servidor), Node ≥ 22.13
@@ -208,15 +211,19 @@ con Tasmota/ESPHome, Zigbee por zigbee2mqtt, ESPHome, Home Assistant…).
   inferior y Ajustes en un engranaje arriba a la derecha. Por partes: 3.1) quitar la app ligera de la pantalla (hecho: sin Bluetooth, cable,
   demo ni modo sin servidor; la prueba de peticiones pasó al núcleo); 3.2) esqueleto, estilo, logo, nombre «Talaia» e
   idioma (hecho: lo elige cada pantalla; por defecto, el del navegador, español también para ca/eu/gl); 3.3) cada
-  sección en los dos idiomas (hecho: tablero, nodos, registro, mapa, ficha, configuración de paneles y pantalla completa;
-  falta Ajustes, 3.3e); 3.4) lo que sale del servidor (malla, Home Assistant, registro) con un idioma del
+  sección en los dos idiomas (hecho, 23 oct. 2026; app/test/i18n.test.mjs comprueba que cada texto que se pide está en
+  los dos y con los mismos huecos); 3.4) lo que sale del servidor (malla, Home Assistant, registro) con un idioma del
   servidor. No se pierde ninguna función.
 - Estilo (3.2): arena y verde bosque de día, «guardia nocturna» (fondo casi negro verdoso, texto color arena) de
   noche; oliva para lo que se pulsa; naranja de señal (#c2410c / #e2531b; de noche #ff6b2b) solo para alarmas.
   Letras Overpass y Overpass Mono (OFL, de npm @fontsource-variable, incrustadas por build.mjs: sin internet se ve
   igual). Las lecturas, en Overpass con cifras tabulares (todas igual de anchas), no en la monoespaciada: esa le da a la
   coma decimal el ancho de una cifra y Dani las vio demasiado espaciadas. Overpass dibuja «·» sin anchura: ese carácter sale de otra letra
-  (unicode-range). Tema y idioma en Ajustes → «Esta pantalla». Ajustes, en una columna centrada (texto a la izquierda). Los registros y alarmas están en Alarmas; el Tablero
+  (unicode-range). Ajustes, en cinco apartados con pestañas, cada uno con su dirección (#/settings/mesh…): Malla
+  (sin señal para los nodos nuevos, avisos por la malla), MQTT (brokers, usuarios del broker de este equipo, Home
+  Assistant), Receptor (estado, nodo, radio, canales, diagnóstico; ahí lleva el botón de estado de arriba), Sistema
+  (histórico, acerca de) y Esta pantalla (idioma, tema, sonido, notificaciones, pantalla encendida, mapa sin
+  internet: todo lo que es de cada aparato). Cada aparato recuerda el último abierto. Ajustes, en una columna centrada (texto a la izquierda). Los registros y alarmas están en Alarmas; el Tablero
   tiene el aviso de alarmas y los paneles; el mapa es una sección (map.js ya no usa un diálogo).
 - Orden (1 y 2, hechos): 1) nombre y política de idioma; 2) congelar la webapp y reorganizar el repositorio;
   3) rediseño con los dos idiomas; 4) usuarios; 5) Docker y documentación en inglés → **2.0**. Las
