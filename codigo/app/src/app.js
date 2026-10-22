@@ -5,6 +5,8 @@ import { distM, compass, precisionM, fmtDist, coordText, mapsUrl, SOURCE } from 
 import { trendDefault, parseTrendRule } from "@vigia/nucleo/trend.js";
 import { searchNodes, highlight, tokens, FILTERS, SORTS } from "./meshsearch.js";
 import { conectarServidor, crearStoreRemoto } from "./remoto.js";
+import { t, setLang, getLang, LANGS } from "./i18n.js";
+import { initShell, go, isView, setAlarms, relabel, getTheme, setTheme } from "./shell.js";
 import { MIN, HOUR, DAY, isNum, hhmm, dShort, ago, stamp, dur, trendDec, fmtTrend, trendVerb, hoursText, lastWindow } from "@vigia/nucleo/textos.js";
 import { TIPOS, LISTA_TIPOS, TIPOS_PANEL, NOMBRES_ESTADO, tipoMalla, esEstado, unidades, adivinarTipo, adivinarEstado, proponerOrden, unidadDe, textoDato, metasDe, MALLA_MAX_SALTOS } from "@vigia/nucleo/mqtt-datos.js";
 import { crearMotor, estadoInicial, MESH_HOURLY, ASK, ASK_ALL, askKey, RE, seriesKey, trendKey, estadoKey, hexId } from "@vigia/nucleo/motor.js";
@@ -60,7 +62,7 @@ const motor = crearMotor(S, {
   posicion: (num) => refreshPos(num),
   peticion: (num) => refreshAsk(num),
   peticionEstado: (num) => patchAskStatus(num),
-  ruta() { if (mapView && $("#map").open) mapView.update(); },
+  ruta() { if (mapView && isView("map")) mapView.update(); },
   avisoMalla: () => patchMeshLast(),
   registro: () => renderLog(),
   alarma: (al) => fireAlarm(al),
@@ -912,17 +914,15 @@ async function applyWake() {
   if (!S.settings.wake) {
     try { await wake?.release(); } catch { /* ya liberado */ }
     wake = null;
-    renderFoot();
     return;
   }
   if (!("wakeLock" in navigator) || document.visibilityState !== "visible" || wake) return;
   try {
     wake = await navigator.wakeLock.request("screen");
-    wake.addEventListener("release", () => { wake = null; renderFoot(); });
+    wake.addEventListener("release", () => { wake = null; });
   } catch {
     toast("Este navegador no deja mantener la pantalla encendida.");
   }
-  renderFoot();
 }
 document.addEventListener("visibilitychange", () => {
   if (document.visibilityState === "visible") {
@@ -1105,11 +1105,9 @@ function render() {
     renderCards();
     renderMesh();
     renderLog();
-    renderFoot();
-    mapView?.update();
+    if (isView("map")) mapView?.update();
     if (S.full) refreshFull(null);
-    const n = unacked().length;
-    document.title = n ? `(${n}) Alarma · Vigía Mesh` : "Vigía Mesh";
+    setAlarms(unacked().length);
   });
 }
 
@@ -1127,19 +1125,21 @@ const ICON = {
 /** Barra de arriba: primero, si hay conexión con el servidor; después, cómo está su receptor. */
 function renderTop() {
   const b = $("#linkBtn");
-  const st = !S.servidorOk ? "reconnecting" : S.link.state;
-  let label;
-  if (!S.servidorOk) label = "Sin conexión con el servidor";
-  else if (st === "ready") label = `${S.nodes.get(S.myNode)?.short || "Receptor"} conectado`;
-  else if (st === "configuring") label = S.link.extra?.packets ? `Leyendo el nodo · ${S.link.extra.packets}` : "Leyendo el nodo…";
-  else if (st === "reconnecting" || st === "connecting") label = S.trouble?.kind === "unplugged" ? "Receptor desenchufado" : "Receptor sin conexión";
-  else label = "Receptor parado";
+  const st = !S.servidorOk ? "noserver" : S.link.state;
+  // On a phone the short label leaves room for the section's name.
+  let label, short;
+  const name = S.nodes.get(S.myNode)?.short || t("link.receiver");
+  if (!S.servidorOk) [label, short] = [t("link.noServer"), t("link.short.noServer")];
+  else if (st === "ready") [label, short] = [t("link.ready", { name }), name];
+  else if (st === "configuring") [label, short] = [S.link.extra?.packets ? t("link.readingN", { n: S.link.extra.packets }) : t("link.reading"), t("link.short.reading")];
+  else if (st === "reconnecting" || st === "connecting") [label, short] = S.trouble?.kind === "unplugged" ? [t("link.unplugged"), t("link.short.unplugged")] : [t("link.lost"), t("link.short.lost")];
+  else [label, short] = [t("link.stopped"), t("link.short.stopped")];
   b.dataset.state = st;
-  b.innerHTML = `<span class="ld"></span>${ICON.server}<span class="lt">${esc(label)}</span>`;
+  b.setAttribute("aria-label", label);
+  setHTML(b, `<span class="ld"></span>${ICON.server}<span class="lt">${esc(label)}</span><span class="lt-s" aria-hidden="true">${esc(short)}</span>`);
 }
 
 function renderBoard() {
-  const el = $("#board");
   const list = [...S.active.values()].sort((a, b) => (a.acked - b.acked) || (b.since - a.since));
   const watchedN = Object.keys(S.cfg.watched).length;
   let html = "";
@@ -1167,7 +1167,8 @@ function renderBoard() {
       : "Esperando al receptor. Las alarmas de nodo sin señal están en pausa hasta que vuelva.";
     html += `<div class="notice"><p>${esc(msg)}</p></div>`;
   }
-  el.innerHTML = html;
+  setHTML($("#board"), html);
+  setHTML($("#alarmBoard"), html);
 }
 
 /* ───────────── cuando el servidor o su receptor no conectan ───────────── */
@@ -1609,20 +1610,18 @@ function renderLog() {
   more.textContent = S.logExpanded ? "Ver menos" : `Ver todo el registro (${S.log.length})`;
 }
 
-function renderFoot() {
-  const bits = ["Datos guardados en el servidor de Vigía, en tu red."];
-  if (wake) bits.push("Pantalla fija activada.");
-  $("#foot").textContent = bits.join(" ");
-  const v = $("#footVer");
-  if (v) v.textContent = `Vigía Mesh ${APP_VERSION}`;
-}
-
 /* ───────────── mapa ───────────── */
 const TILE_CACHE = "teselas-osm"; // el mismo nombre que en sw.js
 let persistAsked = false;
-/** focus: nodo en el que centrar el mapa (desde su tarjeta o su ficha). */
-/** route: { to, fwd, back } para dibujar la ruta de un traceroute. */
+let mapWanted = null; // what the Map section has to show when it opens: { focus, route }
+/** focus: nodo en el que centrar el mapa (desde su tarjeta o su ficha). route: { to, fwd, back } de un traceroute. */
 function openMap(focus = null, route = null) {
+  if ($("#detail").open) $("#detail").close();
+  if ($("#nodeview").open) $("#nodeview").close();
+  mapWanted = { focus, route };
+  go("map");
+}
+function enterMap() {
   // Que el navegador no vacíe el fondo guardado cuando el móvil vaya justo de espacio.
   if (!persistAsked) { persistAsked = true; navigator.storage?.persist?.().catch(() => {}); }
   if (!mapView) {
@@ -1636,11 +1635,9 @@ function openMap(focus = null, route = null) {
       save: (v) => LS.set("vigia.map", v),
     });
   }
-  const detail = $("#detail");
-  // Desde la ficha: si el mapa ya estaba abierto debajo, se cierra la ficha para verlo;
-  // si no, el mapa se abre encima y al cerrarlo se vuelve a la ficha.
-  if (focus != null && detail.open && $("#map").open) detail.close();
-  mapView.open(focus, route);
+  const w = mapWanted || { focus: null, route: null };
+  mapWanted = null;
+  mapView.open(w.focus, w.route);
 }
 
 /* ───────────── detalle de nodo ───────────── */
@@ -1651,8 +1648,6 @@ function openDetail(num) {
   S.detail = { num, range: S.detail?.num === num ? S.detail.range : "24h" };
   renderDetail();
   const d = $("#detail");
-  // Con el mapa abierto, la ficha puede estar debajo (se abrió antes): se reabre para que quede encima.
-  if (d.open && $("#map").open) d.close();
   if (!d.open) d.showModal();
   drawCharts();
 }
@@ -1917,8 +1912,8 @@ function renderSettings() {
     : notifState === "denied" ? `<span class="warn-t">Bloqueadas en los ajustes del navegador</span>`
     : notifState === "none" ? `<span class="hint">No disponibles aquí</span>`
     : `<button class="btn ghost" data-notif>Activar</button>`;
-  $("#settings").innerHTML = `<div class="sheet-h"><div class="sheet-t"><h2>Ajustes</h2></div><button class="icon-btn" data-close aria-label="Cerrar">${ICON.close}</button></div>
-  <div class="sheet-b">
+  $("#settings").innerHTML = `
+    ${screenSection()}
     <section class="blk"><h3>Receptor</h3>${rec}</section>
     <section class="blk"><h3>Avisos</h3>
       <div class="set-row"><label class="sw" for="setSound"><input type="checkbox" id="setSound" ${S.settings.sound ? "checked" : ""}><span class="sw-ui"></span><span>Sonido de alarma</span></label><button class="btn ghost" data-test>Probar alarma</button></div>
@@ -1945,12 +1940,11 @@ function renderSettings() {
       <p class="hint">«Avisar del fallo» abre un aviso nuevo en GitHub con el diagnóstico ya pegado. Necesita internet y una cuenta de GitHub, y el aviso es público: revisa el texto antes de enviarlo.</p>
     </section>
     <section class="blk about"><h3>Acerca de</h3>
-      <p><strong>Vigía Mesh ${APP_VERSION}</strong>. Panel de alarmas para nodos Meshtastic que funciona sin internet. Hecho por Dani-NRos.</p>
+      <p><strong>Talaia ${APP_VERSION}</strong>. Vigilancia de una malla Meshtastic y de dispositivos MQTT, en tu red. Antes, Vigía. Hecho por Dani-NRos.</p>
       <div class="btns"><a class="btn ghost" href="${REPO_URL}" target="_blank" rel="noopener">Código en GitHub</a><a class="btn ghost" href="${ISSUES_URL}" target="_blank" rel="noopener">Avisos y sugerencias</a></div>
       <p class="hint">Para abrir los enlaces hace falta internet. Si algo falla o echas algo en falta, cuéntalo en los avisos de GitHub.</p>
       <p class="hint">Código abierto con licencia GPL-3.0. Proyecto independiente, no afiliado a Meshtastic. Meshtastic® es una marca registrada de Meshtastic LLC.</p>
-    </section>
-  </div>`;
+    </section>`;
   S.store.count().then((c) => { const el = $("#histCount"); if (el) el.textContent = `${c.toLocaleString("es-ES")} lecturas`; });
   tileInfo();
 }
@@ -1966,10 +1960,22 @@ async function tileInfo() {
   if (p) p.textContent = kept === true ? "Guardado permanente: el navegador no lo borra aunque falte espacio."
     : kept === false ? "El navegador puede borrarlo si el móvil se queda sin espacio. Instalar la app suele evitarlo." : "";
 }
-function openSettings() {
-  renderSettings();
-  const d = $("#settings");
-  if (!d.open) d.showModal();
+function openSettings() { go("settings"); }
+
+/** Language and theme of this screen. */
+function screenSection() {
+  const langs = LANGS.map((l) => `<option value="${l.code}"${l.code === getLang() ? " selected" : ""}>${l.name}</option>`).join("");
+  const themes = ["auto", "light", "dark"].map((v) => `<option value="${v}"${v === getTheme() ? " selected" : ""}>${esc(t(`screen.theme.${v}`))}</option>`).join("");
+  return `<section class="blk"><h3>${esc(t("screen.title"))}</h3>
+      <div class="set-row"><label for="setLang">${esc(t("screen.lang"))}</label><select id="setLang" class="inp sel lang">${langs}</select></div>
+      <div class="set-row"><label for="setTheme">${esc(t("screen.theme"))}</label><select id="setTheme" class="inp sel theme">${themes}</select></div>
+      <p class="hint">${esc(t("screen.hint"))}</p>
+    </section>`;
+}
+
+/** Automations: what they will be, until 2.1. */
+function renderSoon() {
+  $("#soon").innerHTML = `<span class="soon-tag">${esc(t("auto.soon"))}</span><p>${esc(t("auto.lead"))}</p><p>${esc(t("auto.example"))}</p>`;
 }
 
 /* ───────────── Enterado y peticiones: van al servidor ───────────── */
@@ -2035,7 +2041,7 @@ document.addEventListener("click", async (ev) => {
   if ("watch" in ds) return watch(Number(ds.watch));
   if ("close" in ds) return t.closest("dialog")?.close();
   if ("retry" in ds) return orden({ orden: "reconectar" });
-  if ("diag" in ds) { openSettings(); setTimeout(() => $("#diagBox")?.scrollIntoView({ block: "start" }), 50); return; }
+  if ("diag" in ds) { openSettings(); setTimeout(() => $("#diagBox")?.scrollIntoView({ block: "start" }), 80); return; }
   if ("brkNuevo" in ds) { brokerEdit = { id: null, nombre: "", url: "", usuario: "", clave: "", activado: true }; renderMqtt(); return $("#brkNombre")?.focus(); }
   if ("brkEdit" in ds) { const b = mqttBrokers().find((x) => x.id === ds.brkEdit); if (b) brokerEdit = { id: b.id, nombre: b.nombre, url: b.url, usuario: b.usuario, clave: "", activado: b.activado }; return renderMqtt(); }
   if ("brkCancel" in ds) { brokerEdit = null; return renderMqtt(); }
@@ -2093,7 +2099,7 @@ document.addEventListener("click", async (ev) => {
     return;
   }
   if ("notif" in ds) { try { await Notification.requestPermission(); } catch { /* nada */ } renderSettings(); return; }
-  if ("test" in ds) { unlockAudio(); raise("test", { kind: "test", num: null, t: Date.now() }); $("#settings").close(); return; }
+  if ("test" in ds) { unlockAudio(); raise("test", { kind: "test", num: null, t: Date.now() }); go("dashboard"); return; }
   if ("export" in ds) return location.assign("api/lecturas.csv");
   if ("wipe" in ds) {
     if (Date.now() - wipeArmed > 4000) { wipeArmed = Date.now(); t.textContent = "Toca otra vez para borrar"; return; }
@@ -2118,8 +2124,6 @@ document.addEventListener("click", async (ev) => {
   }
   if ("range" in ds) { S.detail.range = ds.range; $$("#detail [data-range]").forEach((b) => b.setAttribute("aria-pressed", String(b.dataset.range === ds.range))); return drawCharts(); }
   if (t.id === "linkBtn") return openSettings();
-  if (t.id === "setBtn") return openSettings();
-  if (t.id === "mapBtn") return openMap();
   if (t.id === "meshMore") { S.meshExpanded = !S.meshExpanded; return renderMesh(); }
   if ("mf" in ds) {
     const f = new Set(S.meshView.filters);
@@ -2148,10 +2152,11 @@ document.addEventListener("keydown", (ev) => {
     return;
   }
   // «/» lleva al buscador, salvo escribiendo en otra casilla o con una ficha abierta.
+  // «/» lleva al buscador de Nodos desde cualquier sección.
   if (ev.key === "/" && !ev.ctrlKey && !ev.metaKey && !ev.altKey && !ev.target.closest?.("input, textarea, select, [contenteditable]") && !document.querySelector("dialog[open]") && !$("#meshTools").hidden) {
     ev.preventDefault();
-    $("#meshQ").focus();
-    $("#meshQ").scrollIntoView({ block: "center", behavior: "smooth" });
+    if (!isView("nodes")) go("nodes");
+    setTimeout(() => $("#meshQ").focus(), 0);
     return;
   }
   if (ev.key === "Escape" && ev.target.id === "meshQ") {
@@ -2209,6 +2214,8 @@ document.addEventListener("change", async (ev) => {
   if (t.closest(".tr-form")) return; // se guarda con el botón
   if (t.matches("[data-est-cuando], [data-est-min]")) return guardarEstado(t);
   if (t.matches("#detail .inp")) return saveRuleFromInput(t);
+  if (t.id === "setLang") { setLang(t.value); relabel(); renderSoon(); render(); return renderSettings(); }
+  if (t.id === "setTheme") return setTheme(t.value);
   if (t.id === "setSound") { S.settings.sound = t.checked; saveSettings(); if (t.checked) { unlockAudio(); beep(); } return; }
   if (t.id === "setWake") { S.settings.wake = t.checked; saveSettings(); return applyWake(); }
   if (t.id === "setOff") {
@@ -2291,14 +2298,26 @@ function refrescarAbiertos(p) {
     if ("paneles" in p || p.nodes?.some((n) => n.num === num)) patchInterruptores();
   }
   if (S.full && (p.nodes || p.rows || "active" in p)) refreshFull(S.full.num);
-  if ($("#settings").open) {
+  if (isView("settings")) {
     if ("meshLast" in p) patchMeshLast();
     if ("mqtt" in p) patchMqtt();
     if (("link" in p || "diag" in p || "settings" in p || "channels" in p || "trouble" in p) && !escribiendo("#settings input, #settings select")) renderSettings();
   }
-  if (mapView && $("#map").open && (p.nodes || "traces" in p)) mapView.update();
+  if (mapView && isView("map") && (p.nodes || "traces" in p)) mapView.update();
 }
+/** Entering a section: the map is drawn when it shows; Settings, with what it has now. */
+function enterView(view) {
+  if (view === "map") enterMap();
+  else if (view === "settings") renderSettings();
+}
+function leaveView(view) {
+  if (view === "map") mapView?.leave();
+}
+
 function boot() {
+  document.documentElement.lang = getLang();
+  renderSoon();
+  initShell({ enter: enterView, leave: leaveView });
   S.settings = { ...DEFAULT_SETTINGS, ...LS.get("vigia.settings", {}) };
   S.ui = { collapsed: {}, order: [], ...(LS.get("vigia.cards", {}) || {}) };
   S.meshView = { filters: [], sort: "auto", ...(LS.get("vigia.meshView", {}) || {}) };
@@ -2310,7 +2329,7 @@ function boot() {
       S.servidorOk = ok;
       if (!ok) addLogLocal("Sin conexión con el servidor; reintentando…");
       render();
-      if ($("#settings").open) renderSettings();
+      if (isView("settings")) renderSettings();
     },
     onEstado(foto) {
       S.nodes = new Map(foto.nodes.map((n) => [n.num, n]));

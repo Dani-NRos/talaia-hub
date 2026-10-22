@@ -14,7 +14,8 @@ const SPAIN = { center: [40.0, -3.7], zoom: 6 };
  *        sf(): factor de dispersión del receptor, hopName(num), legHops(leg) }
  */
 export function createMapView(ctx) {
-  const dlg = document.getElementById("map");
+  const view = document.getElementById("v-map"); // the Map section: the map is drawn while it is showing
+  const showing = () => !view.hidden;
   const box = document.getElementById("mapBox");
   const selM = document.getElementById("mapMetric");
   const selA = document.getElementById("mapAge");
@@ -31,8 +32,6 @@ export function createMapView(ctx) {
   selA.innerHTML = AGES.map((a) => `<option value="${a.key}">${a.label}</option>`).join("");
   selA.value = st.age;
   const save = () => ctx.save({ metric: st.metric, age: st.age });
-  // Al cerrar se olvida el nodo buscado y se cierra su globo, que si no seguiría tapando el mapa al volver.
-  dlg.addEventListener("close", () => { focusNum = null; route = null; drawRoute(); m?.closePopup(); });
   selM.addEventListener("change", () => { st.metric = selM.value || null; save(); update(); });
   selA.addEventListener("change", () => { st.age = selA.value; save(); update(); });
 
@@ -184,7 +183,7 @@ export function createMapView(ctx) {
 
   /* ── pintar ── */
   function update() {
-    if (!m || !dlg.open) return;
+    if (!m || !showing()) return;
     if (route) return updateRoute();
     routeMode(false);
     const { esc } = ctx;
@@ -400,7 +399,6 @@ export function createMapView(ctx) {
 
   /** focus: número de nodo para abrir el mapa centrado en él. r: ruta de un traceroute para dibujarla. */
   function open(focus = null, r = null) {
-    if (!dlg.open) dlg.showModal();
     ensure();
     m.invalidateSize();
     focusNum = focus;
@@ -419,8 +417,11 @@ export function createMapView(ctx) {
     for (const it of markers.values()) it.mk.remove();
     markers.clear();
     fitted = false;
-    if (dlg.open) { update(); fit(false); fitted = true; spread(); }
+    if (showing()) { update(); fit(false); fitted = true; spread(); }
   }
 
-  return { open, update, reset };
+  /** On leaving the section: forget the node that was asked for and close its popup, or it would still cover the map. */
+  function leave() { focusNum = null; route = null; drawRoute(); m?.closePopup(); }
+
+  return { open, update, reset, leave };
 }

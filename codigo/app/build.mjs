@@ -30,7 +30,17 @@ const res = await build({
   logLevel: "warning",
 });
 const js = res.outputFiles[0].text.replace(/<\/script/gi, "<\\/script");
-const src = fs.readFileSync(path.join(root, "index.src.html"), "utf8");
+
+// Styles: the fonts, embedded (the screen must look the same without internet), then the stylesheets in order.
+const font = (pkg, file) => fs.readFileSync(path.join(root, "..", "node_modules", pkg, "files", file)).toString("base64");
+// Overpass draws the middle dot (·) with no width, so «a · b» looks like «a ·b»: that one character comes from the
+// next font in the list.
+const fonts = [
+  ["Overpass", "@fontsource-variable/overpass", "overpass-latin-wght-normal.woff2", "100 900", "U+0000-00B6,U+00B8-FFFF"],
+  ["Overpass Mono", "@fontsource-variable/overpass-mono", "overpass-mono-latin-wght-normal.woff2", "300 700", null],
+].map(([family, pkg, file, weight, range]) => `@font-face{font-family:"${family}";src:url(data:font/woff2;base64,${font(pkg, file)}) format("woff2");font-weight:${weight};font-style:normal;font-display:swap${range ? `;unicode-range:${range}` : ""}}`);
+const css = ["base.css", "legacy.css", "shell.css"].map((f) => fs.readFileSync(path.join(root, "src/css", f), "utf8"));
+const src = fs.readFileSync(path.join(root, "index.src.html"), "utf8").replace("/*@CSS@*/", () => [...fonts, ...css].join("\n"));
 
 // title, links and style go to <head>
 const headBits = [];
@@ -45,13 +55,12 @@ const html = `<!doctype html>
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
-<meta name="theme-color" content="#e9eeec" media="(prefers-color-scheme: light)">
-<meta name="theme-color" content="#0e1513" media="(prefers-color-scheme: dark)">
+<meta name="theme-color" content="#e3dfcf" media="(prefers-color-scheme: light)">
+<meta name="theme-color" content="#0e1410" media="(prefers-color-scheme: dark)">
 <meta name="description" content="Vigilancia 24/7 de una malla Meshtastic y dispositivos MQTT, en tu red.">
 <link rel="manifest" href="./manifest.webmanifest">
 <link rel="icon" href="./icon-192.png" type="image/png">
 <link rel="apple-touch-icon" href="./icon-192.png">
-<style>:root{color-scheme:light;padding-top:env(safe-area-inset-top,0px);padding-bottom:env(safe-area-inset-bottom,0px)}body{margin:0}img{max-width:100%}[hidden]{display:none!important}</style>
 ${headBits.join("\n")}
 </head>
 <body>

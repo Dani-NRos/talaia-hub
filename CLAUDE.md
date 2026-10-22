@@ -45,7 +45,13 @@ codigo/                 raíz de npm workspaces: npm install, npm test, npm run 
   app/                  la PWA (@vigia/app)
     src/app.js          pantalla; crea el motor con ganchos (redibujar, sonar…) solo para mostrar: el estado llega
                         del servidor por SSE y lo que se pulsa va a él como orden por POST (src/remoto.js). En
-                        localStorage, solo lo de cada aparato (sonido, pantalla encendida, tarjetas, buscador, mapa)
+                        localStorage, solo lo de cada aparato (sonido, pantalla encendida, tarjetas, buscador, mapa,
+                        idioma y tema)
+    src/shell.js        el marco: barra de secciones, barra de arriba, qué sección se ve (#/dashboard, #/alarms,
+                        #/nodes, #/map, #/automations, #/settings), pestaña del navegador y tema
+    src/i18n.js         idioma de cada pantalla (es/en): t("clave", valores); las secciones pasan aquí al reescribirse
+    src/logo.js         la torre de vigilancia (logo, icono de la pestaña: su ventana se enciende con alarmas sin atender)
+    src/css/            base.css (colores, letras), legacy.css (lo de la 1.x, sección a sección fuera), shell.css
     src/map.js mapdata.js meshsearch.js remoto.js
     index.src.html build.mjs pwa/ (manifiesto, iconos y sw.js: la pantalla del servidor se instala como app)
   servidor/             Vigía servidor (@vigia/servidor), Node ≥ 22.13
@@ -183,8 +189,15 @@ con Tasmota/ESPHome, Zigbee por zigbee2mqtt, ESPHome, Home Assistant…).
   ordenador, las seis en la barra lateral (Ajustes abajo); en el móvil, cinco en la barra inferior y Ajustes en un
   engranaje arriba a la derecha. Por partes: 3.1) quitar la app ligera de la pantalla (hecho: sin Bluetooth, cable,
   demo ni modo sin servidor; la prueba de peticiones pasó al núcleo); 3.2) esqueleto, estilo, logo, nombre «Talaia» e
-  idioma (lo elige cada pantalla; por defecto, el del navegador); 3.3) cada sección en los dos idiomas; 3.4) lo que
-  sale del servidor (malla, Home Assistant, registro) con un idioma del servidor. No se pierde ninguna función.
+  idioma (hecho: lo elige cada pantalla; por defecto, el del navegador, español también para ca/eu/gl); 3.3) cada
+  sección en los dos idiomas; 3.4) lo que sale del servidor (malla, Home Assistant, registro) con un idioma del
+  servidor. No se pierde ninguna función.
+- Estilo (3.2): arena y verde bosque de día, «guardia nocturna» (fondo casi negro verdoso, texto color arena) de
+  noche; oliva para lo que se pulsa; naranja de señal (#c2410c / #e2531b; de noche #ff6b2b) solo para alarmas.
+  Letras Overpass y Overpass Mono (OFL, de npm @fontsource-variable, incrustadas por build.mjs: sin internet se ve
+  igual); las lecturas, en la monoespaciada. Overpass dibuja «·» sin anchura: ese carácter sale de otra letra
+  (unicode-range). Tema y idioma en Ajustes → «Esta pantalla». Los registros y alarmas están en Alarmas; el Tablero
+  tiene el aviso de alarmas y los paneles; el mapa es una sección (map.js ya no usa un diálogo).
 - Orden (1 y 2, hechos): 1) nombre y política de idioma; 2) congelar la webapp y reorganizar el repositorio;
   3) rediseño con los dos idiomas; 4) usuarios; 5) Docker y documentación en inglés → **2.0**. Las
   **automatizaciones** («si… entonces…», centradas en la malla, con la fase 6 de control desde la malla dentro) →

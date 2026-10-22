@@ -1,17 +1,30 @@
 {
-  "name": "Vigía Mesh",
-  "short_name": "Vigía",
-  "description": "Telemetría y alarmas de nodos Meshtastic por Bluetooth, sin internet.",
+  "name": "Talaia",
+  "short_name": "Talaia",
+  "description": "Vigilancia 24/7 de una malla Meshtastic y dispositivos MQTT, en tu red.",
   "lang": "es",
   "start_url": "./",
   "scope": "./",
   "display": "standalone",
   "orientation": "any",
-  "background_color": "#e9eeec",
-  "theme_color": "#1d6a86",
+  "background_color": "#e3dfcf",
+  "theme_color": "#22372a",
   "icons": [
-    { "src": "icon-192.png", "sizes": "192x192", "type": "image/png" },
-    { "src": "icon-512.png", "sizes": "512x512", "type": "image/png" },
-    { "src": "icon-maskable-512.png", "sizes": "512x512", "type": "image/png", "purpose": "maskable" }
+    {
+      "src": "icon-192.png",
+      "sizes": "192x192",
+      "type": "image/png"
+    },
+    {
+      "src": "icon-512.png",
+      "sizes": "512x512",
+      "type": "image/png"
+    },
+    {
+      "src": "icon-maskable-512.png",
+      "sizes": "512x512",
+      "type": "image/png",
+      "purpose": "maskable"
+    }
   ]
 }

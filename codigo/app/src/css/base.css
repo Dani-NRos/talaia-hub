@@ -1,0 +1,61 @@
+/* Talaia: a field instrument for watching a mesh. Sand and forest green by day; "night watch" after dark, with
+   sand-coloured text that does not dazzle. One signal colour (blaze orange, as on forest markings) for alarms only.
+   Readings in a monospaced face, like an instrument's display. Fonts (Overpass and Overpass Mono, OFL) are
+   embedded by build.mjs, so the screen looks the same without internet. */
+:root {
+  --bg: #e3dfcf;          /* sand */
+  --surface: #f0ede2;
+  --surface-2: #d8d3c0;
+  --line: #c3bca3;
+  --ink: #1e2419;
+  --ink-2: #585f4b;
+  --accent: #55662a;      /* olive: what you can press */
+  --on-accent: #f4f1e4;
+  --ok: #2f7d4f;
+  --warn: #9c6209;
+  --crit: #c2410c;        /* signal, dark enough for text and as a background */
+  --on-crit: #fff6ef;
+  --signal: #e2531b;      /* signal for small marks: the lamp, badges */
+  --off: #686684;
+  --rail: #22372a;        /* forest: the navigation */
+  --rail-ink: #e7e1cc;
+  --rail-ink-2: #a9b39c;
+  --rail-on: #b9c77d;     /* the current section */
+  --shadow: 0 1px 0 rgb(30 36 25 / .05);
+  --f-body: "Overpass", "Segoe UI", system-ui, sans-serif;
+  --f-display: var(--f-body);
+  --f-mono: "Overpass Mono", ui-monospace, "SFMono-Regular", Menlo, Consolas, monospace;
+  --r: 8px;
+  --top-h: 56px;
+  --tab-h: 60px;
+  --rail-w: 88px;
+  color-scheme: light;
+}
+@media (prefers-color-scheme: dark) {
+  :root:not([data-theme="light"]) {
+    --bg: #0e1410; --surface: #151d17; --surface-2: #1c261f; --line: #2b372d; --ink: #e4decb; --ink-2: #a2a58f;
+    --accent: #b4c27b; --on-accent: #151b0e; --ok: #79c08a; --warn: #e2a33e; --crit: #ff6b2b; --on-crit: #1c0a02;
+    --signal: #ff6b2b; --off: #a9a8c8; --rail: #0a0f0b; --rail-ink: #d6cfb8; --rail-ink-2: #858a77; --rail-on: #b4c27b;
+    --shadow: none;
+    color-scheme: dark;
+  }
+}
+:root[data-theme="dark"] {
+  --bg: #0e1410; --surface: #151d17; --surface-2: #1c261f; --line: #2b372d; --ink: #e4decb; --ink-2: #a2a58f;
+  --accent: #b4c27b; --on-accent: #151b0e; --ok: #79c08a; --warn: #e2a33e; --crit: #ff6b2b; --on-crit: #1c0a02;
+  --signal: #ff6b2b; --off: #a9a8c8; --rail: #0a0f0b; --rail-ink: #d6cfb8; --rail-ink-2: #858a77; --rail-on: #b4c27b;
+  --shadow: none;
+  color-scheme: dark;
+}
+
+* { box-sizing: border-box; }
+html { -webkit-text-size-adjust: 100%; }
+body { margin: 0; background: var(--bg); color: var(--ink); font: 400 15.5px/1.5 var(--f-body); -webkit-tap-highlight-color: transparent; }
+h1, h2, h3, h4 { margin: 0; text-wrap: balance; }
+p { margin: 0; }
+button, input, select { font: inherit; color: inherit; }
+:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; border-radius: 4px; }
+[hidden] { display: none !important; }
+
+.icon-btn { display: inline-grid; place-items: center; width: 40px; height: 40px; border-radius: var(--r); border: 1px solid var(--line); background: var(--surface); color: var(--ink); cursor: pointer; flex: none; text-decoration: none; }
+.icon-btn svg { width: 20px; height: 20px; }

@@ -74,7 +74,10 @@ async function foto(page, nombre) {
   fs.writeFileSync(`${f}.txt`, txt);
   return txt;
 }
-const texto = (page) => page.evaluate(() => document.body.innerText);
+// Lo visible, más el estado del servidor de la barra de arriba (en el móvil se ve abreviado).
+const texto = (page) => page.evaluate(() => `${document.body.innerText}\n${document.querySelector("#linkBtn")?.getAttribute("aria-label") || ""}`);
+/** Goes to a section of the screen (#/dashboard, #/nodes, #/settings…): only the one showing is read. */
+const ir = async (page, view) => { await page.evaluate((v) => { location.hash = `#/${v}`; }, view); await sleep(300); };
 async function esperarTexto(page, re, que, ms = 8000) {
   const fin = Date.now() + ms;
   while (Date.now() < fin) { if (re.test(await texto(page))) return; await sleep(100); }
@@ -98,8 +101,10 @@ await paso("las dos pantallas ven el receptor conectado", async () => {
 await foto(movil, "movil-inicio");
 
 await paso("vigilar un nodo desde el PC aparece en el móvil", async () => {
+  await ir(pc, "nodes");
   await pc.click(`[data-watch="${CASETA}"]`);
-  await esperarTexto(movil, /SENSORES VIGILADOS[\s\S]*Caseta huerto/i, "Caseta vigilada en el móvil");
+  await ir(pc, "dashboard");
+  await esperarTexto(movil, /Paneles[\s\S]*Caseta huerto/i, "Caseta vigilada en el móvil");
 });
 
 await paso("límite de temperatura desde el móvil", async () => {
@@ -152,21 +157,22 @@ await paso("pedir ambiente desde el móvil: acuse del nodo y respuesta", async (
   const tel = create(TEL.TelemetrySchema, { variant: { case: "environmentMetrics", value: create(TEL.EnvironmentMetricsSchema, { temperature: 29.2, relativeHumidity: 63 }) } });
   nodo.paquete({ from: CASETA, payloadVariant: { case: "decoded", value: create(M.DataSchema, { portnum: PORT.TELEMETRY_APP, payload: toBinary(TEL.TelemetrySchema, tel), requestId: q.id }) } });
   await esperarTexto(movil, /Ambiente: recibido a las/, "respuesta en el móvil");
-  await esperarTexto(pc, /de vuelta en rango/, "alarma resuelta en el PC");
+  await ir(pc, "alarms");
+  await esperarTexto(pc, /de vuelta en rango/, "alarma resuelta en el PC (registro)");
+  await ir(pc, "dashboard");
 });
 await foto(movil, "movil-peticion");
 await movil.keyboard.press("Escape");
 
 await paso("avisos por la malla desde el servidor: canal privado", async () => {
-  await pc.click("#setBtn");
-  await sleep(400);
+  await ir(pc, "settings");
   await pc.check("#meshOn", { force: true });
   await sleep(300);
   await pc.selectOption("#meshCh", "1");
   await sleep(300);
   await pc.check("#meshClear", { force: true });
   await sleep(300);
-  await pc.keyboard.press("Escape");
+  await ir(pc, "dashboard");
   const antes = nodo.paquetes(PORT.TEXT_MESSAGE_APP).length;
   nodo.ambiente(CASETA, { temperature: 33, relativeHumidity: 60 });
   await nodo.esperar(() => nodo.paquetes(PORT.TEXT_MESSAGE_APP).length > antes, 6000, "aviso por la malla");
@@ -175,11 +181,11 @@ await paso("avisos por la malla desde el servidor: canal privado", async () => {
   const rout = toBinary(M.RoutingSchema, create(M.RoutingSchema, { variant: { case: "errorReason", value: 0 } }));
   nodo.paquete({ from: ME, payloadVariant: { case: "decoded", value: create(M.DataSchema, { portnum: PORT.ROUTING_APP, payload: rout, requestId: p.id }) } });
   await sleep(800);
-  await movil.click("#setBtn");
+  await ir(movil, "settings");
   await esperarTexto(movil, /Último: «⚠ Vigía: Caseta huerto · Temperatura 33,0 °C[\s\S]*repetido por la malla/, "último aviso en ajustes del móvil");
 });
 await foto(movil, "movil-ajustes");
-await movil.keyboard.press("Escape");
+await ir(movil, "dashboard");
 
 // Broker MQTT con usuario y contraseña, y un «Home Assistant» que mira lo que se publica y pulsa botones.
 const broker = await Aedes.createBroker();
@@ -205,8 +211,7 @@ async function fotoApartado(page, sel, nombre) {
 }
 
 await paso("MQTT desde Ajustes: añadir el broker de Home Assistant (con contraseña mal y bien) y publicar en él", async () => {
-  await pc.click("#setBtn");
-  await sleep(400);
+  await ir(pc, "settings");
   await esperarTexto(pc, /Este servidor[\s\S]*Conectado desde las/, "el broker de este servidor, conectado");
   await pc.locator("#mqttBox").screenshot({ path: path.join(out, "mqtt-inicio.png") });
   await pc.click("[data-brk-nuevo]");
@@ -253,15 +258,15 @@ await paso("broker de este servidor: un usuario creado desde Ajustes deja entrar
   if (mala) { await mala.endAsync(); throw new Error("entra con la contraseña mal"); }
   await fotoApartado(pc, "#mqttBox", "mqtt-pc");
 });
-await pc.keyboard.press("Escape");
+await ir(pc, "dashboard");
 
 await paso("el móvil ve los mismos brokers (sin contraseñas)", async () => {
-  await movil.click("#setBtn");
+  await ir(movil, "settings");
   await esperarTexto(movil, /Home Assistant[\s\S]*Conectado desde las/, "Home Assistant en el móvil");
   await movil.click("#mqttBox summary:text('Usuarios de este broker')");
   await esperarTexto(movil, /Usuarios de este broker[\s\S]*shelly/, "el usuario en el móvil");
   await fotoApartado(movil, "#mqttBox", "mqtt-movil");
-  await movil.keyboard.press("Escape");
+  await ir(movil, "dashboard");
 });
 
 await paso("Enterado desde Home Assistant queda visto en las pantallas", async () => {
@@ -290,8 +295,10 @@ const usarEn = (page) => async (tema, campo = "") => {
 };
 
 await paso("datos MQTT en el panel del receptor: buscar, filtrar y «Usar»; dos temperaturas, solo una a la malla", async () => {
+  await ir(pc, "nodes");
   await pc.click(`[data-watch="${ME}"]`);
-  await esperarTexto(pc, /SENSORES VIGILADOS[\s\S]*DNN5/i, "el receptor vigilado");
+  await ir(pc, "dashboard");
+  await esperarTexto(pc, /Paneles[\s\S]*DNN5/i, "el receptor vigilado");
   await pc.click(`#cards .name-btn[data-open="${ME}"]`);
   await sleep(400);
   await fotoApartado(pc, "#datBox", "datos-vacio");
@@ -377,7 +384,7 @@ await paso("renombrar un nodo desde el móvil: sale con su nombre nuevo en el PC
   await movil.click("[data-pn-nombre]");
   await esperarTexto(movil, /Ahora se llama «Huerto»/, "aviso del nombre");
   await movil.keyboard.press("Escape");
-  await esperarTexto(pc, /SENSORES VIGILADOS[\s\S]*Huerto/i, "el nombre nuevo en el PC");
+  await esperarTexto(pc, /Paneles[\s\S]*Huerto/i, "el nombre nuevo en el PC");
   await esperarMqtt(() => JSON.parse(visto.get(`homeassistant/sensor/vigia_${ID}/temperature/config`) || "{}").device?.name === "Vigía · Huerto", "dispositivo renombrado en HA");
 });
 
@@ -461,7 +468,9 @@ await paso("estados ON/OFF y conexión en el panel del enchufe: «Usar», al rev
   await foto(movil, "movil-estados");
   await ha.publishAsync("tele/enchufe/LWT", "Online", { retain: true });
   await ha.publishAsync("stat/enchufe/POWER", "ON", { retain: true });
-  await esperarTexto(movil, /Enchufe del taller · Conectado otra vez/, "conectado otra vez");
+  await ir(movil, "alarms");
+  await esperarTexto(movil, /Enchufe del taller · Conectado otra vez/, "conectado otra vez (registro)");
+  await ir(movil, "dashboard");
   await pc.keyboard.press("Escape");
   // A Home Assistant no va nada del panel: solo el texto del último aviso por la malla, que es lo que salió por ella.
   const fugas = [...visto].filter(([tema, c]) => c.includes("Enchufe del taller") && tema !== "vigia/servidor/estado").map(([tema]) => tema);
@@ -507,7 +516,9 @@ await paso("encender y apagar un Shelly desde la tarjeta del móvil: propone el 
   await sw.click();
   await esperarTexto(movil, /SHELLY\s*Encendido/i, "encendido en la tarjeta del móvil");
   if (!output) throw new Error("el Shelly no se ha encendido");
+  await ir(pc, "alarms");
   await esperarTexto(pc, /Shelly: Encendido \(orden desde Vigía\)/, "en el registro del PC");
+  await ir(pc, "dashboard");
   if ((await sw.getAttribute("aria-checked")) !== "true") throw new Error("el interruptor no está encendido");
   await foto(movil, "movil-interruptor");
   await sw.click();
