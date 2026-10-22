@@ -143,6 +143,27 @@ con Tasmota/ESPHome, Zigbee por zigbee2mqtt, ESPHome, Home Assistant…).
   se rechaza: Vigía no tiene contraseña. Más adelante: notificaciones push y quizá usar `Tailscale-User-Login` para
   saber quién manda cada orden.
 
+### Versión 2.0 (Dani, 22 oct. 2026) — plan acordado
+
+- **Solo el servidor**: la webapp de Bluetooth/cable se **congela** en la 1.20 y sigue publicada como versión ligera
+  (solo arreglos graves); sale del repositorio principal (rama o repositorio aparte). La interfaz de la v2 es solo la
+  del servidor.
+- **Nombre nuevo** (sin «Mesh»: ya no es solo Meshtastic). A Dani no le gusta cómo suena «Vigía» (la g). Busca algo
+  con o sin «Naika» (su marca: antes NaikaLabs en GitHub) que evoque red, vigilancia, nodo, telemetría…; le valen
+  palabras en euskera. Pendiente de decidir (candidatas: Talaia, Zaindari, Behatoki).
+- **Idioma**: README y documentación en inglés (con versión en español); la app en español e inglés (elegible),
+  hecho junto al rediseño; código nuevo en inglés y lo existente se renombra por partes al reescribirlo, con las
+  pruebas como red. Los commits pasan al inglés cuando empiece la v2.
+- **Rediseño**: barra lateral de iconos en ordenador y barra inferior en el móvil; secciones Tablero, Alarmas, Mapa,
+  Automatizaciones, Ajustes (MQTT, Malla, Receptor, Sistema). Estilo de instrumento de campo, sin adornos: oliva o
+  verde bosque con arena, un color de señal para las alarmas, números monoespaciados, modo oscuro «guardia nocturna».
+  Logo: torre de vigilancia forestal geométrica que se lea a 16 px. Sin propuestas visuales previas (Dani se fía del
+  planteamiento).
+- **Usuarios y contraseña** obligatorios antes de abrirlo al mundo; **Docker** para instalarlo fácil.
+- Orden: 1) nombre y política de idioma; 2) congelar la webapp y reorganizar el repositorio; 3) rediseño con los dos
+  idiomas; 4) usuarios; 5) Docker y documentación en inglés → **2.0**. Las **automatizaciones** («si… entonces…»,
+  centradas en la malla, con la fase 6 de control desde la malla dentro) → **2.1**. Nada de editor de flujos.
+
 ## Publicar
 
 - Se desarrolla en la rama `mapa`; se publica subiendo `mapa:main`. GitHub Pages sirve `main` desde la raíz.
