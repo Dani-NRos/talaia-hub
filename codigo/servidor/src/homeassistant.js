@@ -23,7 +23,7 @@ import { HOUR, isNum } from "@vigia/nucleo/textos.js";
 import { esClaveMqtt } from "@vigia/nucleo/mqtt-datos.js";
 
 const VERSION = JSON.parse(fs.readFileSync(new URL("../package.json", import.meta.url), "utf8")).version;
-const REPO = "https://github.com/Dani-NRos/vigia-mesh";
+const REPO = "https://github.com/Dani-NRos/talaia-hub";
 const ESPERA_MS = 1000; // los cambios se juntan y salen como mucho cada segundo
 const LIMPIEZA_MS = 3000; // al conectar, tiempo para recibir lo que había publicado antes y quitar lo que sobra
 

@@ -1,16 +1,21 @@
-# Vigía servidor (camino de la 2.0)
+# Talaia Hub (camino de la 2.0)
 
-**Vigía servidor**: vigilancia 24/7 en Linux (BMAX con Ubuntu, Raspberry Pi 4/5, Pi Zero 2 W) de nodos Meshtastic y
-dispositivos MQTT, con histórico en SQLite, Home Assistant por MQTT y acceso desde fuera con Tailscale. Esta rama
-(`mapa`) es la de la **versión 2.0** (plan abajo): tendrá nombre nuevo y repositorio propio.
+**Talaia Hub** (hasta la 1.20, «Vigía servidor»): vigilancia 24/7 en Linux (BMAX con Ubuntu, Raspberry Pi 4/5, Pi
+Zero 2 W) de nodos Meshtastic y dispositivos MQTT, con histórico en SQLite, Home Assistant por MQTT y acceso desde fuera
+con Tailscale. Dentro de la app se llama solo **«Talaia»**. Este repositorio (`talaia-hub`, rama `main`) es el de la
+**versión 2.0** (plan abajo); trae la historia de la rama `mapa` de `vigia-mesh`.
 
-Ramas del repositorio `vigia-mesh`:
+Hasta que se cambien (rediseño y Docker, ver el plan), los nombres de dentro siguen siendo de Vigía: textos de la app,
+paquetes `@vigia/*`, servicio `vigia-servidor`, `/opt/vigia`, `/etc/vigia`, `/var/lib/vigia`, usuario `vigia`, y los
+identificadores y temas `vigia…` de Home Assistant (cambiarlos sin migrar duplicaría los dispositivos en HA y perdería
+su histórico).
+
+El repositorio `vigia-mesh` sigue aparte:
 - `main`: la **app ligera** (PWA de Bluetooth y cable) **congelada en la 1.20**, publicada en GitHub Pages
   (https://dani-nros.github.io/vigia-mesh/). Solo arreglos graves. No se renombra el repositorio: las URL de GitHub
-  Pages de un proyecto no se redirigen al renombrarlo y las apps instaladas dejarían de actualizarse. Por eso el
-  servidor se irá a un repositorio nuevo cuando tenga nombre.
+  Pages de un proyecto no se redirigen al renombrarlo y las apps instaladas dejarían de actualizarse.
 - `version-1.20`: el servidor y la app tal como estaban en la 1.20 (el proxy de esta sesión no deja subir etiquetas).
-- `mapa`: desarrollo de la 2.0 (solo el servidor).
+- `mapa`: donde se hizo la 2.0 hasta pasar aquí; ya no se usa (su README apunta a `talaia-hub`).
 
 ## Normas de trabajo (de Dani)
 
@@ -18,7 +23,7 @@ Ramas del repositorio `vigia-mesh`:
   Tampoco cambiar sus alarmas o sus nodos vigilados. Los selectores de Bluetooth y de puerto los maneja él.
 - **Una cosa cada vez**: terminar, probar y comprobar cada fase antes de seguir.
 - **Pruebas** automáticas con `node --test`; cuando haga falta, con su equipo real (lo prueba él).
-- **Arreglos en la app ligera** (rama `main`): primero una copia de pruebas en `/beta/`, luego publicar.
+- **Arreglos en la app ligera** (`main` de `vigia-mesh`): primero una copia de pruebas en `/beta/`, luego publicar.
 - **Idioma**: textos de la app en español de España, claros y sin jerga (hasta que llegue el inglés con el rediseño).
   Desde la 2.0: código nuevo, comentarios nuevos y mensajes de commit en inglés.
 - **Sin complacencia**: si algo no tiene sentido o hay una opción mejor, decirlo; preguntar al decidir algo.
@@ -156,11 +161,12 @@ con Tasmota/ESPHome, Zigbee por zigbee2mqtt, ESPHome, Home Assistant…).
 - **Solo el servidor**: la webapp de Bluetooth/cable se **congela** en la 1.20 y sigue publicada como versión ligera
   (solo arreglos graves); sale del repositorio principal (rama o repositorio aparte). La interfaz de la v2 es solo la
   del servidor.
-- **Nombre nuevo** (sin «Mesh»: ya no es solo Meshtastic). A Dani no le gusta cómo suena «Vigía» (la g). Busca algo
-  con o sin «Naika» (su marca: antes NaikaLabs en GitHub) que evoque red, vigilancia, nodo, telemetría…; le valen
-  palabras en euskera. A Dani le gusta mucho **Talaia** (atalaya en euskera y en valenciano); falta una palabra
-  detrás, descriptiva, para diferenciarse y por temas legales (existió Talaia Networks, de monitorización de redes,
-  comprada por Auvik en 2018: mirar la EUIPO). Otras candidatas: Zaindari, Behatoki.
+- **Nombre nuevo** (sin «Mesh»: ya no es solo Meshtastic; a Dani no le gusta cómo suena «Vigía»): **Talaia Hub**
+  (elegido el 22 oct. 2026: corto y describe lo que es). Talaia es atalaya en euskera y en valenciano. En la app, solo
+  «Talaia»; Naika, si acaso, como firma y no en el nombre. Ojo legal: existió Talaia Networks (monitorización de
+  redes, Barcelona), comprada por Auvik en 2018, que pasó a llamar al producto TrafficInsights. Antes de registrar o
+  vender nada, mirar «talaia» en TMview (clases 9 y 42). La palabra descriptiva («Hub») no protege si «Talaia»
+  estuviera registrada para lo mismo.
 - **Idioma**: README y documentación en inglés (con versión en español); la app en español e inglés (elegible),
   hecho junto al rediseño; código nuevo en inglés y lo existente se renombra por partes al reescribirlo, con las
   pruebas como red. Los commits pasan al inglés cuando empiece la v2.
@@ -171,24 +177,25 @@ con Tasmota/ESPHome, Zigbee por zigbee2mqtt, ESPHome, Home Assistant…).
   planteamiento).
 - **Usuarios y contraseña** obligatorios antes de abrirlo al mundo; **Docker** para instalarlo fácil.
 - Paso 2 hecho (22 oct. 2026): `main` es la app ligera congelada (con aviso en su README), `version-1.20` guarda la
-  1.20 y `mapa` ya no lleva los ficheros compilados de la app ligera ni sus herramientas. Queda para cuando haya nombre:
-  crear el repositorio nuevo (lo crea Dani en GitHub) y llevar `mapa` allí con su historia. El código de la app ligera
-  que sigue en `app/src` (Bluetooth, cable, demo, IndexedDB) se quita con el rediseño (paso 3).
-- Orden: 1) nombre y política de idioma; 2) congelar la webapp y reorganizar el repositorio; 3) rediseño con los dos
-  idiomas; 4) usuarios; 5) Docker y documentación en inglés → **2.0**. Las **automatizaciones** («si… entonces…»,
-  centradas en la malla, con la fase 6 de control desde la malla dentro) → **2.1**. Nada de editor de flujos.
+  1.20 y `mapa` ya no lleva los ficheros compilados de la app ligera ni sus herramientas. Con el nombre, `mapa` pasó a
+  `talaia-hub` (22 oct. 2026) con su historia; el instalador descarga de aquí. El código de la app ligera que sigue en
+  `app/src` (Bluetooth, cable, demo, IndexedDB) se quita con el rediseño (paso 3).
+- Orden (1 y 2, hechos): 1) nombre y política de idioma; 2) congelar la webapp y reorganizar el repositorio;
+  3) rediseño con los dos idiomas; 4) usuarios; 5) Docker y documentación en inglés → **2.0**. Las
+  **automatizaciones** («si… entonces…», centradas en la malla, con la fase 6 de control desde la malla dentro) →
+  **2.1**. Nada de editor de flujos.
 
 ## Publicar
 
-- **Desarrollo de la 2.0** en `mapa`. Dani lo prueba instalando desde la rama:
-  `wget -qO- https://raw.githubusercontent.com/Dani-NRos/vigia-mesh/mapa/codigo/servidor/instalar.sh | sudo bash -s -- --rama mapa`
-  Ya **no** se sube `mapa:main` (`main` es la app ligera). La 2.0 se publicará en el repositorio nuevo; hasta entonces,
-  la versión estable del servidor es la 1.20 (instalador de `main`).
+- **Desarrollo de la 2.0** en `main` de `talaia-hub`. Dani lo prueba instalando desde aquí (se instala encima de lo
+  que haya: mismo servicio, mismos datos):
+  `wget -qO- https://raw.githubusercontent.com/Dani-NRos/talaia-hub/main/codigo/servidor/instalar.sh | sudo bash`
+  Hasta la 2.0, la versión estable del servidor es la 1.20 (instalador de `main` de `vigia-mesh`).
 - **`INSTALADOR=` en `instalar.sh`**: subirlo cada vez que cambia lo que hace el instalador. Si el programa descargado
   trae uno más nuevo, el instalador que corre sigue con ese (`--programa`), pero eso solo lo hacen los de la 2 en adelante.
-- **Arreglos en la app ligera**: rama desde `main`, compilar, copia en `beta/` sin `sw.js` (con `beta/README.md`),
-  Dani la prueba, y se publica en `main` (subir versión 1.20.x, compilar y copiar `codigo/dist/app/*` a la raíz,
-  borrar `beta/`). Las herramientas para comprobar que no cambia nada más (`capturar.mjs`, `real.mjs`,
+- **Arreglos en la app ligera** (repositorio `vigia-mesh`): rama desde `main`, compilar, copia en `beta/` sin `sw.js`
+  (con `beta/README.md`), Dani la prueba, y se publica en `main` (subir versión 1.20.x, compilar y copiar
+  `codigo/dist/app/*` a la raíz, borrar `beta/`). Las herramientas para comprobar que no cambia nada más (`capturar.mjs`, `real.mjs`,
   `comparar.py`, con Playwright y el reloj congelado) están en `main`.
 
 ## Lo aprendido con la malla y el firmware (respetarlo)

@@ -20,7 +20,7 @@ const esc = (s) => String(s ?? "").replace(/[&<>"']/g, (c) => ({ "&": "&amp;", "
 const APP_VERSION = "1.20.0";
 // Abierta desde Vigía servidor: el estado es el del servidor y lo que se pulsa va a él como una orden.
 const SERVIDOR = typeof window !== "undefined" && !!window.__VIGIA_SERVIDOR;
-const REPO_URL = "https://github.com/Dani-NRos/vigia-mesh";
+const REPO_URL = "https://github.com/Dani-NRos/talaia-hub";
 const ISSUES_URL = `${REPO_URL}/issues`;
 
 const LS = {

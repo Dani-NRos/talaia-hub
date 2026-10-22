@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 # Instala o actualiza Vigía servidor en Linux (Ubuntu, Debian, Raspberry Pi OS).
 #
-#   wget -qO- https://raw.githubusercontent.com/Dani-NRos/vigia-mesh/main/codigo/servidor/instalar.sh | sudo bash
+#   wget -qO- https://raw.githubusercontent.com/Dani-NRos/talaia-hub/main/codigo/servidor/instalar.sh | sudo bash
 #   (o con curl -fsSL en vez de wget -qO-)
 #
 # Opciones (detrás de «bash -s --» si va por tubería):
@@ -28,7 +28,7 @@ set -euo pipefail
 INSTALADOR=2
 ARGS=("$@")
 
-REPO="Dani-NRos/vigia-mesh"
+REPO="Dani-NRos/talaia-hub"
 RAMA="main"
 BASE="/opt/vigia"
 ETC="/etc/vigia"
