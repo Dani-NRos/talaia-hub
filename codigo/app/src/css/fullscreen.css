@@ -1,0 +1,33 @@
+/* A panel full screen, for a screen left beside the receiver or on a wall: big readings, its alarms, its charts. */
+dialog.full { border: 0; padding: 0; margin: 0; width: 100%; height: 100%; max-width: none; max-height: none; background: var(--bg); }
+dialog.full[open] { display: grid; grid-template-rows: auto minmax(0, 1fr); }
+.nv-h { display: flex; flex-wrap: wrap; align-items: center; gap: 10px 14px; padding: max(12px, env(safe-area-inset-top, 0px)) max(16px, env(safe-area-inset-right, 0px)) 12px max(16px, env(safe-area-inset-left, 0px)); border-bottom: 1px solid var(--line); background: var(--surface); }
+.nv-t { flex: 1 1 200px; min-width: 0; }
+.nv-t h2 { font: 700 clamp(22px, 3vw, 34px)/1.05 var(--f-display); overflow-wrap: anywhere; }
+.nv-h .st { font-size: 15px; }
+.nv-h .seg { margin-left: auto; }
+.nv-b { overflow-y: auto; display: grid; gap: 14px; align-content: start; padding: 16px max(16px, env(safe-area-inset-right, 0px)) calc(20px + env(safe-area-inset-bottom, 0px)) max(16px, env(safe-area-inset-left, 0px)); }
+.nv-b > [data-full-al]:empty { display: none; }
+.nv-tiles { display: grid; gap: 12px; grid-template-columns: repeat(auto-fit, minmax(min(100%, 170px), 1fr)); }
+.nv-tile { display: grid; gap: 6px; align-content: start; padding: 12px 16px 14px; background: var(--surface); border: 1px solid var(--line); border-radius: var(--r); }
+.nv-tile.bad { border-color: var(--crit); box-shadow: inset 4px 0 0 var(--crit); }
+.nv-l { font: 600 12px/1.2 var(--f-body); text-transform: uppercase; letter-spacing: .07em; color: var(--ink-2); }
+.nv-v { font: 600 clamp(44px, 7vw, 84px)/.95 var(--f-num); font-variant-numeric: tabular-nums; letter-spacing: -.01em; }
+.nv-v small { font: 500 .36em/1 var(--f-body); color: var(--ink-2); margin-left: 5px; }
+.nv-v.est { font-size: clamp(30px, 4.5vw, 56px); line-height: 1.1; overflow-wrap: anywhere; }
+.nv-tile.bad .nv-v, .nv-tile.bad .nv-lim { color: var(--crit); }
+.nv-tile .tgl-w { margin: 4px 0; }
+.nv-s { display: flex; flex-wrap: wrap; gap: 4px 12px; font: 400 12.5px/1.3 var(--f-body); font-variant-numeric: tabular-nums; color: var(--ink-2); }
+.nv-charts { display: grid; gap: 12px; grid-template-columns: 1fr; }
+@media (min-width: 900px) { .nv-charts { grid-template-columns: 1fr 1fr; } }
+.nv-chart { margin: 0; min-width: 0; padding: 10px 12px 8px; background: var(--surface); border: 1px solid var(--line); border-radius: var(--r); }
+.nv-chart figcaption { display: flex; flex-wrap: wrap; justify-content: space-between; gap: 4px 10px; margin-bottom: 6px; font: 600 14px/1.2 var(--f-body); }
+.nv-chart .mm { font: 400 12px/1.2 var(--f-body); font-variant-numeric: tabular-nums; color: var(--ink-2); }
+/* its alarms: like the notice on the dashboard */
+.nv-al { list-style: none; margin: 0; padding: 0; display: grid; gap: 8px; }
+.nv-al li { display: flex; align-items: center; justify-content: space-between; gap: 12px; padding: 12px 14px; border-radius: var(--r); background: var(--alarm-bg); color: var(--alarm-ink); border: 1px solid var(--crit); }
+.nv-al li strong { color: var(--alarm-title); }
+.nv-al li.acked { background: color-mix(in oklab, var(--warn) 12%, var(--surface)); color: var(--ink); border-color: color-mix(in oklab, var(--warn) 50%, var(--line)); }
+.nv-al li.acked strong { color: var(--ink); }
+.nv-al li > div { display: grid; gap: 3px; min-width: 0; }
+.nv-al li span { font-size: 14px; }

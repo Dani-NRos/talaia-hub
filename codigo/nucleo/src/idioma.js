@@ -120,6 +120,17 @@ const es = {
   "st.movimiento": "Movimiento|Sin movimiento",
   "st.si": "Sí|No",
   "st.on": "ON|OFF",
+
+  // why a channel is public
+  "ch.plain": "sin cifrar",
+  "ch.default": "clave pública por defecto",
+  "ch.short": "clave demasiado corta",
+  "ch.event": "clave pública de eventos",
+
+  // fast-change rule, as typed
+  "trend.errDir": "Elige si avisa al bajar o al subir.",
+  "trend.errDelta": "Pon cuánto tiene que cambiar (un número mayor que 0).",
+  "trend.errHours": "Pon un tiempo entre media hora y {max} horas.",
 };
 
 const en = {
@@ -219,6 +230,15 @@ const en = {
   "st.movimiento": "Motion|No motion",
   "st.si": "Yes|No",
   "st.on": "ON|OFF",
+
+  "ch.plain": "not encrypted",
+  "ch.default": "default public key",
+  "ch.short": "key too short",
+  "ch.event": "public event key",
+
+  "trend.errDir": "Choose whether it warns when it drops or when it rises.",
+  "trend.errDelta": "Enter how much it has to change (a number above 0).",
+  "trend.errHours": "Enter a time between half an hour and {max} hours.",
 };
 
 const DICTS = { es, en };

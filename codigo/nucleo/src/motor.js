@@ -33,7 +33,7 @@ import { readTrace, relays, traceTimeout, UNKNOWN_NODE } from "./route.js";
 import { distM, compass, fmtDist, coordText, nextPlace, placeFromPos } from "./geo.js";
 import { trendCheck } from "./trend.js";
 import { newDelivery, deliveryStep } from "./delivery.js";
-import { channelPrivacy, fitBytes } from "./canales.js";
+import { channelPrivacy, channelWhy, fitBytes } from "./canales.js";
 import { MIN, HOUR, isNum, validT, hhmm, dur, ago, stamp, trendDec, fmtTrend, trendVerb, hoursText } from "./textos.js";
 import { esClaveMqtt } from "./mqtt-datos.js";
 import { tx } from "./idioma.js";
@@ -710,7 +710,7 @@ export function crearMotor(S, g = {}) {
     if (cfg.channel != null) {
       const ch = S.channels.find((c) => c.index === cfg.channel);
       if (ch?.private) out.push({ type: "channel", index: ch.index, label: `canal «${ch.name}»` });
-      else if (report) addLog("info", ch ? `Aviso por la malla bloqueado: el canal «${ch.name}» es público (${ch.why})` : "Aviso por la malla no enviado: el canal elegido ya no existe en el receptor");
+      else if (report) addLog("info", ch ? `Aviso por la malla bloqueado: el canal «${ch.name}» es público (${channelWhy(ch)})` : "Aviso por la malla no enviado: el canal elegido ya no existe en el receptor");
     }
     if (cfg.node != null) {
       const n = S.nodes.get(cfg.node);

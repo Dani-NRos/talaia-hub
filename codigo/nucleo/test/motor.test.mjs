@@ -475,8 +475,8 @@ test("canales: guarda nombre y si es privado, nunca la clave", (t) => {
   motor.recibir.channel({ index: 2, role: 2, settings: { name: "avisos", psk: new Uint8Array(32).fill(9) } });
   motor.recibir.channel({ index: 3, role: 0, settings: {} });
   assert.deepEqual(S.channels, [
-    { index: 0, name: "SFNarrow", primary: true, private: false, why: "clave pública por defecto" },
-    { index: 2, name: "avisos", primary: false, private: true, why: "" },
+    { index: 0, name: "SFNarrow", primary: true, private: false, kind: "default", why: "clave pública por defecto" },
+    { index: 2, name: "avisos", primary: false, private: true, kind: "", why: "" },
   ]);
   assert.ok(ev.guardado.includes("channels"));
 });

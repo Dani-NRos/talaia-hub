@@ -144,7 +144,7 @@
 .pos.in-sheet { padding-top: 0; border-top: 0; gap: 8px; }
 .pos-top { display: flex; align-items: baseline; justify-content: space-between; gap: 8px; }
 .pos-l { font: 600 12.5px/1 var(--f-body); color: var(--ink-2); }
-.in-sheet .pos-l { font-size: 14px; color: var(--ink); }
+.in-sheet .pos-l { font: 700 16px/1.25 var(--f-body); color: var(--ink); }
 .pos-m { font: 400 12px/1.3 var(--f-body); color: var(--ink-2); text-align: right; }
 .pos-row { display: flex; flex-wrap: wrap; align-items: center; gap: 6px; }
 .pos-c { font: 500 15px/1.2 var(--f-mono); user-select: all; overflow-wrap: anywhere; }
@@ -166,3 +166,4 @@
 .tgl.env { opacity: .55; cursor: progress; }
 .tgl:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
 .tgl-t { font: 400 12.5px/1.2 var(--f-body); color: var(--ink-2); }
+@media (max-width: 420px) { .rd-v { font-size: 30px; } }

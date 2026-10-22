@@ -273,6 +273,14 @@ test("encender y apagar un Shelly desde Vigía: espera a que diga que lo ha hech
   assert.equal(S.log[0].text, "Taller · Enchufe: Encendido (orden desde Vigía)");
   assert.match((await paneles.mandar(num, "mq3", 1)).error, /no se puede encender ni apagar/);
   assert.match((await paneles.mandar(num, "mq9", 1)).error, /ya no está/);
+  // A device that answers before the broker acknowledges the order (on the same broker it can): it still counts.
+  const con = vigia.mqtt.conexion("b1");
+  const publicar = con.publicar;
+  con.publicar = async (...a) => { const ok = await publicar.apply(con, a); await hasta(() => n.metrics.mq1.v === 0, 3000, "apagado antes del acuse"); return ok; };
+  assert.equal((await paneles.mandar(num, "mq1", 0)).ok, true);
+  con.publicar = publicar;
+  assert.equal(S.paneles.ordenes.mq1, undefined, "nada esperando");
+  assert.equal(S.log[0].text, "Taller · Enchufe: Apagado (orden desde Vigía)");
   // Uno que no contesta: a los 10 s, «no ha contestado» (aquí, con el reloj de la prueba).
   t.mock.timers.enable({ apis: ["setTimeout"] });
   assert.equal((await paneles.mandar(num, "mq2", 1)).ok, true);

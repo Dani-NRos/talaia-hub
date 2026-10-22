@@ -75,3 +75,7 @@
   .view { padding: 24px 28px 48px; }
   .view-map { height: calc(100dvh - var(--top-h) - env(safe-area-inset-top, 0px)); padding: 0; }
 }
+
+/* toast: a short message at the bottom */
+#toast { position: fixed; left: 50%; bottom: calc(18px + env(safe-area-inset-bottom, 0px)); transform: translate(-50%, 12px); max-width: min(520px, calc(100% - 32px)); padding: 11px 16px; border-radius: 12px; background: var(--ink); color: var(--surface); font-size: 14px; font-weight: 500; box-shadow: var(--shadow); opacity: 0; transition: opacity .22s, transform .22s; z-index: 30; pointer-events: none; }
+#toast.show { opacity: 1; transform: translate(-50%, 0); }

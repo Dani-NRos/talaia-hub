@@ -84,6 +84,9 @@ button, input, select { font: inherit; color: inherit; }
 .mini { display: inline-flex; align-items: center; gap: 6px; min-height: 32px; padding: 0 10px; border-radius: 6px; border: 1px solid var(--line); background: transparent; color: var(--accent); font: 600 13px/1 var(--f-body); text-decoration: none; cursor: pointer; white-space: nowrap; }
 .mini:hover:not(:disabled) { border-color: var(--accent); }
 .mini:disabled { opacity: .45; cursor: not-allowed; }
+a.btn, a.mini { text-decoration: none; }
+.link-btn { padding: 0; border: 0; background: none; color: var(--accent); font: inherit; text-align: left; cursor: pointer; text-decoration: underline; text-decoration-color: color-mix(in oklab, var(--accent) 40%, transparent); text-underline-offset: 3px; }
+.link-btn:hover { text-decoration-color: currentColor; }
 
 /* a section inside a view: heading, count and tools */
 .sec { margin-top: 28px; }
@@ -94,3 +97,12 @@ button, input, select { font: inherit; color: inherit; }
 .empty { padding: 18px 20px; border: 1px dashed var(--line); border-radius: var(--r); background: var(--surface); }
 .empty p { max-width: 62ch; color: var(--ink-2); }
 .empty strong { color: var(--ink); }
+
+/* only for screen readers */
+.vh { position: absolute; width: 1px; height: 1px; overflow: hidden; clip: rect(0 0 0 0); white-space: nowrap; }
+
+@keyframes blink { 50% { opacity: .25; } }
+@keyframes spin { to { transform: rotate(360deg); } }
+@keyframes breathe { 0% { box-shadow: 0 0 0 0 color-mix(in oklab, var(--ok) 45%, transparent); } 70%, 100% { box-shadow: 0 0 0 10px color-mix(in oklab, var(--ok) 0%, transparent); } }
+@keyframes up { from { transform: translateY(18px); opacity: .6; } to { transform: none; opacity: 1; } }
+@media (prefers-reduced-motion: reduce) { *, *::before, *::after { animation: none !important; transition: none !important; } }

@@ -1,5 +1,6 @@
 // Alarma de tendencia: un valor que baja o sube mucho en poco tiempo (p. ej. la presión antes de una tormenta).
 // Sin DOM, para poder probarlo con node --test.
+import { tx } from "./idioma.js";
 
 const HOUR = 3600000;
 
@@ -63,8 +64,8 @@ export function trendCheck(series, t, rule) {
 
 /** Valida lo que escribe el usuario. Devuelve { rule } o { error }. */
 export function parseTrendRule(dir, delta, hours) {
-  if (dir !== "down" && dir !== "up") return { error: "Elige si avisa al bajar o al subir." };
-  if (!Number.isFinite(delta) || delta <= 0) return { error: "Pon cuánto tiene que cambiar (un número mayor que 0)." };
-  if (!Number.isFinite(hours) || hours < 0.5 || hours > TREND_MAX_HOURS) return { error: `Pon un tiempo entre media hora y ${TREND_MAX_HOURS} horas.` };
+  if (dir !== "down" && dir !== "up") return { error: tx("trend.errDir") };
+  if (!Number.isFinite(delta) || delta <= 0) return { error: tx("trend.errDelta") };
+  if (!Number.isFinite(hours) || hours < 0.5 || hours > TREND_MAX_HOURS) return { error: tx("trend.errHours", { max: TREND_MAX_HOURS }) };
   return { rule: { dir, delta, hours } };
 }

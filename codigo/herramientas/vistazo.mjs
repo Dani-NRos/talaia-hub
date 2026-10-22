@@ -1,6 +1,8 @@
 // A look at the screen: every section on a computer and on a phone, by day and at night, with a simulated node
 // (a watched sensor with an alarm, the receiver, a neighbour). To review the design, not to test behaviour.
 // Usage: npm run build && node herramientas/vistazo.mjs <output folder> [views…] [--en]
+// Views: the sections, and also "sheet" (the sensor's sheet, whole), "receiver" (the receiver's sheet, with what it
+// sends to the mesh) and "full" (the sensor full screen).
 import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
@@ -13,9 +15,10 @@ const pw = createRequire(process.env.PLAYWRIGHT_DIR || "/opt/npm-tools/node_modu
 const { NodoFalso, ME, CASETA, AVISADO } = await import(`${REPO}/servidor/test/nodo-falso.mjs`);
 
 const args = process.argv.slice(2);
-const out = args.find((a) => !a.startsWith("--") && !["dashboard", "alarms", "nodes", "map", "automations", "settings"].includes(a)) || "vistazo";
-const views = args.filter((a) => ["dashboard", "alarms", "nodes", "map", "automations", "settings"].includes(a));
-const VIEWS = views.length ? views : ["dashboard", "alarms", "nodes", "map", "automations", "settings"];
+const ALL = ["dashboard", "alarms", "nodes", "map", "automations", "settings", "sheet", "receiver", "full"];
+const out = args.find((a) => !a.startsWith("--") && !ALL.includes(a)) || "vistazo";
+const views = args.filter((a) => ALL.includes(a));
+const VIEWS = views.length ? views : ALL;
 const lang = args.includes("--en") ? "en" : "es";
 fs.rmSync(out, { recursive: true, force: true });
 fs.mkdirSync(out, { recursive: true });
@@ -59,9 +62,30 @@ for (const [size, viewport] of Object.entries(SIZES)) {
     await page.goto(URL0);
     await sleep(900);
     for (const v of VIEWS) {
+      const file = path.join(out, `${size}-${scheme}-${v}.png`);
+      if (v === "sheet" || v === "receiver") {
+        // The whole sheet: without its height limit, so one picture shows all of it.
+        await page.evaluate(() => { location.hash = "#/dashboard"; });
+        await sleep(200);
+        await page.click(`#cards .name-btn[data-open="${v === "sheet" ? CASETA : ME}"]`);
+        await sleep(600);
+        await page.addStyleTag({ content: "dialog.sheet { max-height: none !important; } .sheet-b { overflow: visible !important; }" });
+        await page.locator("#detail").screenshot({ path: file });
+        await page.keyboard.press("Escape");
+        await sleep(200);
+        continue;
+      }
+      if (v === "full") {
+        await page.evaluate((num) => { location.hash = "#/dashboard"; document.querySelector(`#cards [data-full="${num}"]`)?.click(); }, CASETA);
+        await sleep(800);
+        await page.screenshot({ path: file });
+        await page.keyboard.press("Escape");
+        await sleep(200);
+        continue;
+      }
       await page.evaluate((x) => { location.hash = `#/${x}`; }, v);
       await sleep(v === "map" ? 900 : 350);
-      await page.screenshot({ path: path.join(out, `${size}-${scheme}-${v}.png`), fullPage: v !== "map" });
+      await page.screenshot({ path: file, fullPage: v !== "map" });
     }
     await ctx.close();
   }

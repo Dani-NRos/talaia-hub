@@ -569,9 +569,17 @@ export function crearPaneles({ S, motor, eventos, almacen, registro, receptor, b
       if (v !== 0 && v !== 1) return { ok: false };
       const con = conexiones.get(d.broker);
       if (!con?.conectada) return { ok: false, error: `El broker de «${nombreDato(d)}» no está conectado.` };
-      if (ordenes.get(clave)?.timer) return { ok: false, error: "Espera: aún no ha contestado a la orden anterior." };
-      if (!(await con.publicar(d.orden.tema, v ? d.orden.on : d.orden.off, { qos: 1 }))) return { ok: false, error: "No se pudo mandar la orden al broker." };
+      const antes = ordenes.get(clave);
+      if (antes && !antes.error) return { ok: false, error: "Espera: aún no ha contestado a la orden anterior." };
+      // Pending before publishing: a device on the same broker can answer before the broker acknowledges (qos 1),
+      // and its answer has to find the order waiting.
       const o = { num, v, t: Date.now(), timer: null };
+      ordenes.set(clave, o);
+      if (!(await con.publicar(d.orden.tema, v ? d.orden.on : d.orden.off, { qos: 1 }))) {
+        if (ordenes.get(clave) === o) ordenes.delete(clave);
+        return { ok: false, error: "No se pudo mandar la orden al broker." };
+      }
+      if (ordenes.get(clave) !== o) return { ok: true }; // it has already said it did it
       o.timer = setTimeout(() => {
         if (ordenes.get(clave) !== o) return;
         ordenes.set(clave, { v, t: o.t, error: "No ha contestado" });
@@ -579,7 +587,6 @@ export function crearPaneles({ S, motor, eventos, almacen, registro, receptor, b
         contar();
       }, ORDEN_MS);
       o.timer.unref?.();
-      ordenes.set(clave, o);
       contar();
       return { ok: true };
     },

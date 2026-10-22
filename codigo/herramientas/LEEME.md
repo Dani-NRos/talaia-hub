@@ -11,7 +11,9 @@ Necesitan Playwright con Chromium (no va en el repo: se busca en `PLAYWRIGHT_DIR
   reinicio y quitar el panel). Guarda capturas y textos de cada paso y, si algo falla, cómo estaba cada pantalla.
 
 - **`vistazo.mjs <salida> [secciones…] [--en]`**: capturas de cada sección en el ordenador y en el móvil, de día y
-  de noche, con un nodo simulado (un sensor vigilado con una alarma y el receptor). Para revisar el diseño.
+  de noche, con un nodo simulado (un sensor vigilado con una alarma y el receptor). Para revisar el diseño. Además de
+  las secciones: `sheet` (la ficha del sensor, entera), `receiver` (la del receptor, con lo que manda a la malla) y
+  `full` (el sensor a pantalla completa).
 - **`iconos.mjs`**: dibuja los iconos de la app (`app/pwa/icon-*.png`) con la torre de `app/src/logo.js`.
 
 Las herramientas de la app ligera (capturas antes/después y nodo por cable simulado) siguen en la rama `main`, con

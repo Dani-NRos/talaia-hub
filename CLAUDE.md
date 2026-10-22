@@ -40,7 +40,8 @@ codigo/                 raíz de npm workspaces: npm install, npm test, npm run 
     src/idioma.js       idioma de los textos del núcleo (alarmas, tiempos, nombres de métricas, peticiones, estados):
                         tx("clave"). La pantalla pone el de quien la mira; el servidor, el suyo (3.4). También los
                         formatos de número (1015 hPa; miles a partir de cinco cifras) y de hora
-    src/canales.js      qué canal es privado; recorte a 200 bytes
+    src/canales.js      qué canal es privado (`kind`: el porqué, que cada pantalla dice en su idioma con
+                        channelWhy); recorte a 200 bytes
     src/tramas.js       tramas del puerto serie (0x94 0xC3), troceado propio, latido, despertar, fabricantes USB
     src/mqtt-datos.js   datos MQTT: tipos y unidades, qué parece cada tema, leer el valor de un JSON, comprobar la
                         configuración (también lo que puede salir a la malla); metrics.js registra sus métricas
@@ -57,9 +58,16 @@ codigo/                 raíz de npm workspaces: npm install, npm test, npm run 
     src/ctx.js ui.js    lo que comparten las secciones (estado, motor, orden, toast) y utilidades ($, esc, LS, iconos)
     src/views/          una sección por fichero, en inglés: dashboard.js (aviso de alarmas y tarjetas),
                         node-parts.js (pedir datos, ubicación y valla, interruptor: tarjeta y ficha), nodes.js
-                        (toda la malla, también los vigilados; 50 por página), alarms.js (registro)
+                        (toda la malla, también los vigilados; 50 por página), alarms.js (registro), sheet.js (la
+                        ficha: peticiones, ruta, ubicación, alarmas, cambio rápido, estados, gráficas), panel-config.js
+                        (en la ficha de un panel vigilado: nombre, datos MQTT, conexión, lo que sale a la malla; y
+                        «Panel nuevo»; lo cambiado sin guardar se queda si se vuelve a abrir el mismo), fullscreen.js
+                        (un panel a pantalla completa, con la pantalla encendida)
+    src/charts.js       gráficas en SVG (con ejes, la de las tarjetas y la barra de los estados ON/OFF)
     src/logo.js         la torre de vigilancia (logo, icono de la pestaña: su ventana se enciende con alarmas sin atender)
-    src/css/            base.css (colores, letras), legacy.css (lo de la 1.x, sección a sección fuera), shell.css
+    src/css/            base.css (colores, letras, botones), forms.css (bloques y casillas: ficha y Ajustes),
+                        dashboard.css lists.css map.css sheet.css fullscreen.css shell.css; legacy.css, solo lo
+                        que queda de Ajustes hasta la 3.3e. El orden, en build.mjs
     src/map.js mapdata.js meshsearch.js remoto.js
     index.src.html build.mjs pwa/ (manifiesto, iconos y sw.js: la pantalla del servidor se instala como app)
   servidor/             Vigía servidor (@vigia/servidor), Node ≥ 22.13
@@ -152,7 +160,8 @@ con Tasmota/ESPHome, Zigbee por zigbee2mqtt, ESPHome, Home Assistant…).
 - Hecho así (fase 4, Dani 22 oct. 2026): un estado puede llevar `orden: { tema, on, off }` (la propone
   `proponerOrden` desde el tema de estado; se puede cambiar). Interruptor en tarjeta, ficha y pantalla completa, sin
   confirmación; `paneles.mandar` publica (qos 1, sin retener) y espera a que el tema de estado diga el valor (10 s;
-  si no, «No ha contestado»); queda en el registro. A los Shelly se les pide el estado al conectar con el broker y al
+  si no, «No ha contestado»); queda en el registro. La orden queda esperando antes de publicarla: un dispositivo del
+  mismo broker puede contestar antes que el acuse (qos 1) del broker, y su respuesta tiene que encontrarla. A los Shelly se les pide el estado al conectar con el broker y al
   guardar los datos (`pedirEstadoShelly`: `status_update` en `…/command/switch:0`): solo información.
 - Fases: 1) brokers (Mosquitto propio + varios); 2) paneles, nombres, datos MQTT numéricos, estación al panel del
   receptor; 3) ON/OFF; 4) control; 5) descubrimiento automático (**congelada** por Dani el 22 oct. 2026 hasta que
@@ -199,7 +208,8 @@ con Tasmota/ESPHome, Zigbee por zigbee2mqtt, ESPHome, Home Assistant…).
   inferior y Ajustes en un engranaje arriba a la derecha. Por partes: 3.1) quitar la app ligera de la pantalla (hecho: sin Bluetooth, cable,
   demo ni modo sin servidor; la prueba de peticiones pasó al núcleo); 3.2) esqueleto, estilo, logo, nombre «Talaia» e
   idioma (hecho: lo elige cada pantalla; por defecto, el del navegador, español también para ca/eu/gl); 3.3) cada
-  sección en los dos idiomas; 3.4) lo que sale del servidor (malla, Home Assistant, registro) con un idioma del
+  sección en los dos idiomas (hecho: tablero, nodos, registro, mapa, ficha, configuración de paneles y pantalla completa;
+  falta Ajustes, 3.3e); 3.4) lo que sale del servidor (malla, Home Assistant, registro) con un idioma del
   servidor. No se pierde ninguna función.
 - Estilo (3.2): arena y verde bosque de día, «guardia nocturna» (fondo casi negro verdoso, texto color arena) de
   noche; oliva para lo que se pulsa; naranja de señal (#c2410c / #e2531b; de noche #ff6b2b) solo para alarmas.

@@ -1,0 +1,115 @@
+/* A node's (or panel's) sheet: a panel from the bottom on a phone, a centred window on a computer. Its alarms,
+   fast change, ON/OFF states, charts, route through the mesh and the panel's configuration (MQTT data). */
+
+dialog { color: var(--ink); }
+dialog::backdrop { background: rgb(8 14 12 / .55); }
+dialog.sheet { border: 0; padding: 0; width: min(680px, 100%); max-width: 100%; max-height: min(92dvh, 960px); margin: auto auto 0; border-radius: 12px 12px 0 0; background: var(--surface); box-shadow: 0 -10px 40px rgb(0 0 0 / .25); overflow: hidden; overflow: clip; }
+dialog.sheet[open] { display: flex; flex-direction: column; animation: up .22s ease-out; }
+@media (min-width: 760px) { dialog.sheet { margin: auto; border-radius: 12px; border: 1px solid var(--line); } }
+.sheet-h { display: flex; align-items: flex-start; gap: 10px; padding: 16px max(16px, env(safe-area-inset-right, 0px)) 14px max(16px, env(safe-area-inset-left, 0px)); border-bottom: 1px solid var(--line); }
+.sheet-h > .tag { margin-top: 4px; }
+.sheet-t { flex: 1; min-width: 0; }
+.sheet-t h2 { font: 700 22px/1.15 var(--f-display); overflow-wrap: anywhere; }
+.sheet-t .meta { margin-top: 4px; }
+.sheet-b { overflow-y: auto; padding: 0 max(18px, env(safe-area-inset-right, 0px)) calc(20px + env(safe-area-inset-bottom, 0px)) max(18px, env(safe-area-inset-left, 0px)); }
+
+/* limits */
+.tbl { overflow-x: auto; }
+.thr-t { width: 100%; border-collapse: collapse; }
+.thr-t th, .thr-t td { padding: 7px 6px; text-align: left; border-bottom: 1px solid var(--line); }
+.thr-t thead th { font: 600 11px/1 var(--f-body); text-transform: uppercase; letter-spacing: .08em; color: var(--ink-2); }
+.thr-t tbody th { font-weight: 600; font-size: 15px; }
+.thr-t small { font: 400 12px/1 var(--f-body); color: var(--ink-2); }
+.thr-t td.now { font: 600 20px/1 var(--f-num); font-variant-numeric: tabular-nums; white-space: nowrap; }
+.thr-t td:nth-child(3), .thr-t td:nth-child(4) { width: 84px; }
+.thr-t .inp { text-align: right; }
+
+/* fast change */
+.trend-box { display: grid; gap: 8px; margin-top: 8px; padding-top: 14px; border-top: 1px dashed var(--line); }
+.tr-list { list-style: none; margin: 0; padding: 0; display: grid; gap: 6px; }
+.tr-list li { display: flex; align-items: center; justify-content: space-between; gap: 10px; padding: 8px 10px; border: 1px solid var(--line); border-radius: 6px; font-size: 14px; }
+.tr-list .tr-t { display: grid; gap: 3px; min-width: 0; }
+.tr-list small { font-size: 12.5px; color: var(--ink-2); }
+.tr-list li.bad { border-color: var(--crit); }
+.tr-list li.bad small { color: var(--crit); font-weight: 600; }
+.tr-form { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; font-size: 14px; }
+.tr-form .inp-u .inp { width: 68px; }
+
+/* alarms of ON/OFF states */
+.est-al { display: grid; margin: 12px 0 2px; }
+.est-al-r { display: flex; flex-wrap: wrap; align-items: center; gap: 6px 10px; padding: 8px 0; border-top: 1px solid var(--line); }
+.est-al-r:last-child { border-bottom: 1px solid var(--line); }
+.est-al-n { flex: 1 1 150px; font-weight: 600; }
+.est-al-n b { font-weight: 500; color: var(--ink-2); margin-left: 6px; }
+.est-al-r.bad .est-al-n b { color: var(--crit); font-weight: 600; }
+.est-al-r .inp-u .inp { width: 64px; }
+.est-al-n .tgl-w { margin-left: 10px; }
+
+/* history charts */
+.chart-list { display: grid; gap: 14px; }
+.chart { margin: 0; display: grid; gap: 4px; }
+.chart figcaption { display: flex; flex-wrap: wrap; align-items: baseline; gap: 4px 10px; }
+.chart figcaption span:first-child { font-weight: 600; }
+.chart figcaption b { font: 600 20px/1 var(--f-num); font-variant-numeric: tabular-nums; }
+.chart .mm { font: 400 12px/1 var(--f-body); font-variant-numeric: tabular-nums; color: var(--ink-2); margin-left: auto; }
+.chart-box { width: 100%; min-height: 132px; }
+.chart-box:has(.est-svg) { min-height: 0; }
+.chart-svg { display: block; }
+.chart-svg .grid { stroke: var(--line); stroke-width: 1; }
+.chart-svg .grid.v { stroke-dasharray: 2 4; }
+.chart-svg .tick { fill: var(--ink-2); font: 400 10.5px var(--f-mono); }
+.chart-svg .ar { fill: color-mix(in oklab, var(--accent) 15%, transparent); }
+.chart-svg .ln { fill: none; stroke: var(--accent); stroke-width: 1.8; stroke-linejoin: round; stroke-linecap: round; }
+.chart-svg .thr { stroke: var(--crit); stroke-width: 1.2; stroke-dasharray: 5 4; }
+.chart-svg .thr-l { fill: var(--crit); font: 500 10.5px var(--f-mono); }
+.chart-svg .end { fill: var(--accent); }
+.chart-svg .end-ring { fill: color-mix(in oklab, var(--accent) 25%, transparent); }
+.chart-svg .end.bad { fill: var(--crit); }
+.chart-svg .end-ring.bad { fill: color-mix(in oklab, var(--crit) 28%, transparent); }
+.empty-chart { display: grid; place-items: center; min-height: 90px; border-radius: 6px; background: var(--surface-2); color: var(--ink-2); font: 400 13px var(--f-body); }
+.est-ley { margin: 4px 0 0; display: flex; align-items: center; gap: 6px; font: 12px/1.3 var(--f-body); color: var(--ink-2); }
+.eb-k { display: inline-block; width: 12px; height: 10px; border-radius: 2px; }
+.eb-k.on { background: var(--accent); }
+.eb-k.off { margin-left: 8px; background: color-mix(in oklab, var(--accent) 14%, var(--surface-2)); }
+
+/* route through the mesh */
+.route-box { display: grid; gap: 10px; }
+.rt-cols { display: grid; grid-template-columns: repeat(auto-fit, minmax(210px, 1fr)); gap: 10px; }
+.rt { padding: 10px 12px; border: 1px solid var(--line); border-radius: 6px; background: var(--bg); display: grid; gap: 6px; align-content: start; }
+.blk .rt h4 { display: flex; gap: 6px; align-items: baseline; }
+.rt h4 span { font: 400 12.5px/1 var(--f-body); color: var(--ink-2); }
+.rt-l { list-style: none; margin: 0; padding: 0; display: grid; }
+.rt-n { display: flex; align-items: center; gap: 8px; min-height: 28px; font-size: 14px; font-weight: 600; min-width: 0; }
+.rt-n > span:last-child, .rt-n .link-btn { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.rt-n.unk { color: var(--ink-2); font-weight: 500; font-style: italic; }
+.rt-s { position: relative; margin-left: 20px; padding: 4px 0 4px 16px; border-left: 3px solid var(--line); font: 500 12.5px/1.2 var(--f-body); font-variant-numeric: tabular-nums; color: var(--ink-2); }
+.rt-s.q-ok { border-left-color: var(--ok); color: var(--ok); }
+.rt-s.q-warn { border-left-color: var(--warn); color: var(--warn); }
+.rt-s.q-bad { border-left-color: var(--crit); color: var(--crit); }
+.rt-s:not([class*="q-"]) { border-left-style: dashed; }
+b.q-ok { color: var(--ok); } b.q-warn { color: var(--warn); } b.q-bad { color: var(--crit); }
+
+/* the panel's configuration: name, MQTT data, connection, what goes out to the mesh */
+.pn-f, .dat-m { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; }
+.pn-f .inp { flex: 1 1 180px; min-width: 0; font-size: 15px; }
+.est-d { display: grid; gap: 6px; padding: 12px 0; border-top: 1px solid var(--line); }
+.est-d:last-child { border-bottom: 1px solid var(--line); }
+.est-d .inp { font-size: 15px; }
+.est-d > .sel { width: 100%; }
+.est-d .sw { flex: 0 0 auto; }
+.est-d input[data-dat-k="tema"], .est-d input[data-dat-k="campo"], .est-d input[data-dat-k^="orden"], .con-b input.inp { font-family: var(--f-mono); font-size: 14px; }
+.est-r { display: flex; gap: 8px; align-items: center; min-width: 0; }
+.est-r > .inp:first-child { flex: 1 1 auto; }
+.est-r > .sel:not(:first-child) { flex: 0 0 auto; }
+.est-u { flex: 0 0 auto; min-width: 44px; color: var(--ink-2); font-size: 14px; }
+.est-h { display: grid; gap: 6px; }
+.est-h .inp { font-size: 15px; }
+.est-hl { list-style: none; margin: 0; padding: 0; max-height: 320px; overflow-y: auto; border: 1px solid var(--line); border-radius: 6px; background: var(--bg); }
+.est-hl li { display: flex; align-items: center; justify-content: space-between; gap: 8px; padding: 6px 8px; border-top: 1px solid var(--line); }
+.est-hl li:first-child { border-top: 0; }
+.est-hn { display: grid; min-width: 0; }
+.est-ht { font: 13px/1.3 var(--f-mono); overflow-wrap: anywhere; }
+.est-pre { margin: 6px 0; padding: 8px 10px; border-radius: 6px; background: var(--surface-2); font: 12.5px/1.45 var(--f-mono); overflow-x: auto; }
+.con-b { display: grid; gap: 6px; padding: 12px 0; border-bottom: 1px solid var(--line); }
+.con-b .inp { font-size: 15px; }
+.est-r > .con-c { flex: 0 1 130px; min-width: 80px; }

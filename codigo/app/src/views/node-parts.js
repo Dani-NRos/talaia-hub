@@ -2,7 +2,7 @@
 // (with the anti-theft fence in the sheet) and the switch of an ON/OFF datum that can be turned on and off.
 import { ctx } from "../ctx.js";
 import { t } from "../i18n.js";
-import { $$, esc } from "../ui.js";
+import { $$, esc, parseNum } from "../ui.js";
 import { ASK, ASK_ALL, askKey, RE } from "@vigia/nucleo/motor.js";
 import { metricMeta, fmtNum } from "@vigia/nucleo/metrics.js";
 import { hhmm, ago, stamp, isNum } from "@vigia/nucleo/textos.js";
@@ -119,6 +119,32 @@ export function refreshPosition(num) {
   }
 }
 
+/** Sets the fence (or moves it) at the current position, with the radius in the box. */
+export async function setFence(num) {
+  const r = parseNum(document.querySelector("#fence-r")?.value);
+  const res = await ctx.orden({ orden: "valla", num, radio: r });
+  if (res.error) return ctx.toast(res.error);
+  if (!res.ok) return;
+  refreshPosition(num);
+  ctx.render();
+  ctx.toast(res.toast);
+}
+export async function setFenceRadius(num, input) {
+  const r = parseNum(input.value);
+  const res = await ctx.orden({ orden: "radioValla", num, radio: r });
+  if (res.error) { if (res.radio != null) input.value = res.radio; return ctx.toast(res.error); }
+  if (!res.ok) return;
+  input.blur();
+  refreshPosition(num);
+  ctx.render();
+  ctx.toast(res.toast);
+}
+export async function removeFence(num) {
+  if (!(await ctx.orden({ orden: "quitarValla", num })).ok) return;
+  refreshPosition(num);
+  ctx.render();
+}
+
 export async function copyText(text, btn) {
   try {
     await navigator.clipboard.writeText(text);
@@ -158,6 +184,13 @@ export function switchHTML(num, k) {
   const next = m.estados?.[on ? 1 : 0];
   const aria = `${m.label}: ${next ? t("sw.to", { state: next }) : t("sw.toggle")}`;
   return `<span class="tgl-w" data-sw="${k}"><button type="button" class="tgl${on ? " on" : ""}${o?.enviando ? " env" : ""}" role="switch" aria-checked="${on}" data-orden="${k}" data-num="${num}"${o?.enviando ? " disabled" : ""} aria-label="${esc(aria)}"><span class="tgl-ui"></span></button>${txt ? `<span class="tgl-t${o?.error ? " warn-t" : ""}">${esc(txt)}</span>` : ""}</span>`;
+}
+
+/** Pressing a switch: the opposite of what it says now. */
+export async function toggleSwitch(num, k) {
+  const cur = ctx.S.nodes.get(num)?.metrics?.[k];
+  const res = await ctx.orden({ orden: "mandar", num, clave: k, v: cur?.v === 1 ? 0 : 1 });
+  if (!res.ok && res.error) ctx.toast(res.error);
 }
 
 /** The switches in the sheet and the full screen, up to date (without redrawing the rest). */

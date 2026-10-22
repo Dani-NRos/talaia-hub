@@ -1,18 +1,28 @@
 // Pruebas de canales (qué es privado, cuánto cabe en un mensaje) y de los textos de tiempo. Ejecutar: npm test
 import test from "node:test";
 import assert from "node:assert/strict";
-import { channelPrivacy, fitBytes, DEFAULT_PSK, EVENT_PSK } from "../src/canales.js";
+import { channelPrivacy, channelWhy, fitBytes, DEFAULT_PSK, EVENT_PSK } from "../src/canales.js";
+import { setLanguage } from "../src/idioma.js";
 import { dur, ago, hoursText, lastWindow, validT } from "../src/textos.js";
 
 test("canales públicos: sin cifrar, clave por defecto (y su atajo), clave corta o la de eventos", () => {
-  assert.deepEqual(channelPrivacy(new Uint8Array([])), { private: false, why: "sin cifrar" });
-  assert.deepEqual(channelPrivacy(new Uint8Array([0])), { private: false, why: "sin cifrar" });
-  assert.deepEqual(channelPrivacy(new Uint8Array([1])), { private: false, why: "clave pública por defecto" });
-  assert.deepEqual(channelPrivacy(new Uint8Array(8).fill(3)), { private: false, why: "clave demasiado corta" });
+  assert.deepEqual(channelPrivacy(new Uint8Array([])), { private: false, kind: "plain", why: "sin cifrar" });
+  assert.deepEqual(channelPrivacy(new Uint8Array([0])), { private: false, kind: "plain", why: "sin cifrar" });
+  assert.deepEqual(channelPrivacy(new Uint8Array([1])), { private: false, kind: "default", why: "clave pública por defecto" });
+  assert.deepEqual(channelPrivacy(new Uint8Array(8).fill(3)), { private: false, kind: "short", why: "clave demasiado corta" });
   // La clave por defecto con el último byte cambiado (lo que hace el atajo «simple1»…«simple10») sigue siendo pública.
   assert.equal(channelPrivacy(Uint8Array.from([...DEFAULT_PSK.slice(0, 15), 9])).private, false);
-  assert.deepEqual(channelPrivacy(Uint8Array.from(EVENT_PSK)), { private: false, why: "clave pública de eventos" });
-  assert.deepEqual(channelPrivacy(new Uint8Array(32).fill(9)), { private: true, why: "" });
+  assert.deepEqual(channelPrivacy(Uint8Array.from(EVENT_PSK)), { private: false, kind: "event", why: "clave pública de eventos" });
+  assert.deepEqual(channelPrivacy(new Uint8Array(32).fill(9)), { private: true, kind: "", why: "" });
+});
+
+test("por qué un canal es público, en el idioma de cada pantalla (y los canales guardados antes, con su texto)", (t) => {
+  t.after(() => setLanguage("es"));
+  const ch = channelPrivacy(new Uint8Array([1]));
+  setLanguage("en");
+  assert.equal(channelWhy(ch), "default public key");
+  assert.equal(channelWhy({ private: false, why: "sin cifrar" }), "sin cifrar");
+  assert.equal(channelWhy({ private: true, kind: "", why: "" }), "");
 });
 
 test("los mensajes se recortan a 200 bytes contando que las tildes ocupan 2", () => {
