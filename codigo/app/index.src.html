@@ -71,9 +71,6 @@ button { font: inherit; color: inherit; }
 .icon-btn svg { width: 20px; height: 20px; }
 
 /* aviso de demo */
-.demo-bar { display: flex; flex-wrap: wrap; align-items: center; gap: 8px 14px; margin-top: 14px; padding: 10px 14px; border: 1px dashed var(--accent); border-radius: 12px; background: color-mix(in oklab, var(--accent) 8%, var(--surface)); }
-.demo-bar p { flex: 1 1 220px; font-size: 14px; }
-.demo-bar strong { font-weight: 600; }
 
 /* tablero de estado */
 #board { display: grid; gap: 10px; margin-top: 14px; }
@@ -588,11 +585,6 @@ dialog.full[open] { display: grid; grid-template-rows: auto minmax(0, 1fr); }
 </header>
 
 <main class="wrap">
-  <div id="demoBar" class="demo-bar" hidden>
-    <p><strong>Modo demostración.</strong> Los nodos y las lecturas son inventados y no se guardan.</p>
-    <button class="btn primary" type="button" data-demo-off>Conectar mi nodo</button>
-  </div>
-
   <section id="board" aria-live="polite"></section>
 
   <section class="sec" aria-labelledby="h-watch">

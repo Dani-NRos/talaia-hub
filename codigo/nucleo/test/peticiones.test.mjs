@@ -1,8 +1,8 @@
 // Pruebas de las peticiones a nodos: lectura de acuses/errores, captura del id del paquete y traceroute. Ejecutar: npm test
 import test from "node:test";
 import assert from "node:assert/strict";
-import { routingErrorReason } from "@vigia/nucleo/pb.js";
-import { Receptor } from "../src/receptor.js";
+import { routingErrorReason } from "../src/pb.js";
+import { ReceptorBase as Receptor } from "../src/receptor-base.js";
 
 test("acuse y errores de enrutado", () => {
   assert.equal(routingErrorReason(new Uint8Array([0x18, 0x00])), 0);   // acuse

@@ -2,7 +2,7 @@
   "name": "@vigia/app",
   "version": "1.20.0",
   "private": true,
-  "description": "Vigía Mesh: la app web (PWA) por Bluetooth o cable USB",
+  "description": "The screen of Talaia Hub, served by the server (PWA)",
   "license": "GPL-3.0-only",
   "type": "module",
   "scripts": {
@@ -10,7 +10,6 @@
     "test": "node --test test/*.test.mjs"
   },
   "dependencies": {
-    "@meshtastic/core": "^2.6.7",
     "@vigia/nucleo": "*",
     "esbuild": "^0.28.2",
     "leaflet": "^1.9.4"

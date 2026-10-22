@@ -1,25 +1,19 @@
 import { metricMeta, sortMetrics, fmtValue, fmtWithUnit, fmtNum, fmtLimit, registrarMetricas } from "@vigia/nucleo/metrics.js";
-import { createIdbStore, createMemStore } from "./store.js";
 import { createMapView } from "./map.js";
-import { Receptor } from "./receptor.js";
-import { buildDemo, DEMO_IDS } from "./demo.js";
 import { relays, snrQuality, loraSf, weakest, UNKNOWN_NODE, PRESET_NAME } from "@vigia/nucleo/route.js";
 import { distM, compass, precisionM, fmtDist, coordText, mapsUrl, SOURCE } from "@vigia/nucleo/geo.js";
 import { trendDefault, parseTrendRule } from "@vigia/nucleo/trend.js";
 import { searchNodes, highlight, tokens, FILTERS, SORTS } from "./meshsearch.js";
 import { conectarServidor, crearStoreRemoto } from "./remoto.js";
 import { MIN, HOUR, DAY, isNum, hhmm, dShort, ago, stamp, dur, trendDec, fmtTrend, trendVerb, hoursText, lastWindow } from "@vigia/nucleo/textos.js";
-import { crearAcciones } from "@vigia/nucleo/acciones.js";
 import { TIPOS, LISTA_TIPOS, TIPOS_PANEL, NOMBRES_ESTADO, tipoMalla, esEstado, unidades, adivinarTipo, adivinarEstado, proponerOrden, unidadDe, textoDato, metasDe, MALLA_MAX_SALTOS } from "@vigia/nucleo/mqtt-datos.js";
-import { crearMotor, estadoInicial, MESH_DEFAULT, MESH_HOURLY, ASK, ASK_ALL, askKey, RE, INFO_SUPPRESS, seriesKey, trendKey, estadoKey, hexId } from "@vigia/nucleo/motor.js";
+import { crearMotor, estadoInicial, MESH_HOURLY, ASK, ASK_ALL, askKey, RE, seriesKey, trendKey, estadoKey, hexId } from "@vigia/nucleo/motor.js";
 
 /* ───────────── utilidades ───────────── */
 const $ = (s, r = document) => r.querySelector(s);
 const $$ = (s, r = document) => [...r.querySelectorAll(s)];
 const esc = (s) => String(s ?? "").replace(/[&<>"']/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[c]));
 const APP_VERSION = "1.20.0";
-// Abierta desde Vigía servidor: el estado es el del servidor y lo que se pulsa va a él como una orden.
-const SERVIDOR = typeof window !== "undefined" && !!window.__VIGIA_SERVIDOR;
 const REPO_URL = "https://github.com/Dani-NRos/talaia-hub";
 const ISSUES_URL = `${REPO_URL}/issues`;
 
@@ -43,10 +37,8 @@ const DEFAULT_SETTINGS = { sound: true, wake: false, retentionDays: 30, defaultO
 // Lo que comparte con el servidor (nodos, alarmas, peticiones…) lo define el núcleo; aquí se añade lo de pantalla.
 const S = {
   ...estadoInicial(),
-  demoTimer: null,
   settings: { ...DEFAULT_SETTINGS },
   trouble: null, // último fallo de conexión clasificado
-  otherWindow: null, // "busy" | "lost" si otra ventana de Vigía tiene el receptor
   diag: [],
   meshExpanded: false,
   ui: { collapsed: {}, order: [] }, // tarjetas vigiladas: contraídas y orden elegido (se guardan aparte de las alarmas)
@@ -58,7 +50,6 @@ const S = {
   detail: null, // { num, range }
   servidorOk: false, // modo «Servidor»: hay conexión con él
 };
-let receptor = null;
 let swReg = null;
 let mapView = null; // se crea al abrir el mapa por primera vez
 
@@ -75,68 +66,21 @@ const motor = crearMotor(S, {
   alarma: (al) => fireAlarm(al),
   toast: (msg) => toast(msg),
   diag: (e) => pushDiag(e),
-  // Con servidor, lo guarda él; aquí solo los ajustes de este aparato (sonido, pantalla encendida).
-  guardar: (k) => { if (!SERVIDOR || k === "settings") SAVE[k]?.(); },
-  radio: {
-    listo: () => (SERVIDOR ? S.servidorOk : !!receptor?.mesh),
-    requestTelemetry: (...a) => receptor.requestTelemetry(...a),
-    requestNodeInfo: (...a) => receptor.requestNodeInfo(...a),
-    requestPosition: (...a) => receptor.requestPosition(...a),
-    requestTraceroute: (...a) => receptor.requestTraceroute(...a),
-    sendText: (...a) => receptor.sendText(...a),
-  },
+  // El servidor lo guarda todo; aquí solo los ajustes de este aparato (sonido, pantalla encendida).
+  guardar: (k) => { if (k === "settings") saveSettings(); },
+  // El servidor tiene la radio: las peticiones le llegan como órdenes (askUI), nunca salen de aquí.
+  radio: { listo: () => S.servidorOk },
 });
 const {
-  node, nodeName, isWatched, ingest, evalNode, trendNow, evalOffline, raise, clearAlarm,
-  ack, ackAll, unacked, alarmTitle, alarmDetail, addLog, canAsk, askVisible, askFailText, receptorUsesPki, keyNeeded,
-  staleKeyFail, ask, resetAsks, hopName, meshCfg, pumpMesh,
+  node, isWatched, trendNow, raise,
+  ack, unacked, alarmTitle, alarmDetail, canAsk, askVisible, askFailText, receptorUsesPki, keyNeeded,
+  staleKeyFail, hopName, meshCfg,
 } = motor;
-// Lo que cambia el usuario (vigilar, límites, valla, ajustes…): lo mismo que hace el servidor con sus órdenes.
-const acciones = crearAcciones(motor);
 let servidor = null; // modo «Servidor»: la conexión con él
 const orden = (datos) => servidor.orden(datos);
 
-/* ───────────── persistencia (solo modo real) ───────────── */
-function saveCfg() { if (!S.demo) LS.set("vigia.cfg", S.cfg); }
+/* ───────────── persistencia: solo lo de este aparato ───────────── */
 function saveSettings() { LS.set("vigia.settings", S.settings); }
-let nodesTimer = null;
-function saveNodes() {
-  if (S.demo) return;
-  clearTimeout(nodesTimer);
-  nodesTimer = setTimeout(() => LS.set("vigia.nodes", [...S.nodes.values()]), 1500);
-}
-function saveLog() { if (!S.demo) LS.set("vigia.log", S.log.slice(0, 200)); }
-function saveActive() { if (!S.demo) LS.set("vigia.active", [...S.active.values()]); }
-
-function loadReal() {
-  S.cfg = LS.get("vigia.cfg", { watched: {} });
-  if (!S.cfg.watched) S.cfg.watched = {};
-  S.nodes = new Map((LS.get("vigia.nodes", []) || []).map((n) => [n.num, n]));
-  S.log = LS.get("vigia.log", []);
-  S.active = new Map((LS.get("vigia.active", []) || []).map((a) => [a.key, a]));
-  S.myNode = LS.get("vigia.my", null);
-  S.store = createIdbStore();
-  S.channels = LS.get("vigia.channels", []) || [];
-  S.infoAsked = LS.get("vigia.infoAsk", {}) || {};
-  S.meshView = { filters: [], sort: "auto", ...(LS.get("vigia.meshView", {}) || {}) };
-  S.ui = { collapsed: {}, order: [], ...(LS.get("vigia.cards", {}) || {}) };
-  S.traces = LS.get("vigia.traces", {}) || {};
-  S.lora = LS.get("vigia.lora", null);
-  S.recent = new Map();
-}
-// Lo que el motor pide guardar. En la demo no se guarda nada (lo comprueba cada función o el propio motor).
-const SAVE = {
-  cfg: saveCfg,
-  nodes: saveNodes,
-  log: saveLog,
-  active: saveActive,
-  infoAsk: () => LS.set("vigia.infoAsk", Object.fromEntries(Object.entries(S.infoAsked).filter(([, t]) => Date.now() - t < INFO_SUPPRESS))),
-  traces: () => LS.set("vigia.traces", S.traces),
-  channels: () => LS.set("vigia.channels", S.channels),
-  lora: () => LS.set("vigia.lora", S.lora),
-  my: () => LS.set("vigia.my", S.myNode),
-  settings: saveSettings,
-};
 
 /* ───────────── cambio rápido (tendencia) ───────────── */
 /** «ha bajado 1,2 hPa en las últimas 3 horas» con los datos de ahora, para la ficha. */
@@ -172,7 +116,7 @@ function askStatus(num, types = Object.keys(ASK_ALL).filter((t) => t !== "pos" &
   }).join("");
 }
 function keyRow(num, sheet) {
-  if (num === S.myNode && !S.demo) return "";
+  if (num === S.myNode) return "";
   const need = keyNeeded(num);
   if (!sheet && !need) return "";
   const n = S.nodes.get(num);
@@ -297,7 +241,7 @@ function refreshPos(num) {
 
 async function setFence(num) {
   const r = parseNum($("#fence-r")?.value);
-  const res = SERVIDOR ? await orden({ orden: "valla", num, radio: r }) : acciones.fijarValla(num, r);
+  const res = await orden({ orden: "valla", num, radio: r });
   if (res.error) return toast(res.error);
   if (!res.ok) return;
   refreshPos(num);
@@ -306,7 +250,7 @@ async function setFence(num) {
 }
 async function setFenceRadius(num, input) {
   const r = parseNum(input.value);
-  const res = SERVIDOR ? await orden({ orden: "radioValla", num, radio: r }) : acciones.radioValla(num, r);
+  const res = await orden({ orden: "radioValla", num, radio: r });
   if (res.error) { if (res.radio != null) input.value = res.radio; return toast(res.error); }
   if (!res.ok) return;
   input.blur();
@@ -315,7 +259,7 @@ async function setFenceRadius(num, input) {
   toast(res.toast);
 }
 async function delFence(num) {
-  if (!(SERVIDOR ? await orden({ orden: "quitarValla", num }) : acciones.quitarValla(num)).ok) return;
+  if (!(await orden({ orden: "quitarValla", num })).ok) return;
   refreshPos(num);
   render();
 }
@@ -914,7 +858,7 @@ function meshSection() {
       <div class="set-row"><label class="sw" for="meshClear"><input type="checkbox" id="meshClear" ${cfg.onClear ? "checked" : ""}><span class="sw-ui"></span><span>Avisar también cuando se resuelve</span></label></div>
       <div class="btns"><button class="btn ghost" data-mesh-test>Enviar mensaje de prueba</button></div>
       <p class="hint" id="meshLast">${meshLastHTML()}</p>
-      <p class="hint">Sale un mensaje al saltar cada alarma de umbral, cambio rápido, sin señal o fuera de su sitio: en un canal lo leen todos los que lo tengan; a un nodo, solo él, y se da por entregado cuando ese nodo lo confirma (que un vecino lo repita no basta). Como mucho uno cada 8 s y ${MESH_HOURLY} por hora, para no saturar la malla. ${SERVIDOR ? "Los manda el servidor, aunque no haya ninguna pantalla abierta." : "Solo con Vigía abierta y el receptor conectado."} Los canales públicos están bloqueados porque lo leería cualquiera.</p>
+      <p class="hint">Sale un mensaje al saltar cada alarma de umbral, cambio rápido, sin señal o fuera de su sitio: en un canal lo leen todos los que lo tengan; a un nodo, solo él, y se da por entregado cuando ese nodo lo confirma (que un vecino lo repita no basta). Como mucho uno cada 8 s y ${MESH_HOURLY} por hora, para no saturar la malla. Los manda el servidor, aunque no haya ninguna pantalla abierta. Los canales públicos están bloqueados porque lo leería cualquiera.</p>
     </section>`;
 }
 
@@ -983,9 +927,6 @@ async function applyWake() {
 document.addEventListener("visibilitychange", () => {
   if (document.visibilityState === "visible") {
     applyWake();
-    // Con la página congelada no corrían los temporizadores de reintento: se reintenta ya.
-    if (receptor && S.link.state === "reconnecting" && S.link.extra?.at) receptor.retryNow();
-    evalOffline();
     render();
   }
 });
@@ -1173,8 +1114,6 @@ function render() {
 }
 
 const ICON = {
-  bt: `<svg viewBox="0 0 24 24" aria-hidden="true"><path d="M7 7l10 10-5 4V3l5 4L7 17" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"/></svg>`,
-  usb: `<svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 3v14M12 3l-2.5 3h5L12 3ZM12 17a2 2 0 1 0 0 4 2 2 0 0 0 0-4ZM12 14l-5-3V8M12 12l5-3V7" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"/><rect x="5.5" y="6.5" width="3" height="2" rx=".5" fill="currentColor"/><circle cx="17" cy="6" r="1.4" fill="currentColor"/></svg>`,
   server: `<svg viewBox="0 0 24 24" aria-hidden="true"><rect x="4" y="4" width="16" height="6.5" rx="1.5" fill="none" stroke="currentColor" stroke-width="1.7"/><rect x="4" y="13.5" width="16" height="6.5" rx="1.5" fill="none" stroke="currentColor" stroke-width="1.7"/><circle cx="8" cy="7.25" r="1.1" fill="currentColor"/><circle cx="8" cy="16.75" r="1.1" fill="currentColor"/></svg>`,
   gear: `<svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 15.2a3.2 3.2 0 1 0 0-6.4 3.2 3.2 0 0 0 0 6.4Z" fill="none" stroke="currentColor" stroke-width="1.8"/><path d="M19.4 13.5a7.6 7.6 0 0 0 0-3l2-1.6-2-3.4-2.4.9a7.5 7.5 0 0 0-2.6-1.5L14 2.4h-4l-.4 2.5A7.5 7.5 0 0 0 7 6.4l-2.4-.9-2 3.4 2 1.6a7.6 7.6 0 0 0 0 3l-2 1.6 2 3.4 2.4-.9a7.5 7.5 0 0 0 2.6 1.5l.4 2.5h4l.4-2.5a7.5 7.5 0 0 0 2.6-1.5l2.4.9 2-3.4-2-1.6Z" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linejoin="round"/></svg>`,
   close: `<svg viewBox="0 0 24 24" aria-hidden="true"><path d="M6 6l12 12M18 6L6 18" stroke="currentColor" stroke-width="2" stroke-linecap="round"/></svg>`,
@@ -1185,35 +1124,9 @@ const ICON = {
   down: `<svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 5v14M6 13l6 6 6-6" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/></svg>`,
 };
 
-const STAGE_TEXT = { gatt: "Buscando el nodo…", service: "Abriendo canal…", notify: "Abriendo canal…", open: "Abriendo el puerto…" };
-const LINK_TEXT = {
-  idle: "Conectar receptor",
-  connecting: "Conectando…",
-  configuring: "Leyendo el nodo…",
-  ready: "Receptor conectado",
-  reconnecting: "Reconectando…",
-};
-
+/** Barra de arriba: primero, si hay conexión con el servidor; después, cómo está su receptor. */
 function renderTop() {
   const b = $("#linkBtn");
-  if (SERVIDOR) return renderTopServidor(b);
-  const st = S.demo ? "demo" : S.link.state;
-  b.dataset.state = st;
-  let label = S.demo ? "Demo" : LINK_TEXT[st] || st;
-  if (st === "ready" && S.myNode != null) label = `${S.nodes.get(S.myNode)?.short || "Receptor"} conectado`;
-  const ex = S.link.extra || {};
-  if ((st === "connecting" || st === "reconnecting") && ex.stage && !ex.at) label = STAGE_TEXT[ex.stage] || label;
-  if (st === "configuring" && ex.packets) label = `Leyendo el nodo · ${ex.packets}`;
-  if (st === "reconnecting" && ex.at) {
-    const s = Math.max(0, Math.round((ex.at - Date.now()) / 1000));
-    label = s > 0 ? `Reintento en ${s} s` : "Reconectando…";
-  }
-  b.innerHTML = `<span class="ld"></span>${!S.demo && linkKind() === "serial" ? ICON.usb : ICON.bt}<span class="lt">${esc(label)}</span>`;
-  $("#demoBar").hidden = !S.demo;
-}
-
-/** Barra de arriba con servidor: primero, si hay conexión con él; después, cómo está su receptor. */
-function renderTopServidor(b) {
   const st = !S.servidorOk ? "reconnecting" : S.link.state;
   let label;
   if (!S.servidorOk) label = "Sin conexión con el servidor";
@@ -1223,7 +1136,6 @@ function renderTopServidor(b) {
   else label = "Receptor parado";
   b.dataset.state = st;
   b.innerHTML = `<span class="ld"></span>${ICON.server}<span class="lt">${esc(label)}</span>`;
-  $("#demoBar").hidden = true;
 }
 
 function renderBoard() {
@@ -1249,111 +1161,17 @@ function renderBoard() {
   }
   const tHTML = troubleHTML();
   html += tHTML;
-  if (!S.demo && S.otherWindow) {
-    html += S.otherWindow === "lost"
-      ? `<div class="notice"><p>La conexión con el receptor ha pasado a otra ventana de Vigía.</p><button class="btn primary" data-takeover>Recuperarla aquí</button></div>`
-      : `<div class="notice"><p>Vigía ya está conectada al receptor en otra ventana o pestaña. El nodo solo admite una conexión: usa esa, o tráete la conexión aquí.</p><button class="btn primary" data-takeover>Conectar aquí</button></div>`;
-  } else if (!S.demo && !tHTML && S.link.state !== "ready" && !S.active.has("link")) {
-    const unplugged = S.link.state === "idle" && S.device?.kind === "serial" && canSerial() && !S.userIdle;
-    const msg = unplugged
-      ? `Enchufa el cable de tu receptor (${S.device.name}) y se conectará solo. Mientras tanto ves los últimos datos guardados y no puedo saber si un nodo deja de emitir.`
-      : S.link.state === "idle"
+  if (!tHTML && S.link.state !== "ready" && !S.active.has("link")) {
+    const msg = S.link.state === "idle"
       ? "Sin receptor conectado. Mientras tanto ves los últimos datos guardados y no puedo saber si un nodo deja de emitir."
       : "Esperando al receptor. Las alarmas de nodo sin señal están en pausa hasta que vuelva.";
-    html += `<div class="notice"><p>${esc(msg)}</p>${S.link.state === "idle" ? `<div class="btns">${connectButtons()}</div>` : ""}</div>`;
+    html += `<div class="notice"><p>${esc(msg)}</p></div>`;
   }
   el.innerHTML = html;
 }
 
-/* ───────────── guía cuando no conecta ───────────── */
-const TROUBLE = {
-  busy: {
-    title: "El nodo no responde",
-    lead: "No se pudo abrir la conexión. Lo normal es que otro móvil o la app de Meshtastic lo tenga ocupado, o que esté apagado o lejos.",
-    steps: [
-      "Cierra del todo la app de Meshtastic, o desconecta el nodo desde ella. En Android sigue conectada en segundo plano aunque no la abras, y el nodo solo admite un móvil.",
-      "Si lo has usado desde el ordenador, cierra allí la pestaña o la app que lo tenga conectado.",
-      "Comprueba que el nodo está encendido y a pocos metros.",
-      "Apaga y enciende el Bluetooth del móvil. Si sigue igual, reinicia el nodo.",
-    ],
-  },
-  pairing: {
-    title: "Problema de emparejamiento",
-    lead: "La conexión se abre pero se corta al empezar a hablar con el nodo. Casi siempre es que el móvil y el nodo ya no coinciden en el emparejamiento (pasa al actualizar el firmware o al emparejar el nodo con varios aparatos).",
-    steps: [
-      "En los ajustes de Bluetooth del móvil, olvida «{name}».",
-      "Vuelve aquí y pulsa Conectar receptor. Android te pedirá un PIN: sale en la pantalla del nodo (si no tiene pantalla, suele ser 123456).",
-      "Si te pasa a menudo y el receptor es fijo en casa, puedes poner su Bluetooth en «Sin PIN» desde la app de Meshtastic. Se acaba este problema, a cambio de que cualquiera a pocos metros pueda conectarse a él.",
-    ],
-  },
-  service: {
-    title: "Ese aparato no parece un nodo Meshtastic",
-    lead: "Se conecta, pero no encuentra el servicio de Meshtastic.",
-    steps: [
-      "Comprueba que has elegido el nodo correcto.",
-      "Si acabas de actualizar su firmware, olvídalo en los ajustes de Bluetooth del móvil: Android guarda la lista de servicios antigua.",
-      "Pulsa Conectar receptor y elígelo otra vez.",
-    ],
-  },
-  lost: {
-    title: "La conexión se corta",
-    lead: "Conecta, pero se corta antes de terminar de leer el nodo.",
-    steps: [
-      "Acerca el móvil al nodo.",
-      "Cierra la app de Meshtastic y cualquier otra que use el nodo.",
-      "Apaga y enciende el Bluetooth del móvil.",
-    ],
-  },
-};
-TROUBLE.other = TROUBLE.lost;
-// Por cable USB, otros fallos y otros remedios.
-const TROUBLE_USB = {
-  busy: {
-    title: "No se puede abrir el puerto",
-    lead: "Otro programa tiene abierto el puerto del nodo, o el nodo ya no está enchufado.",
-    steps: [
-      "Cierra la web o la app de Meshtastic, el flasheador, un monitor serie (Arduino, PlatformIO) o la línea de órdenes de Meshtastic si alguno lo está usando: el puerto solo admite un programa.",
-      "Cierra otras pestañas o ventanas de Vigía conectadas por cable.",
-      "Desenchufa el cable y vuelve a enchufarlo.",
-    ],
-  },
-  noapi: {
-    title: "El nodo no contesta por el cable",
-    lead: "El puerto se abre, pero lo que hay al otro lado no contesta como un nodo Meshtastic.",
-    steps: [
-      "Comprueba que has elegido el puerto del nodo (en Windows, el COM que aparece al enchufarlo).",
-      "Si el nodo se acaba de reiniciar al enchufarlo, espera unos segundos: se reintenta solo.",
-      "Prueba con otro cable: algunos solo cargan y no llevan datos.",
-      "Reinicia el nodo.",
-    ],
-  },
-  lost: {
-    title: "Se ha cortado la conexión por cable",
-    lead: "El cable se ha soltado, el nodo se ha reiniciado o el ordenador ha apagado el puerto USB.",
-    steps: [
-      "Revisa el cable y el puerto USB del ordenador; mejor directo al ordenador que por un concentrador.",
-      "Al volver a enchufarlo, Vigía se reconecta sola.",
-      "En Windows, si pasa a menudo, quita el ahorro de energía del USB (Administrador de dispositivos → Concentrador raíz USB → Administración de energía).",
-    ],
-  },
-};
-TROUBLE_USB.other = TROUBLE_USB.lost;
-
+/* ───────────── cuando el servidor o su receptor no conectan ───────────── */
 function troubleHTML() {
-  if (SERVIDOR) return troubleServidorHTML();
-  const tr = S.trouble;
-  if (S.demo || !tr || S.otherWindow || S.link.state === "ready") return "";
-  const urgent = tr.kind === "pairing" || tr.kind === "service";
-  if (!urgent && tr.count < 2) return "";
-  const set = tr.link === "serial" ? TROUBLE_USB : TROUBLE;
-  const g = set[tr.kind] || set.other;
-  const name = tr.name || S.device?.name || "el nodo";
-  const steps = g.steps.map((x) => `<li>${esc(x.replace("{name}", name))}</li>`).join("");
-  const retry = S.link.state === "idle" ? connectButtons() : `<button class="btn primary" data-retry>Reintentar ahora</button>`;
-  return `<div class="trouble" role="status"><h2>${esc(g.title)}</h2><p>${esc(g.lead)} <span class="tr-n">${tr.count === 1 ? "1 intento" : `${tr.count} intentos seguidos`}.</span></p><ol>${steps}</ol><div class="btns">${retry}<button class="btn ghost" data-diag>Ver diagnóstico</button></div></div>`;
-}
-
-function troubleServidorHTML() {
   if (!S.servidorOk) return `<div class="trouble" role="status"><h2>Sin conexión con el servidor</h2><p>Esta pantalla no llega al servidor de Vigía. Lo vuelve a intentar sola cada pocos segundos. Mientras tanto, el servidor sigue vigilando.</p><ol><li>Comprueba que este aparato está en la red de casa (o en Tailscale).</li><li>Si el servidor se ha reiniciado, espera un momento.</li></ol></div>`;
   const tr = S.trouble;
   if (!tr || S.link.state === "ready" || tr.count < 2) return "";
@@ -1361,12 +1179,9 @@ function troubleServidorHTML() {
 }
 
 /* ───────────── diagnóstico de conexión ───────────── */
-let diagSaveT = null;
 function pushDiag(e) {
   S.diag.push(e);
   if (S.diag.length > 150) S.diag.splice(0, S.diag.length - 150);
-  clearTimeout(diagSaveT);
-  diagSaveT = setTimeout(() => LS.set("vigia.diag", S.diag), 800);
   const el = $("#diagList");
   if (el) el.textContent = diagLines(40);
 }
@@ -1377,7 +1192,6 @@ function diagText() {
     `Vigía Mesh ${APP_VERSION}`,
     navigator.userAgent,
     `Receptor: ${S.device?.name || "—"} · estado: ${S.link.state}${S.trouble ? ` · último fallo: ${S.trouble.kind} (${S.trouble.count})` : ""}`,
-    `Bluetooth web: ${navigator.bluetooth ? "sí" : "no"} · getDevices: ${navigator.bluetooth?.getDevices ? "sí" : "no"} · forget: ${typeof BluetoothDevice !== "undefined" && BluetoothDevice.prototype?.forget ? "sí" : "no"} · locks: ${navigator.locks ? "sí" : "no"} · serie web: ${navigator.serial ? "sí" : "no"} · enlace: ${linkKind() === "serial" ? "cable" : "Bluetooth"}`,
     "",
   ];
   return head.join("\n") + S.diag.map(diagLine).join("\n");
@@ -1386,7 +1200,7 @@ function diagText() {
 function issueUrl() {
   const intro = "**Qué pasó:**\n\n\n**Modelo del nodo receptor y versión de firmware:**\n\n\n**Diagnóstico** (revísalo antes de enviar: el aviso es público)\n";
   const lines = diagText().split("\n");
-  const keep = 4; // cabecera: versión, navegador, receptor y capacidades
+  const keep = 3; // cabecera: versión, navegador y receptor
   let cut = false;
   const build = () => `${ISSUES_URL}/new?title=${encodeURIComponent("Fallo de conexión")}&body=${encodeURIComponent(`${intro}\n\`\`\`\n${[...lines.slice(0, keep), ...(cut ? ["(líneas más antiguas recortadas)"] : []), ...lines.slice(keep)].join("\n")}\n\`\`\`\n`)}`;
   let url = build();
@@ -1420,7 +1234,7 @@ const datoDe = (num, k) => panelCfg(num)?.datos?.find((d) => d.clave === k) || n
  * confirmación; «Enviando…» hasta que el dispositivo dice que lo ha hecho; si no contesta, lo dice.
  */
 function interruptorHTML(num, k) {
-  if (!SERVIDOR || !datoDe(num, k)?.orden) return "";
+  if (!datoDe(num, k)?.orden) return "";
   const m = metricMeta(k), cur = S.nodes.get(num)?.metrics?.[k];
   const o = S.paneles?.ordenes?.[k];
   const on = cur?.v === 1;
@@ -1452,7 +1266,7 @@ function metaLine(n) {
 }
 
 /* ───────────── tarjetas de los nodos vigilados ───────────── */
-function saveUi() { if (!S.demo) LS.set("vigia.cards", S.ui); }
+function saveUi() { LS.set("vigia.cards", S.ui); }
 /** Nodos vigilados en el orden elegido; los que aún no tienen sitio van al final, por nombre. */
 function watchedOrder() {
   const pos = new Map(S.ui.order.map((n, i) => [n, i]));
@@ -1481,15 +1295,15 @@ function renderCards() {
   const nums = watchedOrder();
   $("#watchCount").textContent = nums.length ? String(nums.length) : "";
   const tools = $("#cardTools");
-  tools.hidden = nums.length < 1 && !SERVIDOR;
+  tools.hidden = false;
   const allMin = nums.length > 0 && nums.every((n) => S.ui.collapsed[n]);
-  const nuevo = SERVIDOR ? `<button type="button" class="btn ghost sm" data-panel-nuevo>Añadir panel</button>` : "";
+  const nuevo = `<button type="button" class="btn ghost sm" data-panel-nuevo>Añadir panel</button>`;
   setHTML(tools, S.ordering
     ? `<button type="button" class="btn primary sm" data-order-done>Listo</button>`
     : `${nums.length ? `<button type="button" class="btn ghost sm" data-cards-all>${allMin ? "Expandir todas" : "Contraer todas"}</button>` : ""}${nums.length > 1 ? `<button type="button" class="btn ghost sm" data-order>Ordenar</button>` : ""}${nuevo}`);
   el.classList.toggle("ordering", S.ordering);
   if (!nums.length) {
-    setHTML(el, `<div class="empty"><p><strong>Aquí aparecerán tus sensores.</strong> En “Resto de la malla” toca <em>Vigilar</em> en un nodo para fijarlo aquí y ponerle alarmas de umbral y de nodo sin señal.${SERVIDOR ? " Para un dispositivo que publica por MQTT (Shelly, Tasmota, Zigbee…), pulsa <em>Añadir panel</em>." : ""}</p></div>`);
+    setHTML(el, `<div class="empty"><p><strong>Aquí aparecerán tus sensores.</strong> En “Resto de la malla” toca <em>Vigilar</em> en un nodo para fijarlo aquí y ponerle alarmas de umbral y de nodo sin señal. Para un dispositivo que publica por MQTT (Shelly, Tasmota, Zigbee…), pulsa <em>Añadir panel</em>.</p></div>`);
     return;
   }
   if (S.ordering) {
@@ -1748,7 +1562,7 @@ function renderMesh() {
   const shown = res.slice(0, limit);
   let html;
   if (!rest.length && !words.length) {
-    html = `<li class="empty-row">${S.demo || S.link.state === "ready" ? "No hay más nodos en la base de datos del receptor." : "Conecta el receptor para ver los nodos que oye."}</li>`;
+    html = `<li class="empty-row">${S.link.state === "ready" ? "No hay más nodos en la base de datos del receptor." : "Conecta el receptor para ver los nodos que oye."}</li>`;
   } else if (!res.length) {
     const why = [q ? `con «${esc(q)}»` : "", filters.size ? "con esos filtros" : ""].filter(Boolean).join(" y ");
     html = `<li class="empty-row">Ningún nodo coincide ${why}. <button type="button" class="link-btn" data-mesh-clear>Quitar la búsqueda</button></li>`;
@@ -1796,7 +1610,7 @@ function renderLog() {
 }
 
 function renderFoot() {
-  const bits = [SERVIDOR ? "Datos guardados en el servidor de Vigía, en tu red." : "Sin internet: los datos se guardan solo en este dispositivo."];
+  const bits = ["Datos guardados en el servidor de Vigía, en tu red."];
   if (wake) bits.push("Pantalla fija activada.");
   $("#foot").textContent = bits.join(" ");
   const v = $("#footVer");
@@ -1810,7 +1624,7 @@ let persistAsked = false;
 /** route: { to, fwd, back } para dibujar la ruta de un traceroute. */
 function openMap(focus = null, route = null) {
   // Que el navegador no vacíe el fondo guardado cuando el móvil vaya justo de espacio.
-  if (!persistAsked && window.__VIGIA_PWA) { persistAsked = true; navigator.storage?.persist?.().catch(() => {}); }
+  if (!persistAsked) { persistAsked = true; navigator.storage?.persist?.().catch(() => {}); }
   if (!mapView) {
     mapView = createMapView({
       nodes: () => [...S.nodes.values()].filter((n) => n.num >= 0).map((n) => (n.alias ? { ...n, long: n.alias } : n)),
@@ -1882,7 +1696,7 @@ function renderDetail() {
       <button type="button" data-range="24h" aria-pressed="${S.detail.range === "24h"}">24 h</button><button type="button" data-range="7d" aria-pressed="${S.detail.range === "7d"}">7 días</button></div></div>
       <div id="chartList" class="chart-list">${keys.length ? keys.map((k) => `<figure class="chart" data-m="${k}"><figcaption><span>${esc(metricMeta(k).label)}</span><b data-cur="${k}">${n.metrics[k] ? esc(fmtWithUnit(k, n.metrics[k].v)) : "—"}</b><span class="mm" data-mm="${k}"></span></figcaption><div class="chart-box"></div></figure>`).join("") : `<p class="hint">${sinNodo ? "Aún no ha llegado ningún dato." : "Sin telemetría de este nodo."}</p>`}</div></section>`;
   // Con servidor: el nombre en Vigía, los datos por MQTT y, en el receptor, lo que sale a la malla.
-  if (SERVIDOR && w) body += nombreSection(num) + datosSection(num) + (num === S.myNode ? mallaSection() : "");
+  if (w) body += nombreSection(num) + datosSection(num) + (num === S.myNode ? mallaSection() : "");
   if (w) {
     body += sinNodo
       ? `<section class="blk end"><button class="btn danger-ghost" data-panel-quitar="${num}">Quitar panel</button></section>`
@@ -1943,8 +1757,8 @@ async function saveRuleFromInput(inp) {
   const err = $("#ruleErr");
   if (inp.id === "r-off") {
     const v = parseNum(inp.value);
-    if (SERVIDOR && Number.isNaN(v)) { showErr(err, "Pon un número de minutos (1 o más) o déjalo vacío."); inp.focus(); return; }
-    const res = SERVIDOR ? await orden({ orden: "sinSenal", num, valor: v }) : acciones.ponerSinSenal(num, v);
+    if (Number.isNaN(v)) { showErr(err, "Pon un número de minutos (1 o más) o déjalo vacío."); inp.focus(); return; }
+    const res = await orden({ orden: "sinSenal", num, valor: v });
     if (res.error) { showErr(err, res.error); inp.focus(); return; }
     err.hidden = true;
     render();
@@ -1954,7 +1768,7 @@ async function saveRuleFromInput(inp) {
   const k = inp.dataset.rule, side = inp.dataset.side;
   const v = parseNum(inp.value);
   if (Number.isNaN(v)) { showErr(err, `“${inp.value}” no es un número. Usa coma o punto para los decimales.`); inp.focus(); return; }
-  const res = SERVIDOR ? await orden({ orden: "limite", num, metrica: k, lado: side, valor: v }) : acciones.ponerLimite(num, k, side, v);
+  const res = await orden({ orden: "limite", num, metrica: k, lado: side, valor: v });
   if (res.error) { showErr(err, res.error); inp.focus(); return; }
   err.hidden = true;
   render();
@@ -2047,14 +1861,14 @@ async function addTrend(num) {
   const delta = parseNum($("#tr-delta").value), hours = parseNum($("#tr-hours").value);
   const { rule, error } = parseTrendRule($("#tr-dir").value, delta ?? NaN, hours ?? NaN);
   if (error) { showErr(err, error); return; }
-  const res = SERVIDOR ? await orden({ orden: "tendencia", num, metrica: k, regla: rule }) : acciones.ponerTendencia(num, k, rule);
+  const res = await orden({ orden: "tendencia", num, metrica: k, regla: rule });
   if (res.error) { showErr(err, res.error); return; }
   refreshTrend(num, k);
   render();
   toast(res.toast);
 }
 async function delTrend(num, k) {
-  const res = SERVIDOR ? await orden({ orden: "quitarTendencia", num, metrica: k }) : acciones.quitarTendencia(num, k);
+  const res = await orden({ orden: "quitarTendencia", num, metrica: k });
   if (!res.ok) return;
   refreshTrend(num);
   render();
@@ -2062,7 +1876,7 @@ async function delTrend(num, k) {
 }
 
 async function watch(num) {
-  const res = SERVIDOR ? await orden({ orden: "vigilar", num }) : acciones.vigilar(num);
+  const res = await orden({ orden: "vigilar", num });
   if (!res.ok) { if (res.error) toast(res.error); return; }
   res.recientes?.then(render);
   render();
@@ -2071,7 +1885,7 @@ async function watch(num) {
 }
 
 async function unwatch(num) {
-  if (SERVIDOR) await orden({ orden: "dejar", num }); else acciones.dejarDeVigilar(num);
+  await orden({ orden: "dejar", num });
   // Lo de la pantalla (tarjeta contraída, orden) es de este aparato.
   delete S.ui.collapsed[num];
   S.ui.order = S.ui.order.filter((n) => n !== num);
@@ -2080,37 +1894,6 @@ async function unwatch(num) {
 }
 
 /* ───────────── ajustes ───────────── */
-const PREVIEW = !window.__VIGIA_PWA;
-function btSupportMsg() {
-  if (PREVIEW) return "Esta es la vista previa: aquí el navegador no deja usar Bluetooth. Instala la app desde tu dirección https para conectar el nodo.";
-  const s = Receptor.support();
-  if (s === "insecure") return "Bluetooth web solo funciona en páginas seguras (https). Abre la app desde su dirección https.";
-  if (s === "none") return "Este navegador no tiene Bluetooth web. Usa Chrome en Android o en el ordenador; en iPhone no está disponible.";
-  return "";
-}
-
-function serialSupportMsg() {
-  if (PREVIEW) return "Esta es la vista previa: aquí el navegador no deja usar el cable. Instala la app desde tu dirección https para conectar el nodo.";
-  const s = Receptor.serialSupport();
-  if (s === "insecure") return "El cable USB solo funciona en páginas seguras (https). Abre la app desde su dirección https.";
-  if (s === "none") return "Este navegador no puede usar el cable USB. Hace falta Chrome o Edge en el ordenador.";
-  return "";
-}
-const canSerial = () => !serialSupportMsg();
-/** Cómo se conectó el receptor la última vez: "ble" o "serial". Sin Bluetooth web pero con cable, el cable. */
-function linkKind() {
-  const k = (S.device || LS.get("vigia.device", null))?.kind;
-  if (k === "serial" || k === "ble") return k;
-  return btSupportMsg() && canSerial() ? "serial" : "ble";
-}
-/** Botones para conectar: el último modo usado delante; el cable solo donde el navegador lo permite. */
-function connectButtons() {
-  if (!canSerial()) return `<button class="btn primary" data-connect>Conectar receptor</button>`;
-  const usb = `<button class="btn ${linkKind() === "serial" ? "primary" : "ghost"}" data-connect-usb>${ICON.usb}Por cable USB</button>`;
-  const bt = btSupportMsg() ? "" : `<button class="btn ${linkKind() === "ble" ? "primary" : "ghost"}" data-connect-bt>${ICON.bt}Por Bluetooth</button>`;
-  return linkKind() === "serial" ? usb + bt : bt + usb;
-}
-
 function receptorServidorHTML() {
   if (!S.servidorOk) return `<p class="warn-t">Sin conexión con el servidor de Vigía. Esta pantalla lo vuelve a intentar sola.</p>`;
   const my = S.myNode != null ? S.nodes.get(S.myNode) : null;
@@ -2127,42 +1910,8 @@ function receptorServidorHTML() {
 }
 
 function renderSettings() {
-  const st = S.link.state;
-  const dev = S.device || LS.get("vigia.device", null);
-  const sup = btSupportMsg() && serialSupportMsg();
-  const viaUsb = linkKind() === "serial";
-  let rec = "";
-  if (SERVIDOR) rec = receptorServidorHTML();
-  else if (sup) rec = `<p class="warn-t">${esc(btSupportMsg())}</p>`;
-  else if (S.demo) rec = `<p>Estás en la demo. Sal de ella para conectar tu nodo.</p><div class="btns"><button class="btn primary" data-demo-off>Salir de la demo y conectar</button></div>`;
-  else {
-    const my = S.myNode != null ? S.nodes.get(S.myNode) : null;
-    const via = dev ? (dev.kind === "serial" ? " por cable USB" : " por Bluetooth") : "";
-    const statusTxt = {
-      idle: dev?.name ? `Desconectado. Último receptor: ${dev.name}${via}.` : "Ningún receptor emparejado todavía.",
-      connecting: `Conectando${via} con ${dev?.name || "el nodo"}…`,
-      configuring: `Conectado${via}. Leyendo la base de datos de nodos…`,
-      ready: `Conectado${via} a ${my ? `${my.short} · ${my.long}` : dev?.name || "tu nodo"}.`,
-      reconnecting: `Se ha perdido la conexión${via} con ${dev?.name || "el receptor"}. ${viaUsb ? "Se reconecta sola al volver a enchufarlo." : "Reintentando sola."}`,
-    }[st];
-    rec = `<p>${esc(statusTxt)}</p><div class="btns">`;
-    if (st === "idle") rec += connectButtons();
-    else rec += `${st === "reconnecting" ? `<button class="btn primary" data-retry>Reintentar ahora</button>` : ""}<button class="btn ghost" data-disconnect>Desconectar</button>`;
-    rec += `${dev && st === "idle" ? `<button class="btn danger-ghost" data-forget>Olvidar este receptor</button>` : ""}</div>`;
-    if (st === "idle") {
-      const more = [btSupportMsg() ? "" : `<button type="button" class="link-btn" data-connect-all>todos los aparatos Bluetooth</button>`, canSerial() ? `<button type="button" class="link-btn" data-connect-usb-all>todos los puertos serie</button>` : ""].filter(Boolean);
-      rec += `<p class="hint">¿Tu nodo no aparece en la lista? Busca entre ${more.join(" o entre ")}.</p>`;
-    }
-    rec += `<p class="hint">El receptor es el nodo que tienes al lado; los sensores le llegan por LoRa. ${canSerial() ? "Se conecta por Bluetooth o, en el ordenador, por cable USB: con cable no hay emparejamientos ni cortes, y si lo desenchufas y lo vuelves a enchufar se reconecta sola." : "El móvil se conecta a él por Bluetooth, sin internet."}</p>
-      <details class="tips"><summary>Si no conecta</summary><ul>
-        <li><strong>La app de Meshtastic lo tiene ocupado.</strong> En Android sigue conectada en segundo plano aunque no la abras. Ciérrala del todo o desconecta el nodo desde ella: el nodo solo admite un móvil.</li>
-        <li><strong>Emparejamiento roto.</strong> Si se conecta y se corta enseguida, olvida el nodo en los ajustes de Bluetooth del móvil y vuelve a conectar; te pedirá el PIN que sale en su pantalla.</li>
-        <li><strong>Otra ventana de Vigía.</strong> Si la tienes abierta en Chrome y también instalada, solo una puede conectarse.</li>
-        <li><strong>Bluetooth del móvil atascado.</strong> Apagarlo y encenderlo arregla muchos fallos raros de Android.</li>
-        ${canSerial() ? `<li><strong>Por cable: el puerto está ocupado.</strong> Solo un programa puede abrirlo: cierra la web de Meshtastic, el flasheador o cualquier monitor serie. Usa un cable de datos (algunos solo cargan).</li>` : ""}
-      </ul></details>`;
-  }
-  const notifState = !("Notification" in window) ? "none" : SERVIDOR && !window.isSecureContext ? "http" : Notification.permission;
+  const rec = receptorServidorHTML();
+  const notifState = !("Notification" in window) ? "none" : !window.isSecureContext ? "http" : Notification.permission;
   const notif = notifState === "granted" ? `<span class="okt">Activadas</span>`
     : notifState === "http" ? `<span class="hint">El navegador solo las deja con https (llegarán con Tailscale)</span>`
     : notifState === "denied" ? `<span class="warn-t">Bloqueadas en los ajustes del navegador</span>`
@@ -2176,15 +1925,15 @@ function renderSettings() {
       <div class="set-row"><label class="sw" for="setWake"><input type="checkbox" id="setWake" ${S.settings.wake ? "checked" : ""}><span class="sw-ui"></span><span>Mantener la pantalla encendida</span></label></div>
       <div class="set-row"><span>Notificaciones del sistema</span>${notif}</div>
       <div class="set-row"><label for="setOff">Sin señal, valor para nodos nuevos</label><span class="inp-u"><input id="setOff" class="inp" inputmode="numeric" autocomplete="off" value="${S.settings.defaultOfflineMin}"><span>min</span></span></div>
-      <p class="hint">${SERVIDOR ? "El servidor vigila siempre. Esta pantalla suena y avisa mientras está abierta; si das «Enterado» aquí, queda visto en todos tus aparatos." : "Las alarmas solo saltan con la app abierta y en pantalla. Con el móvil bloqueado, Chrome congela la página; al volver, recoge lo que guardó el receptor y avisa de lo que se perdió."}</p>
+      <p class="hint">El servidor vigila siempre. Esta pantalla suena y avisa mientras está abierta; si das «Enterado» aquí, queda visto en todos tus aparatos.</p>
     </section>
-    ${PREVIEW && !S.demo ? "" : meshSection()}
-    ${SERVIDOR ? mqttSection() : ""}
+    ${meshSection()}
+    ${mqttSection()}
     <section class="blk"><h3>Histórico</h3>
       <div class="set-row"><span id="histCount">Contando lecturas…</span><select id="setRet" class="inp sel" aria-label="Tiempo que se guardan las lecturas">${[7, 30, 90, 365].map((d) => `<option value="${d}"${S.settings.retentionDays === d ? " selected" : ""}>Guardar ${d} días</option>`).join("")}</select></div>
-      <div class="btns">${PREVIEW ? "" : `<button class="btn ghost" data-export>Exportar CSV</button>`}<button class="btn danger-ghost" data-wipe>Borrar histórico</button></div>
+      <div class="btns"><button class="btn ghost" data-export>Exportar CSV</button><button class="btn danger-ghost" data-wipe>Borrar histórico</button></div>
     </section>
-    ${PREVIEW ? "" : `<section class="blk"><h3>Mapa sin internet</h3>
+    <section class="blk"><h3>Mapa sin internet</h3>
       <div class="set-row"><span id="tileCount">Contando el fondo guardado…</span><button class="btn ghost" data-wipe-tiles>Borrar fondo guardado</button></div>
       <p class="hint">El fondo del mapa se guarda solo de las zonas que ves con conexión y en los zooms que usas, hasta unas 2.000 teselas (unos 40 MB). Antes de ir a un sitio sin cobertura, recórrelo en el mapa con internet.</p>
       <p class="hint" id="tilePersist"></p>
@@ -2192,10 +1941,9 @@ function renderSettings() {
     <section class="blk" id="diagBox"><h3>Diagnóstico de conexión</h3>
       <p class="hint">Cada paso de la conexión queda apuntado aquí. Si falla, copia el diagnóstico: dice en qué paso se corta.</p>
       <pre class="diag" id="diagList">${esc(diagLines(40))}</pre>
-      <div class="btns"><button class="btn ghost" data-copy-diag>Copiar diagnóstico</button><button class="btn ghost" data-report>Avisar del fallo en GitHub</button>${SERVIDOR ? "" : `<button class="btn ghost" data-clear-diag>Borrar</button>`}</div>
+      <div class="btns"><button class="btn ghost" data-copy-diag>Copiar diagnóstico</button><button class="btn ghost" data-report>Avisar del fallo en GitHub</button></div>
       <p class="hint">«Avisar del fallo» abre un aviso nuevo en GitHub con el diagnóstico ya pegado. Necesita internet y una cuenta de GitHub, y el aviso es público: revisa el texto antes de enviarlo.</p>
-    </section>`}
-    ${SERVIDOR ? "" : `<section class="blk"><h3>Demostración</h3>${S.demo ? `<p>Los datos que ves son inventados y no se guardan.</p>${PREVIEW ? "" : `<button class="btn ghost" data-demo-off>Salir de la demo</button>`}` : `<p>Prueba el panel con nodos inventados. Tus datos reales no se tocan.</p><button class="btn ghost" data-demo-on>Ver la demo</button>`}</section>`}
+    </section>
     <section class="blk about"><h3>Acerca de</h3>
       <p><strong>Vigía Mesh ${APP_VERSION}</strong>. Panel de alarmas para nodos Meshtastic que funciona sin internet. Hecho por Dani-NRos.</p>
       <div class="btns"><a class="btn ghost" href="${REPO_URL}" target="_blank" rel="noopener">Código en GitHub</a><a class="btn ghost" href="${ISSUES_URL}" target="_blank" rel="noopener">Avisos y sugerencias</a></div>
@@ -2203,8 +1951,8 @@ function renderSettings() {
       <p class="hint">Código abierto con licencia GPL-3.0. Proyecto independiente, no afiliado a Meshtastic. Meshtastic® es una marca registrada de Meshtastic LLC.</p>
     </section>
   </div>`;
-  S.store.count().then((c) => { const el = $("#histCount"); if (el) el.textContent = `${c.toLocaleString("es-ES")} lecturas${S.demo ? " (demo)" : ""}`; });
-  if (!PREVIEW) tileInfo();
+  S.store.count().then((c) => { const el = $("#histCount"); if (el) el.textContent = `${c.toLocaleString("es-ES")} lecturas`; });
+  tileInfo();
 }
 
 async function tileInfo() {
@@ -2224,204 +1972,19 @@ function openSettings() {
   if (!d.open) d.showModal();
 }
 
-async function exportCsv() {
-  const rows = (await S.store.all()).sort((a, b) => a.t - b.t);
-  const lines = ["fecha;nodo;nombre;metrica;valor;unidad"];
-  for (const r of rows) {
-    const m = metricMeta(r.metric);
-    lines.push([new Date(r.t).toISOString(), hexId(r.node), `"${nodeName(r.node).replaceAll('"', "'")}"`, r.metric, String(r.v).replace(".", ","), m.unit].join(";"));
-  }
-  const blob = new Blob(["﻿" + lines.join("\n")], { type: "text/csv;charset=utf-8" });
-  const a = document.createElement("a");
-  a.href = URL.createObjectURL(blob);
-  a.download = `vigia-mesh-${new Date().toISOString().slice(0, 10)}.csv`;
-  document.body.append(a);
-  a.click();
-  a.remove();
-  setTimeout(() => URL.revokeObjectURL(a.href), 4000);
-  toast(`${rows.length.toLocaleString("es-ES")} lecturas exportadas`);
-}
-
-/* ───────────── Enterado y peticiones: aquí o en el servidor ───────────── */
+/* ───────────── Enterado y peticiones: van al servidor ───────────── */
 function ackUI(key) {
-  if (!SERVIDOR || key === "test") return ack(key); // la alarma de prueba es solo de este aparato
+  if (key === "test") return ack(key); // la alarma de prueba es solo de este aparato
   orden({ orden: "ack", key });
 }
 function ackAllUI() {
-  if (!SERVIDOR) return ackAll();
   if (S.active.has("test")) ack("test");
   orden({ orden: "ackAll" });
 }
 async function askUI(num, type) {
-  if (!SERVIDOR) return ask(num, type);
   const r = await orden({ orden: "pedir", num, tipo: type });
   if (r.toast || r.error) toast(r.toast || r.error);
 }
-
-/* ───────────── receptor ───────────── */
-function makeReceptor() {
-  return new Receptor({
-    onStatus(state, extra) {
-      S.link = { state, extra: extra || null };
-      if ($("#settings").open) renderSettings();
-      if (S.detail) refreshAsk(S.detail.num);
-      render();
-    },
-    onDevice(dev) {
-      if (dev.kind === "serial") {
-        const same = S.device?.kind === "serial" && S.device.vid === dev.vid && S.device.pid === dev.pid;
-        S.device = { kind: "serial", vid: dev.vid, pid: dev.pid, name: same && S.device.name ? S.device.name : "nodo por cable USB" };
-      } else {
-        S.device = { kind: "ble", id: dev.id, name: dev.name || "Nodo Meshtastic" };
-      }
-      LS.set("vigia.device", S.device);
-    },
-    onReady() {
-      motor.resetClock();
-      setTimeout(pumpMesh, 1500);
-      S.trouble = null;
-      S.otherWindow = null;
-      LS.set("vigia.ever", true);
-      clearAlarm("link", {});
-      // Por cable el puerto no tiene nombre: se usa el del nodo.
-      if (S.device?.kind === "serial" && S.myNode != null) { S.device.name = nodeName(S.myNode); LS.set("vigia.device", S.device); }
-      addLog("info", `Receptor listo${S.device?.kind === "serial" ? " por cable" : ""}: ${S.myNode != null ? nodeName(S.myNode) : S.device?.name || "nodo"}`);
-      evalOffline();
-      render();
-    },
-    onLost(reason, wasReady) {
-      if (wasReady) raise("link", { kind: "link", num: null, t: Date.now() });
-      evalOffline();
-    },
-    onTrouble(info) {
-      S.trouble = info;
-      if (info.count === 1 && info.kind !== "pairing" && info.kind !== "service") toast("No se pudo conectar. Reintentando…");
-      render();
-    },
-    onDiag(e) { pushDiag(e); },
-    // Lo que llega del receptor lo procesa el motor (el mismo que usa el servidor).
-    onChannel: (c) => motor.recibir.channel(c),
-    onLora: (l) => motor.recibir.lora(l),
-    onNotice: (n) => motor.recibir.notice(n),
-    onOtherWindow() { S.otherWindow = "busy"; render(); },
-    onLockLost() { S.otherWindow = "lost"; addLog("info", "La conexión con el receptor ha pasado a otra ventana"); render(); },
-    onMyNode: (num) => motor.recibir.myNode(num),
-    onNodeInfo: (ni) => motor.recibir.nodeInfo(ni),
-    onUser: (from, user, meta) => motor.recibir.user(from, user, meta),
-    onPacket: (p) => motor.recibir.packet(p),
-    onPosition: (p) => motor.recibir.position(p),
-    onTelemetry: (p) => motor.recibir.telemetry(p),
-  });
-}
-
-function btErrorText(e) {
-  const name = e?.name || "";
-  const msg = String(e?.message || "");
-  if (name === "NotFoundError" && /cancel/i.test(msg)) return "";
-  if (name === "NotFoundError") return "No se encontró el nodo. Comprueba que tiene el Bluetooth activo y está cerca.";
-  if (name === "SecurityError" || /permissions policy|disallowed/i.test(msg)) return "Esta página no tiene permiso para usar Bluetooth. Pasa en la vista previa: abre la app instalada desde tu dirección https.";
-  if (name === "NetworkError") return "El nodo no responde. Acércalo, o reinícialo si tiene otro móvil conectado.";
-  if (name === "NotAllowedError") return "Has denegado el acceso al Bluetooth.";
-  return `No se pudo conectar: ${msg || name || "error desconocido"}`;
-}
-
-function serialErrorText(e) {
-  const name = e?.name || "";
-  const msg = String(e?.message || "");
-  if (name === "NotFoundError") return ""; // cerró el selector sin elegir
-  if (name === "SecurityError" || /permissions policy|disallowed/i.test(msg)) return "Esta página no tiene permiso para usar el cable. Abre la app instalada desde tu dirección https.";
-  return `No se pudo abrir el puerto: ${msg || name || "error desconocido"}`;
-}
-
-/** kind: "ble" o "serial" (por defecto, el último usado). all: selector sin filtro. */
-async function connectFlow(all = false, kind = linkKind()) {
-  const serial = kind === "serial";
-  const sup = serial ? serialSupportMsg() : btSupportMsg();
-  if (sup) { toast(sup); openSettings(); return; }
-  if (S.demo) stopDemo();
-  if (!receptor) receptor = makeReceptor();
-  // Un solo receptor a la vez: cambiar de Bluetooth a cable (o al revés) suelta el anterior.
-  if (receptor.state !== "idle" && receptor.kind !== kind) await receptor.disconnect();
-  S.userIdle = false;
-  try {
-    if (serial) await receptor.pickSerial(all);
-    else await receptor.pick(all);
-  } catch (e) {
-    const t = serial ? serialErrorText(e) : btErrorText(e);
-    if (t) toast(t);
-    if (receptor.state !== "reconnecting") { S.link = { state: "idle", extra: null }; render(); }
-  }
-}
-
-/* ───────────── demo ───────────── */
-function startDemo() {
-  if (receptor && receptor.state !== "idle") receptor.disconnect();
-  S.demo = true;
-  const d = buildDemo(Date.now());
-  S.demoData = d;
-  S.demoToken++;
-  resetAsks();
-  S.store = createMemStore();
-  S.store.add(d.rows);
-  S.nodes = new Map();
-  for (const n of d.nodes) S.nodes.set(n.num, { metrics: {}, snr: null, hasEnv: false, hw: "", ...n });
-  for (const r of d.rows) {
-    const n = S.nodes.get(r.node);
-    const prev = n.metrics[r.metric];
-    if (!prev || r.t >= prev.t) n.metrics[r.metric] = { v: r.v, t: r.t };
-  }
-  for (const [num, ms] of Object.entries(d.extraMetrics)) Object.assign(S.nodes.get(Number(num)).metrics, ms);
-  S.myNode = d.myNode;
-  S.channels = [
-    { index: 0, name: "LongFast", primary: true, private: false, why: "clave pública por defecto" },
-    { index: 1, name: "avisos", primary: false, private: true, why: "" },
-    { index: 2, name: "familia", primary: false, private: true, why: "" },
-  ];
-  S.demoMesh = MESH_DEFAULT();
-  S.infoAsked = {};
-  S.traces = {};
-  S.traceAt = 0;
-  S.lora = { usePreset: true, modemPreset: 0, hopLimit: 3 };
-  S.meshLast = null;
-  S.cfg = { watched: JSON.parse(JSON.stringify(d.watched)) };
-  S.ui = { collapsed: {}, order: [] };
-  S.ordering = false;
-  S.active = new Map();
-  S.log = [{ t: Date.now(), type: "info", text: "Demo cargada con nodos inventados" }];
-  S.recent = new Map();
-  const since = Date.now() - 26 * HOUR;
-  for (const r of d.rows) if (r.t >= since) {
-    const k = seriesKey(r.node, r.metric);
-    if (!S.recent.has(k)) S.recent.set(k, []);
-    S.recent.get(k).push({ t: r.t, v: r.v });
-  }
-  for (const num of Object.keys(S.cfg.watched)) evalNode(Number(num), { silent: true });
-  mapView?.reset();
-  const seen = S.active.get(`${DEMO_IDS.monte}||offline`);
-  if (seen) seen.acked = true;
-  clearInterval(S.demoTimer);
-  S.demoTimer = setInterval(() => {
-    const x = d.tick();
-    ingest(x.num, x.metrics, Date.now(), { env: true });
-  }, 12000);
-  render();
-}
-
-function stopDemo() {
-  clearInterval(S.demoTimer);
-  S.demoTimer = null;
-  S.demo = false;
-  S.demoData = null;
-  S.demoToken++;
-  resetAsks();
-  loadReal();
-  mapView?.reset();
-  if (S.detail && $("#detail").open) $("#detail").close();
-  loadRecent().then(render);
-  render();
-}
-
-const loadRecent = (nums) => acciones.cargarRecientes(nums);
 
 /* ───────────── toast ───────────── */
 let toastT = null;
@@ -2438,7 +2001,7 @@ function toast(msg) {
 }
 
 /* ───────────── eventos ───────────── */
-let wipeArmed = 0, unwatchArmed = 0, forgetArmed = 0;
+let wipeArmed = 0, unwatchArmed = 0;
 document.addEventListener("click", async (ev) => {
   const t = ev.target.closest("a, button, [data-open], [data-close]");
   if (t?.tagName === "A") return; // enlaces (Google Maps, GitHub) van a lo suyo
@@ -2471,19 +2034,7 @@ document.addEventListener("click", async (ev) => {
   if ("ackall" in ds) return ackAllUI();
   if ("watch" in ds) return watch(Number(ds.watch));
   if ("close" in ds) return t.closest("dialog")?.close();
-  if ("connect" in ds) { $("#settings").open && $("#settings").close(); return connectFlow(false); }
-  if ("connectAll" in ds) { $("#settings").close(); return connectFlow(true, "ble"); }
-  if ("connectBt" in ds) { $("#settings").open && $("#settings").close(); return connectFlow(false, "ble"); }
-  if ("connectUsb" in ds) { $("#settings").open && $("#settings").close(); return connectFlow(false, "serial"); }
-  if ("connectUsbAll" in ds) { $("#settings").open && $("#settings").close(); return connectFlow(true, "serial"); }
-  if ("retry" in ds) return SERVIDOR ? orden({ orden: "reconectar" }) : receptor?.retryNow();
-  if ("takeover" in ds) {
-    if (!receptor) receptor = makeReceptor();
-    if (!receptor.hasTarget) { S.otherWindow = null; render(); return connectFlow(false); }
-    if (!(await receptor.takeOver())) return toast("No se pudo tomar la conexión. Cierra la otra ventana de Vigía.");
-    S.otherWindow = null;
-    return render();
-  }
+  if ("retry" in ds) return orden({ orden: "reconectar" });
   if ("diag" in ds) { openSettings(); setTimeout(() => $("#diagBox")?.scrollIntoView({ block: "start" }), 50); return; }
   if ("brkNuevo" in ds) { brokerEdit = { id: null, nombre: "", url: "", usuario: "", clave: "", activado: true }; renderMqtt(); return $("#brkNombre")?.focus(); }
   if ("brkEdit" in ds) { const b = mqttBrokers().find((x) => x.id === ds.brkEdit); if (b) brokerEdit = { id: b.id, nombre: b.nombre, url: b.url, usuario: b.usuario, clave: "", activado: b.activado }; return renderMqtt(); }
@@ -2526,7 +2077,7 @@ document.addEventListener("click", async (ev) => {
   if ("mallaSave" in ds) return guardarMalla();
   if ("mallaSend" in ds) { const r = await orden({ orden: "enviarMalla" }); return toast(r.error || r.toast); }
   if ("meshTest" in ds) {
-    const res = SERVIDOR ? await orden({ orden: "pruebaMalla" }) : acciones.pruebaMalla();
+    const res = await orden({ orden: "pruebaMalla" });
     if (res.toast) toast(res.toast);
     return;
   }
@@ -2541,28 +2092,13 @@ document.addEventListener("click", async (ev) => {
     window.open(issueUrl(), "_blank", "noopener");
     return;
   }
-  if ("clearDiag" in ds) { S.diag = []; LS.del("vigia.diag"); const el = $("#diagList"); if (el) el.textContent = diagLines(40); return; }
-  if ("forget" in ds) {
-    if (Date.now() - forgetArmed > 4000) { forgetArmed = Date.now(); t.textContent = "Toca otra vez para olvidarlo"; return; }
-    forgetArmed = 0;
-    await receptor?.forget();
-    LS.del("vigia.device");
-    S.device = null;
-    S.trouble = null;
-    renderSettings();
-    render();
-    return toast("Receptor olvidado. Al conectar podrás elegir otro.");
-  }
-  if ("disconnect" in ds) { await receptor?.disconnect(); S.userIdle = true; S.trouble = null; addLog("info", "Receptor desconectado a mano"); clearAlarm("link", { silent: true }); render(); return; }
-  if ("demoOn" in ds) { $("#settings").close(); startDemo(); return toast("Demo activada: datos inventados"); }
-  if ("demoOff" in ds) { $("#settings").open && $("#settings").close(); if (PREVIEW) return toast(btSupportMsg()); stopDemo(); return connectFlow(false); }
   if ("notif" in ds) { try { await Notification.requestPermission(); } catch { /* nada */ } renderSettings(); return; }
   if ("test" in ds) { unlockAudio(); raise("test", { kind: "test", num: null, t: Date.now() }); $("#settings").close(); return; }
-  if ("export" in ds) return SERVIDOR ? location.assign("api/lecturas.csv") : exportCsv();
+  if ("export" in ds) return location.assign("api/lecturas.csv");
   if ("wipe" in ds) {
     if (Date.now() - wipeArmed > 4000) { wipeArmed = Date.now(); t.textContent = "Toca otra vez para borrar"; return; }
     wipeArmed = 0;
-    const res = SERVIDOR ? await orden({ orden: "borrarHistorico" }) : await acciones.borrarHistorico();
+    const res = await orden({ orden: "borrarHistorico" });
     renderSettings();
     render();
     return toast(res.toast);
@@ -2581,7 +2117,7 @@ document.addEventListener("click", async (ev) => {
     return;
   }
   if ("range" in ds) { S.detail.range = ds.range; $$("#detail [data-range]").forEach((b) => b.setAttribute("aria-pressed", String(b.dataset.range === ds.range))); return drawCharts(); }
-  if (t.id === "linkBtn") { if (SERVIDOR) return openSettings(); if (!S.demo && S.link.state === "idle" && !(linkKind() === "serial" ? serialSupportMsg() : btSupportMsg())) return connectFlow(false); return openSettings(); }
+  if (t.id === "linkBtn") return openSettings();
   if (t.id === "setBtn") return openSettings();
   if (t.id === "mapBtn") return openMap();
   if (t.id === "meshMore") { S.meshExpanded = !S.meshExpanded; return renderMesh(); }
@@ -2677,27 +2213,24 @@ document.addEventListener("change", async (ev) => {
   if (t.id === "setWake") { S.settings.wake = t.checked; saveSettings(); return applyWake(); }
   if (t.id === "setOff") {
     const v = parseNum(t.value);
-    const res = SERVIDOR ? await orden({ orden: "sinSenalDefecto", valor: Number.isNaN(v) ? null : v }) : acciones.sinSenalPorDefecto(v);
+    const res = await orden({ orden: "sinSenalDefecto", valor: Number.isNaN(v) ? null : v });
     if (res.error) { t.value = res.valor; return toast(res.error); }
     return toast(res.toast);
   }
   if (t.id === "meshOn" || t.id === "meshClear") {
     const cambio = t.id === "meshOn" ? { enabled: t.checked } : { onClear: t.checked };
-    const res = SERVIDOR ? await orden({ orden: "malla", cambio }) : acciones.avisosMalla(cambio);
+    const res = await orden({ orden: "malla", cambio });
     if (res.toast) toast(res.toast);
     return;
   }
   if (t.id === "meshCh" || t.id === "meshNode") {
     const v = t.value === "" ? null : Number(t.value);
     const cambio = t.id === "meshCh" ? { channel: v } : { node: v };
-    const res = SERVIDOR ? await orden({ orden: "malla", cambio }) : acciones.avisosMalla(cambio);
+    const res = await orden({ orden: "malla", cambio });
     if (!res.ok) { t.value = ""; return toast(res.toast); }
     return renderSettings();
   }
-  if (t.id === "setRet") {
-    if (SERVIDOR) { await orden({ orden: "retencion", dias: Number(t.value) }); return renderSettings(); }
-    acciones.retencion(Number(t.value)).poda.then(renderSettings);
-  }
+  if (t.id === "setRet") { await orden({ orden: "retencion", dias: Number(t.value) }); return renderSettings(); }
 });
 
 $("#nodeview").addEventListener("close", closeFull);
@@ -2711,7 +2244,7 @@ $("#detail").addEventListener("close", () => {
 });
 window.addEventListener("resize", () => { clearTimeout(liveT); liveT = setTimeout(drawCharts, 200); });
 
-/* ───────────── modo «Servidor» ───────────── */
+/* ───────────── estado del servidor ───────────── */
 /** Lecturas nuevas del servidor: a las series de las últimas 26 h, como hace el motor al recibirlas. */
 function anadirReciente(r) {
   const key = seriesKey(r.node, r.metric);
@@ -2765,7 +2298,7 @@ function refrescarAbiertos(p) {
   }
   if (mapView && $("#map").open && (p.nodes || "traces" in p)) mapView.update();
 }
-function bootServidor() {
+function boot() {
   S.settings = { ...DEFAULT_SETTINGS, ...LS.get("vigia.settings", {}) };
   S.ui = { collapsed: {}, order: [], ...(LS.get("vigia.cards", {}) || {}) };
   S.meshView = { filters: [], sort: "auto", ...(LS.get("vigia.meshView", {}) || {}) };
@@ -2803,43 +2336,4 @@ function bootServidor() {
 /** Una línea en el diagnóstico de esta pantalla (el del servidor viene con su estado). */
 function addLogLocal(msg) { S.diag = [...(S.diag || []), { t: Date.now(), msg }].slice(-60); }
 
-/* ───────────── arranque ───────────── */
-async function boot() {
-  if (SERVIDOR) return bootServidor();
-  S.settings = { ...DEFAULT_SETTINGS, ...LS.get("vigia.settings", {}) };
-  S.diag = LS.get("vigia.diag", []) || [];
-  loadReal();
-  const ever = LS.get("vigia.ever", false);
-  if (!ever && S.nodes.size === 0) {
-    startDemo();
-  } else {
-    await loadRecent();
-    S.store.prune(Date.now() - S.settings.retentionDays * DAY);
-    render();
-    const dev = LS.get("vigia.device", null);
-    if (dev?.kind === "serial" && canSerial()) {
-      receptor = makeReceptor();
-      S.device = dev;
-      receptor.restoreSerial(dev).catch(() => {});
-    } else if (dev && dev.kind !== "serial" && !btSupportMsg()) {
-      receptor = makeReceptor();
-      S.device = dev;
-      receptor.restore(dev.id).catch(() => {});
-    }
-  }
-  // Cable: al enchufar el nodo (con permiso ya dado) se conecta solo, salvo que se desconectara a mano.
-  navigator.serial?.addEventListener?.("connect", () => {
-    if (S.demo || S.userIdle || S.device?.kind !== "serial") return;
-    if (receptor?.kind === "serial" && receptor.state === "reconnecting") return receptor.retryNow();
-    if (receptor && receptor.state !== "idle") return;
-    if (!receptor) receptor = makeReceptor();
-    receptor.restoreSerial(S.device).catch(() => {});
-  });
-  applyWake();
-  if (window.__VIGIA_PWA && "serviceWorker" in navigator) {
-    navigator.serviceWorker.register("./sw.js").then((r) => { swReg = r; }).catch(() => {});
-  }
-  setInterval(() => { evalOffline(); render(); }, 15000);
-  setInterval(() => { if (S.link.state === "reconnecting") renderTop(); }, 1000);
-}
 boot();

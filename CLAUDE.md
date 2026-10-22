@@ -43,11 +43,9 @@ codigo/                 raíz de npm workspaces: npm install, npm test, npm run 
                         configuración (también lo que puede salir a la malla); metrics.js registra sus métricas
     src/metrics.js trend.js delivery.js route.js geo.js pb.js
   app/                  la PWA (@vigia/app)
-    src/app.js          pantalla; crea el motor con ganchos (redibujar, guardar en localStorage, sonar…) y radio.
-                        Con window.__VIGIA_SERVIDOR (lo pone el servidor al servirla) arranca en modo «Servidor»:
-                        estado del servidor por SSE y órdenes por POST (src/remoto.js)
-    src/receptor.js     conexión al nodo desde el navegador (Bluetooth o Web Serial): de la app ligera
-    src/ble.js serial.js store.js (IndexedDB) demo.js   también de la app ligera: se van con el rediseño
+    src/app.js          pantalla; crea el motor con ganchos (redibujar, sonar…) solo para mostrar: el estado llega
+                        del servidor por SSE y lo que se pulsa va a él como orden por POST (src/remoto.js). En
+                        localStorage, solo lo de cada aparato (sonido, pantalla encendida, tarjetas, buscador, mapa)
     src/map.js mapdata.js meshsearch.js remoto.js
     index.src.html build.mjs pwa/ (manifiesto, iconos y sw.js: la pantalla del servidor se instala como app)
   servidor/             Vigía servidor (@vigia/servidor), Node ≥ 22.13
@@ -178,8 +176,15 @@ con Tasmota/ESPHome, Zigbee por zigbee2mqtt, ESPHome, Home Assistant…).
 - **Usuarios y contraseña** obligatorios antes de abrirlo al mundo; **Docker** para instalarlo fácil.
 - Paso 2 hecho (22 oct. 2026): `main` es la app ligera congelada (con aviso en su README), `version-1.20` guarda la
   1.20 y `mapa` ya no lleva los ficheros compilados de la app ligera ni sus herramientas. Con el nombre, `mapa` pasó a
-  `talaia-hub` (22 oct. 2026) con su historia; el instalador descarga de aquí. El código de la app ligera que sigue en
-  `app/src` (Bluetooth, cable, demo, IndexedDB) se quita con el rediseño (paso 3).
+  `talaia-hub` (22 oct. 2026) con su historia; el instalador descarga de aquí.
+- **Paso 3, rediseño** (Dani, 22 oct. 2026), en la rama **`rediseno`** (main sigue estable en el BMAX; Dani prueba
+  con `--rama rediseno` y vuelve a main cuando quiera; al acabar, pasa a main). Barra: Tablero, Alarmas, **Nodos**
+  (la lista de toda la malla con su buscador), Mapa, **Automatizaciones** («Llega en la 2.1») y Ajustes. En el
+  ordenador, las seis en la barra lateral (Ajustes abajo); en el móvil, cinco en la barra inferior y Ajustes en un
+  engranaje arriba a la derecha. Por partes: 3.1) quitar la app ligera de la pantalla (hecho: sin Bluetooth, cable,
+  demo ni modo sin servidor; la prueba de peticiones pasó al núcleo); 3.2) esqueleto, estilo, logo, nombre «Talaia» e
+  idioma (lo elige cada pantalla; por defecto, el del navegador); 3.3) cada sección en los dos idiomas; 3.4) lo que
+  sale del servidor (malla, Home Assistant, registro) con un idioma del servidor. No se pierde ninguna función.
 - Orden (1 y 2, hechos): 1) nombre y política de idioma; 2) congelar la webapp y reorganizar el repositorio;
   3) rediseño con los dos idiomas; 4) usuarios; 5) Docker y documentación en inglés → **2.0**. Las
   **automatizaciones** («si… entonces…», centradas en la malla, con la fase 6 de control desde la malla dentro) →

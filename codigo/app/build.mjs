@@ -1,6 +1,5 @@
-// Construye dos salidas desde index.src.html, en codigo/dist/:
-//  dist/app/      → PWA instalable (index.html autocontenido + sw.js + manifest + iconos)
-//  dist/preview.html → fragmento para la vista previa como artifact (sin service worker)
+// Builds the screen the server serves, from index.src.html, into codigo/dist/app/:
+// a self-contained index.html, plus sw.js, the manifest and the icons so it can be installed as an app.
 import { build } from "esbuild";
 import fs from "node:fs";
 import path from "node:path";
@@ -20,29 +19,27 @@ const res = await build({
   minify: true,
   write: false,
   legalComments: "none",
-  loader: { ".css": "text" }, // la hoja de Leaflet va como texto y se inserta al abrir el mapa
+  loader: { ".css": "text" }, // Leaflet's stylesheet goes in as text and is added when the map opens
   alias: {
     os: path.join(root, "src/shims/os.js"),
     path: path.join(root, "src/shims/path.js"),
     util: path.join(root, "src/shims/util.js"),
   },
+  // The core's engine decodes protobuf with @meshtastic/core, which expects a bit of Node.
   banner: { js: 'var process = globalThis.process || { env: {}, cwd: function () { return ""; } };' },
   logLevel: "warning",
 });
 const js = res.outputFiles[0].text.replace(/<\/script/gi, "<\\/script");
 const src = fs.readFileSync(path.join(root, "index.src.html"), "utf8");
 
-// Vista previa (el publicador añade doctype/head/body)
-fs.writeFileSync(path.join(out, "preview.html"), src.replace("<!--APP-->", () => `<script>${js}</script>`));
-
-// PWA: mover title/links/style al <head>
+// title, links and style go to <head>
 const headBits = [];
 let body = src
   .replace(/<title>[\s\S]*?<\/title>\n?/, (m) => (headBits.push(m.trim()), ""))
   .replace(/<meta name="claude:[^>]*>\n?/, "")
   .replace(/<link [^>]*>\n?/g, (m) => (headBits.push(m.trim()), ""))
   .replace(/<style>[\s\S]*?<\/style>\n?/, (m) => (headBits.push(m.trim()), ""));
-body = body.replace("<!--APP-->", () => `<script>window.__VIGIA_PWA = true;</script>\n<script>${js}</script>`);
+body = body.replace("<!--APP-->", () => `<script>${js}</script>`);
 const html = `<!doctype html>
 <html lang="es">
 <head>
@@ -50,7 +47,7 @@ const html = `<!doctype html>
 <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
 <meta name="theme-color" content="#e9eeec" media="(prefers-color-scheme: light)">
 <meta name="theme-color" content="#0e1513" media="(prefers-color-scheme: dark)">
-<meta name="description" content="Panel de telemetría y alarmas para nodos Meshtastic por Bluetooth, sin internet.">
+<meta name="description" content="Vigilancia 24/7 de una malla Meshtastic y dispositivos MQTT, en tu red.">
 <link rel="manifest" href="./manifest.webmanifest">
 <link rel="icon" href="./icon-192.png" type="image/png">
 <link rel="apple-touch-icon" href="./icon-192.png">
