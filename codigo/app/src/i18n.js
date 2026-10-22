@@ -12,8 +12,6 @@ const es = {
   "nav.nodes": "Nodos",
   "nav.map": "Mapa",
   "nav.automations": "Automatizaciones",
-  "nav.automations.short": "Autom.",
-  "nav.automations.rail": "Automati\u00adzaciones",
   "nav.settings": "Ajustes",
   "nav.alarmsBadge": (v) => (v.n === 1 ? "1 alarma sin atender" : `${v.n} alarmas sin atender`),
 
@@ -55,8 +53,6 @@ const en = {
   "nav.nodes": "Nodes",
   "nav.map": "Map",
   "nav.automations": "Automations",
-  "nav.automations.short": "Automate",
-  "nav.automations.rail": "Automa\u00adtions",
   "nav.settings": "Settings",
   "nav.alarmsBadge": (v) => (v.n === 1 ? "1 unattended alarm" : `${v.n} unattended alarms`),
 

@@ -1,6 +1,6 @@
 /* Talaia: a field instrument for watching a mesh. Sand and forest green by day; "night watch" after dark, with
    sand-coloured text that does not dazzle. One signal colour (blaze orange, as on forest markings) for alarms only.
-   Readings in a monospaced face, like an instrument's display. Fonts (Overpass and Overpass Mono, OFL) are
+   Readings with figures of equal width, like an instrument's display. Fonts (Overpass and Overpass Mono, OFL) are
    embedded by build.mjs, so the screen looks the same without internet. */
 :root {
   --bg: #e3dfcf;          /* sand */
@@ -25,10 +25,13 @@
   --f-body: "Overpass", "Segoe UI", system-ui, sans-serif;
   --f-display: var(--f-body);
   --f-mono: "Overpass Mono", ui-monospace, "SFMono-Regular", Menlo, Consolas, monospace;
+  /* Readings: Overpass with tabular figures (all digits the same width, so they line up like on an instrument);
+     not the monospaced face, which gives the decimal comma a whole digit's width ("31 , 4"). */
+  --f-num: var(--f-body);
   --r: 8px;
   --top-h: 56px;
-  --tab-h: 60px;
-  --rail-w: 88px;
+  --tab-h: 56px;
+  --rail-w: 64px;
   color-scheme: light;
 }
 @media (prefers-color-scheme: dark) {

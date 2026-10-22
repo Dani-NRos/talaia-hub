@@ -184,10 +184,11 @@ con Tasmota/ESPHome, Zigbee por zigbee2mqtt, ESPHome, Home Assistant…).
   1.20 y `mapa` ya no lleva los ficheros compilados de la app ligera ni sus herramientas. Con el nombre, `mapa` pasó a
   `talaia-hub` (22 oct. 2026) con su historia; el instalador descarga de aquí.
 - **Paso 3, rediseño** (Dani, 22 oct. 2026), en la rama **`rediseno`** (main sigue estable en el BMAX; Dani prueba
-  con `--rama rediseno` y vuelve a main cuando quiera; al acabar, pasa a main). Barra: Tablero, Alarmas, **Nodos**
-  (la lista de toda la malla con su buscador), Mapa, **Automatizaciones** («Llega en la 2.1») y Ajustes. En el
-  ordenador, las seis en la barra lateral (Ajustes abajo); en el móvil, cinco en la barra inferior y Ajustes en un
-  engranaje arriba a la derecha. Por partes: 3.1) quitar la app ligera de la pantalla (hecho: sin Bluetooth, cable,
+  con `--rama rediseno` y vuelve a main cuando quiera; al acabar, pasa a main). Barra, **solo iconos** y en este orden
+  (Dani, 22 oct. 2026): Tablero, Mapa, **Nodos** (la lista de toda la malla con su buscador), **Automatizaciones**
+  («Llega en la 2.1»), Alarmas; y Ajustes. El nombre de la sección va en la barra de arriba (y en el título y la
+  etiqueta de cada icono). En el ordenador, todo en la barra lateral (Ajustes abajo); en el móvil, cinco en la barra
+  inferior y Ajustes en un engranaje arriba a la derecha. Por partes: 3.1) quitar la app ligera de la pantalla (hecho: sin Bluetooth, cable,
   demo ni modo sin servidor; la prueba de peticiones pasó al núcleo); 3.2) esqueleto, estilo, logo, nombre «Talaia» e
   idioma (hecho: lo elige cada pantalla; por defecto, el del navegador, español también para ca/eu/gl); 3.3) cada
   sección en los dos idiomas; 3.4) lo que sale del servidor (malla, Home Assistant, registro) con un idioma del
@@ -195,8 +196,9 @@ con Tasmota/ESPHome, Zigbee por zigbee2mqtt, ESPHome, Home Assistant…).
 - Estilo (3.2): arena y verde bosque de día, «guardia nocturna» (fondo casi negro verdoso, texto color arena) de
   noche; oliva para lo que se pulsa; naranja de señal (#c2410c / #e2531b; de noche #ff6b2b) solo para alarmas.
   Letras Overpass y Overpass Mono (OFL, de npm @fontsource-variable, incrustadas por build.mjs: sin internet se ve
-  igual); las lecturas, en la monoespaciada. Overpass dibuja «·» sin anchura: ese carácter sale de otra letra
-  (unicode-range). Tema y idioma en Ajustes → «Esta pantalla». Los registros y alarmas están en Alarmas; el Tablero
+  igual). Las lecturas, en Overpass con cifras tabulares (todas igual de anchas), no en la monoespaciada: esa le da a la
+  coma decimal el ancho de una cifra y Dani las vio demasiado espaciadas. Overpass dibuja «·» sin anchura: ese carácter sale de otra letra
+  (unicode-range). Tema y idioma en Ajustes → «Esta pantalla». Ajustes, en una columna centrada (texto a la izquierda). Los registros y alarmas están en Alarmas; el Tablero
   tiene el aviso de alarmas y los paneles; el mapa es una sección (map.js ya no usa un diálogo).
 - Orden (1 y 2, hechos): 1) nombre y política de idioma; 2) congelar la webapp y reorganizar el repositorio;
   3) rediseño con los dos idiomas; 4) usuarios; 5) Docker y documentación en inglés → **2.0**. Las

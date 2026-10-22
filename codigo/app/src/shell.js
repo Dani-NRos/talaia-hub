@@ -13,7 +13,8 @@ export const NAV_ICONS = {
   settings: svg(`<path d="M12 15.2a3.2 3.2 0 1 0 0-6.4 3.2 3.2 0 0 0 0 6.4Z"/><path d="M19.4 13.5a7.6 7.6 0 0 0 0-3l2-1.6-2-3.4-2.4.9a7.5 7.5 0 0 0-2.6-1.5L14 2.4h-4l-.4 2.5A7.5 7.5 0 0 0 7 6.4l-2.4-.9-2 3.4 2 1.6a7.6 7.6 0 0 0 0 3l-2 1.6 2 3.4 2.4-.9a7.5 7.5 0 0 0 2.6 1.5l.4 2.5h4l.4-2.5a7.5 7.5 0 0 0 2.6-1.5l2.4.9 2-3.4-2-1.6Z"/>`),
 };
 
-export const VIEWS = ["dashboard", "alarms", "nodes", "map", "automations", "settings"];
+// In the order of the navigation (Dani, 22 Oct 2026). Settings: at the bottom of the rail, or the gear on phones.
+export const VIEWS = ["dashboard", "map", "nodes", "automations", "alarms", "settings"];
 const LABEL = { dashboard: "nav.dashboard", alarms: "nav.alarms", nodes: "nav.nodes", map: "nav.map", automations: "nav.automations", settings: "nav.settings" };
 
 const $ = (s) => document.querySelector(s);
@@ -49,15 +50,15 @@ function show() {
 }
 
 export function renderNav() {
+  // Icons only (the section's name is in the top bar); the name goes in the tooltip and for screen readers.
   const items = VIEWS.map((v) => {
-    const full = v === "automations" ? t("nav.automations.rail") : t(LABEL[v]);
-    const short = v === "automations" ? t("nav.automations.short") : t(LABEL[v]);
-    const badge = v === "alarms" ? `<span class="badge" aria-label="${t("nav.alarmsBadge", { n: alarms })}">${alarms || ""}</span>` : "";
-    return `<a class="nav-i" href="#/${v}" data-nav="${v}"${v === current ? ' aria-current="page"' : ""} title="${t(LABEL[v])}">${NAV_ICONS[v]}<span class="nav-short">${short}</span><span class="nav-full">${full}</span>${badge}</a>`;
+    const badge = v === "alarms" ? `<span class="badge" aria-hidden="true">${alarms || ""}</span>` : "";
+    const label = v === "alarms" && alarms ? `${t(LABEL[v])}: ${t("nav.alarmsBadge", { n: alarms })}` : t(LABEL[v]);
+    return `<a class="nav-i" href="#/${v}" data-nav="${v}"${v === current ? ' aria-current="page"' : ""} title="${label}" aria-label="${label}">${NAV_ICONS[v]}${badge}</a>`;
   });
   const nav = $("#nav");
   nav.setAttribute("aria-label", t("nav.label"));
-  nav.innerHTML = `<a class="nav-brand" href="#/dashboard">${logoSVG()}<span>${t("app.name")}</span></a>${items.join("")}`;
+  nav.innerHTML = `<a class="nav-brand" href="#/dashboard" title="${t("app.name")}" aria-label="${t("app.name")}">${logoSVG()}</a>${items.join("")}`;
 }
 
 /** Unattended alarms: badge on Alarms, the lamp of the mark lit, and the count in the tab. */
@@ -67,8 +68,7 @@ export function setAlarms(n) {
   document.title = n ? t("title.alarm", { n }) : t("app.name");
   if (n === alarms) return;
   alarms = n;
-  const b = $("#nav .badge");
-  if (b) { b.textContent = n || ""; b.setAttribute("aria-label", t("nav.alarmsBadge", { n })); }
+  renderNav();
 }
 
 /* theme: "auto" follows the system; "light" (day) and "dark" (night watch) are fixed */
