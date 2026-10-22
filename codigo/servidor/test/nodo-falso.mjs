@@ -79,6 +79,12 @@ export class NodoFalso {
     this.paquete({ from, to: 0xffffffff, payloadVariant: { case: "decoded", value: create(M.DataSchema, { portnum: PORT.TELEMETRY_APP, payload: toBinary(TEL.TelemetrySchema, tel) }) } });
   }
 
+  /** Posición de un nodo, a todos (grados; precisión completa). */
+  posicion(from, lat, lon) {
+    const pos = create(M.PositionSchema, { latitudeI: Math.round(lat * 1e7), longitudeI: Math.round(lon * 1e7), time: Math.floor(Date.now() / 1000), precisionBits: 32 });
+    this.paquete({ from, to: 0xffffffff, payloadVariant: { case: "decoded", value: create(M.DataSchema, { portnum: PORT.POSITION_APP, payload: toBinary(M.PositionSchema, pos) }) } });
+  }
+
   /** Paquetes de malla que le han mandado (sin la petición de configuración). */
   paquetes(port = null) {
     return this.recibido.filter((m) => m.payloadVariant.case === "packet").map((m) => m.payloadVariant.value)

@@ -10,7 +10,7 @@ import { fileURLToPath } from "node:url";
 
 const REPO = fileURLToPath(new URL("..", import.meta.url)).replace(/\/$/, "");
 const pw = createRequire(process.env.PLAYWRIGHT_DIR || "/opt/npm-tools/node_modules/")("playwright");
-const { NodoFalso, ME, CASETA } = await import(`${REPO}/servidor/test/nodo-falso.mjs`);
+const { NodoFalso, ME, CASETA, AVISADO } = await import(`${REPO}/servidor/test/nodo-falso.mjs`);
 
 const args = process.argv.slice(2);
 const out = args.find((a) => !a.startsWith("--") && !["dashboard", "alarms", "nodes", "map", "automations", "settings"].includes(a)) || "vistazo";
@@ -37,6 +37,11 @@ await orden({ orden: "vigilar", num: CASETA });
 await orden({ orden: "vigilar", num: ME });
 for (const [t, h] of [[22.1, 63], [23.4, 61], [24.0, 60], [26.2, 58]]) { nodo.ambiente(CASETA, { temperature: t, relativeHumidity: h }); await sleep(150); }
 nodo.ambiente(ME, { temperature: 19.6, relativeHumidity: 55, barometricPressure: 1014.8 });
+nodo.ambiente(AVISADO, { temperature: 17.2, relativeHumidity: 70 });
+// Around Alzira, for the map.
+nodo.posicion(ME, 39.1513, -0.4352);
+nodo.posicion(CASETA, 39.1604, -0.4521);
+nodo.posicion(AVISADO, 39.1388, -0.4189);
 await orden({ orden: "limite", num: CASETA, metrica: "temperature", lado: "max", valor: 30 });
 nodo.ambiente(CASETA, { temperature: 31.4, relativeHumidity: 57 });
 await sleep(800);

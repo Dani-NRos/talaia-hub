@@ -1,4 +1,4 @@
-// Mapa a pantalla completa: la última lectura de cada nodo con ubicación, filtrada por sensor y antigüedad.
+// Map section: the latest reading of each node with a location, filtered by sensor and age.
 // Leaflet va dentro de la app (sin CDN) para que abra sin internet; el fondo son teselas de OpenStreetMap.
 import { map as lmap, tileLayer, marker, divIcon, latLng, latLngBounds, control, Control, DomUtil, DomEvent, layerGroup, circleMarker, circle, polyline, point } from "leaflet/dist/leaflet-src.esm.js";
 import leafletCss from "leaflet/dist/leaflet.css";
@@ -6,6 +6,7 @@ import { metricMeta, fmtWithUnit, fmtNum } from "@vigia/nucleo/metrics.js";
 import { precisionM, fmtDist } from "@vigia/nucleo/geo.js";
 import { AGES, ageMs, metricCounts, defaultMetric, mapPoints, declutter, ageOpacity, pillText, scaleFor, inkFor } from "./mapdata.js";
 import { snrQuality } from "@vigia/nucleo/route.js";
+import { t, getLang } from "./i18n.js";
 
 const SPAIN = { center: [40.0, -3.7], zoom: 6 };
 
@@ -29,8 +30,23 @@ export function createMapView(ctx) {
   let shown = { metric: null, points: [], others: [] };
   let route = null, routeLayer = null, routeEl = null; // ruta de un traceroute: { to, fwd, back }
 
-  selA.innerHTML = AGES.map((a) => `<option value="${a.key}">${a.label}</option>`).join("");
-  selA.value = st.age;
+  let labelled = null; // language of the texts already on the map
+  /** Texts that are drawn once (controls, the age selector): again when the language changes. */
+  function labels() {
+    if (labelled === getLang()) return;
+    labelled = getLang();
+    selA.innerHTML = AGES.map((a) => `<option value="${a.key}">${ctx.esc(t(`map.age.${a.key}`))}</option>`).join("");
+    selA.value = st.age;
+    document.querySelector("label[for=mapMetric]").textContent = t("map.sensor");
+    document.querySelector("label[for=mapAge]").textContent = t("map.age");
+    if (!m) return;
+    for (const [sel, key] of [[".leaflet-control-zoom-in", "map.zoomIn"], [".leaflet-control-zoom-out", "map.zoomOut"], [".map-fit", "map.fit"]]) {
+      const el = box.querySelector(sel);
+      if (el) { el.title = t(key); el.setAttribute("aria-label", t(key)); }
+    }
+    if (offEl) offEl.textContent = t("map.offline");
+  }
+  labels();
   const save = () => ctx.save({ metric: st.metric, age: st.age });
   selM.addEventListener("change", () => { st.metric = selM.value || null; save(); update(); });
   selA.addEventListener("change", () => { st.age = selA.value; save(); update(); });
@@ -42,7 +58,7 @@ export function createMapView(ctx) {
     document.head.prepend(css); // antes que los estilos de la app, para que estos manden
     m = lmap(box, { zoomControl: false, worldCopyJump: true, minZoom: 3 });
     m.attributionControl.setPrefix('<a href="https://leafletjs.com" target="_blank" rel="noopener">Leaflet</a>');
-    control.zoom({ position: "topright", zoomInTitle: "Acercar", zoomOutTitle: "Alejar" }).addTo(m);
+    control.zoom({ position: "topright", zoomInTitle: t("map.zoomIn"), zoomOutTitle: t("map.zoomOut") }).addTo(m);
     // crossOrigin: las teselas llegan con CORS y el service worker podrá guardarlas como respuestas normales.
     tileLayer("https://tile.openstreetmap.org/{z}/{x}/{y}.png", {
       maxZoom: 19,
@@ -56,8 +72,8 @@ export function createMapView(ctx) {
         const b = DomUtil.create("a", "map-fit", wrap);
         b.href = "#";
         b.setAttribute("role", "button");
-        b.title = "Ver todos los nodos";
-        b.setAttribute("aria-label", "Ver todos los nodos");
+        b.title = t("map.fit");
+        b.setAttribute("aria-label", t("map.fit"));
         b.innerHTML = '<svg viewBox="0 0 24 24" aria-hidden="true"><path d="M4 9V4h5M20 9V4h-5M4 15v5h5M20 15v5h-5" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/></svg>';
         DomEvent.disableClickPropagation(wrap);
         DomEvent.on(b, "click", (e) => { DomEvent.preventDefault(e); fit(true); });
@@ -82,7 +98,7 @@ export function createMapView(ctx) {
     const Offline = Control.extend({
       onAdd() {
         offEl = DomUtil.create("div", "map-off");
-        offEl.textContent = "Sin conexión: el fondo solo sale en las zonas que ya has visto con internet.";
+        offEl.textContent = t("map.offline");
         offEl.hidden = navigator.onLine;
         return offEl;
       },
@@ -128,17 +144,17 @@ export function createMapView(ctx) {
     let h = `<div class="mpop"><div class="mpop-h"><span class="tag sm">${esc(n.short)}</span><strong>${esc(n.long)}</strong></div>`;
     if (p) {
       h += `<p class="mpop-v">${esc(fmtWithUnit(metric, p.v))} <span>${esc(meta.label)}</span></p>`;
-      h += `<p class="meta">Medida ${esc(ago(p.t))} · ${esc(stamp(p.t))}</p>`;
-      if (p.far) h += `<p class="mpop-far">Medida antes de llegar a este sitio: en otro lugar o por el camino.</p>`;
+      h += `<p class="meta">${esc(t("map.measured", { ago: ago(p.t), stamp: stamp(p.t) }))}</p>`;
+      if (p.far) h += `<p class="mpop-far">${esc(t("map.far"))}</p>`;
     } else if (meta) {
-      h += `<p class="meta">Sin ${esc(meta.label.toLowerCase())} en este periodo.</p>`;
+      h += `<p class="meta">${esc(t("map.noneMetric", { label: meta.label.toLowerCase() }))}</p>`;
     }
     if (n.pos) {
       const pm = precisionM(n.pos.bits);
-      const prec = pm ? ` ±${fmtDist(pm)}` : n.pos.bits >= 32 ? " exacta" : "";
-      h += `<p class="meta">Ubicación${esc(prec)} · ${esc(ago(n.pos.t))}</p>`;
+      const prec = pm ? ` ±${fmtDist(pm)}` : n.pos.bits >= 32 ? t("map.exact") : "";
+      h += `<p class="meta">${esc(t("map.location", { prec, ago: ago(n.pos.t) }))}</p>`;
     }
-    h += `<button type="button" class="mini" data-open="${num}">Ver ficha</button></div>`;
+    h += `<button type="button" class="mini" data-open="${num}">${esc(t("map.open"))}</button></div>`;
     return h;
   }
 
@@ -175,15 +191,16 @@ export function createMapView(ctx) {
       h += `<div class="ml-bar" style="background:linear-gradient(90deg,${sc.stops.join(",")})"></div>`;
       h += `<div class="ml-ticks"><span>${sc.kind === "div" ? "≤ " : ""}${lab(sc.lo)}</span>${sc.kind === "div" ? `<span>${lab(sc.mid)}</span>` : ""}<span>${sc.kind === "div" ? "≥ " : ""}${lab(sc.hi)}</span></div>`;
     }
-    if (anyFar) h += `<p class="ml-far"><i></i>Medida en otro sitio</p>`;
-    if (anyRing) h += `<p class="ml-ring"><i></i>Posición aproximada</p>`;
-    h += `<p class="ml-age">Más pálido, lectura más antigua</p>`;
+    if (anyFar) h += `<p class="ml-far"><i></i>${ctx.esc(t("map.lg.far"))}</p>`;
+    if (anyRing) h += `<p class="ml-ring"><i></i>${ctx.esc(t("map.lg.ring"))}</p>`;
+    h += `<p class="ml-age">${ctx.esc(t("map.lg.age"))}</p>`;
     return h;
   }
 
   /* ── pintar ── */
   function update() {
     if (!m || !showing()) return;
+    labels();
     if (route) return updateRoute();
     routeMode(false);
     const { esc } = ctx;
@@ -198,7 +215,7 @@ export function createMapView(ctx) {
     if (metric && !counts.has(metric)) opts.unshift([metric, 0]);
     const optHTML = opts.length
       ? opts.map(([k, c]) => `<option value="${esc(k)}"${k === metric ? " selected" : ""}>${esc(metricMeta(k).label)} (${c})</option>`).join("")
-      : `<option value="">Sin sensores</option>`;
+      : `<option value="">${esc(t("map.noSensors"))}</option>`;
     if (selM.dataset.h !== optHTML) { selM.innerHTML = optHTML; selM.dataset.h = optHTML; }
     selM.disabled = !opts.length;
 
@@ -232,17 +249,17 @@ export function createMapView(ctx) {
     for (const [k, it] of markers) if (!keep.has(k)) { it.mk.remove(); markers.delete(k); }
     spread();
 
-    countEl.textContent = points.length ? `${points.length} ${points.length === 1 ? "nodo" : "nodos"}` : "";
+    countEl.textContent = points.length ? t(points.length === 1 ? "map.count1" : "map.count", { n: points.length }) : "";
     if (legendEl) {
       const h = legendHTML(metric, sc, points.some((p) => p.far), [...points, ...others].some((q) => q.acc), points.length);
       if (legendEl.dataset.h !== h) { legendEl.innerHTML = h; legendEl.dataset.h = h; }
       legendEl.hidden = !h;
     }
-    const period = AGES.find((a) => a.key === st.age)?.label.toLowerCase() || "";
+    const period = t(`map.age.${st.age}`).toLowerCase();
     let msg = "";
-    if (!nodes.some((n) => n.pos)) msg = "Aún no hay nodos con ubicación. Aparecerán cuando el receptor oiga sus posiciones.";
-    else if (!metric) msg = `Ningún nodo con ubicación ha mandado telemetría (${period}).`;
-    else if (!points.length) msg = `Ningún nodo con ubicación ha mandado ${metricMeta(metric).label.toLowerCase()} (${period}).`;
+    if (!nodes.some((n) => n.pos)) msg = t("map.empty.noPos");
+    else if (!metric) msg = t("map.empty.noTelemetry", { period });
+    else if (!points.length) msg = t("map.empty.noMetric", { label: metricMeta(metric).label.toLowerCase(), period });
     emptyEl.textContent = msg;
     emptyEl.hidden = !msg || !!route;
     drawRoute();
@@ -283,7 +300,7 @@ export function createMapView(ctx) {
       if (q.acc) circle([q.lat, q.lon], { radius: q.acc, pane: "precision", interactive: false, color: "#152320", weight: 1.5, opacity: 0.45, dashArray: "5 5", fillColor: "#66726e", fillOpacity: 0.12 }).addTo(rings);
     }
     for (const [k, it] of markers) if (!keep.has(k)) { it.mk.remove(); markers.delete(k); }
-    countEl.textContent = "Ruta";
+    countEl.textContent = t("map.route");
     routeMode(true);
     if (legendEl) legendEl.hidden = true;
     emptyEl.hidden = true;
@@ -331,10 +348,10 @@ export function createMapView(ctx) {
     if (both) drawLeg(route.back, { color: "#7b3fa0", weight: 3, opacity: 0.85, dashArray: "9 7" }, false);
     drawLeg(route.fwd, { color: "#0d366b", weight: 4, opacity: 0.9 }, true);
     const noPos = [...routeNodes()].filter((num) => !posOf(num)).length;
-    let h = `<div class="mr-h"><strong>Ruta a ${esc(ctx.hopName(route.to))}</strong><button type="button" class="mr-x" data-route-off aria-label="Quitar la ruta del mapa">×</button></div>`;
-    h += `<p><i class="mr-fwd"></i>Ida ${esc(ctx.legHops(route.fwd))}${both ? "" : route.back ? ", y vuelve igual" : ""}</p>`;
-    if (both) h += `<p><i class="mr-back"></i>Vuelta ${esc(ctx.legHops(route.back))}, por otro camino</p>`;
-    if (noPos) h += `<p class="mr-miss"><i class="mr-gap"></i>${noPos} ${noPos === 1 ? "nodo del camino sin ubicación" : "nodos del camino sin ubicación"}</p>`;
+    let h = `<div class="mr-h"><strong>${esc(t("map.routeTo", { name: ctx.hopName(route.to) }))}</strong><button type="button" class="mr-x" data-route-off aria-label="${esc(t("map.routeOff"))}">×</button></div>`;
+    h += `<p><i class="mr-fwd"></i>${esc(t("map.fwd", { hops: ctx.legHops(route.fwd) }))}${both ? "" : route.back ? esc(t("map.backSame")) : ""}</p>`;
+    if (both) h += `<p><i class="mr-back"></i>${esc(t("map.back", { hops: ctx.legHops(route.back) }))}</p>`;
+    if (noPos) h += `<p class="mr-miss"><i class="mr-gap"></i>${esc(t(noPos === 1 ? "map.noPos1" : "map.noPos", { n: noPos }))}</p>`;
     if (routeEl.dataset.h !== h) { routeEl.innerHTML = h; routeEl.dataset.h = h; }
     routeEl.hidden = false;
   }

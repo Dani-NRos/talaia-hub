@@ -7,10 +7,10 @@ const MIN = 60000, HOUR = 60 * MIN, DAY = 24 * HOUR;
 
 /* ── periodos del filtro de antigüedad ── */
 export const AGES = [
-  { key: "3h", label: "Últimas 3 h", ms: 3 * HOUR },
-  { key: "24h", label: "Últimas 24 h", ms: DAY },
-  { key: "7d", label: "Últimos 7 días", ms: 7 * DAY },
-  { key: "all", label: "Todo", ms: Infinity },
+  { key: "3h", ms: 3 * HOUR }, // names in i18n.js: map.age.3h…
+  { key: "24h", ms: DAY },
+  { key: "7d", ms: 7 * DAY },
+  { key: "all", ms: Infinity },
 ];
 export const ageMs = (key) => (AGES.find((a) => a.key === key) || AGES[1]).ms;
 

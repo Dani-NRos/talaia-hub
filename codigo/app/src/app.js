@@ -98,7 +98,7 @@ function patchAskStatus(num) {
 /* ───────────── ruta por la malla (traceroute) ───────────── */
 function legHops(leg) {
   const k = relays(leg).length;
-  return k === 0 ? "directa" : `por ${k} ${k === 1 ? "nodo" : "nodos"}`;
+  return k === 0 ? tr("route.direct") : tr(k === 1 ? "route.via1" : "route.via", { n: k });
 }
 const fmtSnr = (s) => `${fmtNum(s, Number.isInteger(s) ? 0 : Number.isInteger(s * 2) ? 1 : 2)} dB`;
 function legHTML(title, leg, sf) {
