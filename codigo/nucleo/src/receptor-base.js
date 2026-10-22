@@ -14,6 +14,8 @@
 //                        abrir el puerto) y hay que repetirla
 //   releaseTarget()      al desconectar a mano (la app suelta el bloqueo entre ventanas)
 import { MeshDevice, Types, Protobuf } from "@meshtastic/core";
+import { tx } from "./idioma.js";
+import { fmtNum } from "./metrics.js";
 
 const ST = Types.DeviceStatusEnum;
 export const BACKOFF_S = [2, 5, 10, 20, 30, 60];
@@ -107,7 +109,7 @@ export class ReceptorBase {
       for (const ms of [6000, 14000]) {
         setTimeout(() => {
           if (mesh !== this.mesh || this.state !== "configuring" || this.cfgPackets > 0) return;
-          this.diag("El nodo aún no contesta por el cable; se le vuelve a pedir la configuración");
+          this.diag(tx("diag.cableRetry"));
           mesh.configure().catch(() => {});
         }, ms);
       }
@@ -144,7 +146,7 @@ export class ReceptorBase {
       this.fails = 0;
       this.lastKind = null;
       this.everReady = true;
-      this.diag(`Receptor listo: ${this.cfgPackets} paquetes en ${((Date.now() - this.cfgStart) / 1000).toFixed(1)} s`);
+      this.diag(tx("diag.ready", { n: this.cfgPackets, s: fmtNum((Date.now() - this.cfgStart) / 1000, 1) }));
       this._status("ready");
       this.h.onReady?.();
     });
@@ -176,7 +178,7 @@ export class ReceptorBase {
     this.mesh = null;
     this._closeLink();
     const detail = `${err.causeName || ""} ${err.message || ""}`.trim();
-    this.diag(`Fallo en fase «${err.stage}» (${kind}): ${detail}`, { kind, stage: err.stage });
+    this.diag(tx("diag.fail", { stage: err.stage, kind, detail }), { kind, stage: err.stage });
     if (wasReady) {
       this.fails = 0;
       this.h.onLost?.(err.stage, true);

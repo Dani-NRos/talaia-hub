@@ -21,6 +21,8 @@ import { metricMeta } from "@vigia/nucleo/metrics.js";
 import { hexId, trendKey, esAlarmaMqtt } from "@vigia/nucleo/motor.js";
 import { HOUR, isNum } from "@vigia/nucleo/textos.js";
 import { esClaveMqtt } from "@vigia/nucleo/mqtt-datos.js";
+import { tx } from "@vigia/nucleo/idioma.js";
+import "./textos.js";
 
 const VERSION = JSON.parse(fs.readFileSync(new URL("../package.json", import.meta.url), "utf8")).version;
 const REPO = "https://github.com/Dani-NRos/talaia-hub";
@@ -51,13 +53,14 @@ export function alarmasPosibles(num, w, S) {
   for (const [k, r] of Object.entries(w?.rules || {})) {
     if (esClaveMqtt(k)) continue; // los datos MQTT no van a Home Assistant (los lee él de su broker)
     const l = metricMeta(k).label;
-    if (isNum(r.max)) out.push({ slug: `${k}_alta`, key: `${num}|${k}|high`, nombre: `${l} alta` });
-    if (isNum(r.min)) out.push({ slug: `${k}_baja`, key: `${num}|${k}|low`, nombre: `${l} baja` });
-    if (r.trend) out.push({ slug: `${k}_cambio_rapido`, key: trendKey(num, k), nombre: `${l}: cambio rápido` });
+    // The slugs are identifiers in Home Assistant: they never change (the names do, with the server's language).
+    if (isNum(r.max)) out.push({ slug: `${k}_alta`, key: `${num}|${k}|high`, nombre: tx("s.ha.high", { label: l }) });
+    if (isNum(r.min)) out.push({ slug: `${k}_baja`, key: `${num}|${k}|low`, nombre: tx("s.ha.low", { label: l }) });
+    if (r.trend) out.push({ slug: `${k}_cambio_rapido`, key: trendKey(num, k), nombre: tx("s.ha.trend", { label: l }) });
   }
   const lim = isNum(w?.offlineMin) ? w.offlineMin : S.settings.defaultOfflineMin;
-  if (lim) out.push({ slug: "sin_senal", key: `${num}||offline`, nombre: "Sin señal" });
-  if (w?.fence) out.push({ slug: "fuera_de_su_sitio", key: `${num}||moved`, nombre: "Fuera de su sitio" });
+  if (lim) out.push({ slug: "sin_senal", key: `${num}||offline`, nombre: tx("s.ha.offline") });
+  if (w?.fence) out.push({ slug: "fuera_de_su_sitio", key: `${num}||moved`, nombre: tx("s.ha.moved") });
   return out;
 }
 
@@ -83,10 +86,12 @@ export function crearSalidaHA({ S, motor, eventos, registro }, conexion, { base 
   let ultimoLog = S.log[0] || null;
 
   const disponibilidad = { availability_topic: T.disponible, payload_available: "online", payload_not_available: "offline" };
-  const origen = { name: "Vigía servidor", sw: VERSION, url: REPO };
-  const dispServidor = { identifiers: ["vigia_servidor"], name: "Vigía servidor", manufacturer: "Vigía Mesh", model: "Vigía servidor", sw_version: VERSION, configuration_url: REPO };
+  // Names, in the server's language (built each time: they follow a change of language). The identifiers
+  // («vigia_…») stay as they were, so Home Assistant keeps the same devices and their history.
+  const origen = { name: "Talaia Hub", sw: VERSION, url: REPO };
+  const dispServidor = () => ({ identifiers: ["vigia_servidor"], name: "Talaia", manufacturer: "Talaia Hub", model: tx("s.ha.model"), sw_version: VERSION, configuration_url: REPO });
   const dispNodo = (num, n) => ({
-    identifiers: [`vigia_${idNodo(num)}`], name: `Vigía · ${n?.alias || n?.long || hexId(num)}`, manufacturer: "Meshtastic",
+    identifiers: [`vigia_${idNodo(num)}`], name: `Talaia · ${n?.alias || n?.long || hexId(num)}`, manufacturer: "Meshtastic",
     ...(n?.hw ? { model: n.hw } : {}), via_device: "vigia_servidor",
   });
   // Solo nodos Meshtastic: los paneles sin nodo (números negativos) son datos MQTT, que no van a Home Assistant.
@@ -97,15 +102,16 @@ export function crearSalidaHA({ S, motor, eventos, registro }, conexion, { base 
     const out = new Map();
     const pon = (tipo, nodo, ent, cfg) => out.set(T.config(tipo, nodo, ent), JSON.stringify({ ...cfg, ...disponibilidad, origin: origen }));
     // El servidor.
-    const sv = (ent, cfg) => ({ unique_id: `vigia_servidor_${ent}`, device: dispServidor, ...cfg });
-    pon("binary_sensor", "vigia_servidor", "receptor", sv("receptor", { name: "Receptor conectado", device_class: "connectivity", state_topic: T.servidor, value_template: "{{ value_json.receptor }}" }));
-    pon("binary_sensor", "vigia_servidor", "hay_alarmas", sv("hay_alarmas", { name: "Alarmas sin atender", device_class: "problem", state_topic: T.servidor, value_template: "{{ 'ON' if value_json.sin_atender > 0 else 'OFF' }}" }));
-    pon("sensor", "vigia_servidor", "sin_atender", sv("sin_atender", { name: "Número de alarmas sin atender", state_topic: T.servidor, value_template: "{{ value_json.sin_atender }}", state_class: "measurement", icon: "mdi:alarm-light" }));
-    pon("sensor", "vigia_servidor", "activas", sv("activas", { name: "Alarmas activas", state_topic: T.servidor, value_template: "{{ value_json.activas }}", state_class: "measurement", icon: "mdi:alarm-light-outline" }));
-    pon("sensor", "vigia_servidor", "oidos", sv("oidos", { name: "Nodos oídos en la última hora", state_topic: T.servidor, value_template: "{{ value_json.oidos }}", unit_of_measurement: "nodos", state_class: "measurement", icon: "mdi:radio-tower" }));
-    pon("sensor", "vigia_servidor", "aviso_malla", sv("aviso_malla", { name: "Último aviso por la malla", state_topic: T.servidor, value_template: "{{ value_json.aviso.texto }}", json_attributes_topic: T.servidor, json_attributes_template: "{{ value_json.aviso | tojson }}", icon: "mdi:message-alert" }));
-    pon("event", "vigia_servidor", "alarmas", sv("alarmas", { name: "Alarmas", state_topic: T.evento, event_types: ["alarma", "resuelta", "vista"], icon: "mdi:bell-alert" }));
-    pon("button", "vigia_servidor", "enterado_todas", sv("enterado_todas", { name: "Enterado todas", command_topic: T.todas, payload_press: "PRESS", icon: "mdi:check-all" }));
+    const dsv = dispServidor();
+    const sv = (ent, cfg) => ({ unique_id: `vigia_servidor_${ent}`, device: dsv, ...cfg });
+    pon("binary_sensor", "vigia_servidor", "receptor", sv("receptor", { name: tx("s.ha.receiver"), device_class: "connectivity", state_topic: T.servidor, value_template: "{{ value_json.receptor }}" }));
+    pon("binary_sensor", "vigia_servidor", "hay_alarmas", sv("hay_alarmas", { name: tx("s.ha.anyAlarm"), device_class: "problem", state_topic: T.servidor, value_template: "{{ 'ON' if value_json.sin_atender > 0 else 'OFF' }}" }));
+    pon("sensor", "vigia_servidor", "sin_atender", sv("sin_atender", { name: tx("s.ha.unattended"), state_topic: T.servidor, value_template: "{{ value_json.sin_atender }}", state_class: "measurement", icon: "mdi:alarm-light" }));
+    pon("sensor", "vigia_servidor", "activas", sv("activas", { name: tx("s.ha.active"), state_topic: T.servidor, value_template: "{{ value_json.activas }}", state_class: "measurement", icon: "mdi:alarm-light-outline" }));
+    pon("sensor", "vigia_servidor", "oidos", sv("oidos", { name: tx("s.ha.heard"), state_topic: T.servidor, value_template: "{{ value_json.oidos }}", unit_of_measurement: tx("s.ha.nodes"), state_class: "measurement", icon: "mdi:radio-tower" }));
+    pon("sensor", "vigia_servidor", "aviso_malla", sv("aviso_malla", { name: tx("s.ha.lastAlert"), state_topic: T.servidor, value_template: "{{ value_json.aviso.texto }}", json_attributes_topic: T.servidor, json_attributes_template: "{{ value_json.aviso | tojson }}", icon: "mdi:message-alert" }));
+    pon("event", "vigia_servidor", "alarmas", sv("alarmas", { name: tx("s.ha.alarms"), state_topic: T.evento, event_types: ["alarma", "resuelta", "vista"], icon: "mdi:bell-alert" }));
+    pon("button", "vigia_servidor", "enterado_todas", sv("enterado_todas", { name: tx("s.ha.ackAll"), command_topic: T.todas, payload_press: "PRESS", icon: "mdi:check-all" }));
     // Los nodos vigilados.
     for (const num of vigilados()) {
       const n = S.nodes.get(num), id = idNodo(num), nodo = `vigia_${id}`, dev = dispNodo(num, n);
@@ -119,15 +125,15 @@ export function crearSalidaHA({ S, motor, eventos, registro }, conexion, { base 
           ...(DIAGNOSTICO.has(k) ? { entity_category: "diagnostic" } : {}),
         }));
       }
-      pon("sensor", nodo, "oido", nd("oido", { name: "Oído por última vez", device_class: "timestamp", value_template: "{{ value_json.oido }}", entity_category: "diagnostic" }));
-      pon("sensor", nodo, "saltos", nd("saltos", { name: "Saltos", value_template: "{{ value_json.saltos }}", state_class: "measurement", entity_category: "diagnostic", icon: "mdi:transit-connection-variant" }));
+      pon("sensor", nodo, "oido", nd("oido", { name: tx("s.ha.lastHeard"), device_class: "timestamp", value_template: "{{ value_json.oido }}", entity_category: "diagnostic" }));
+      pon("sensor", nodo, "saltos", nd("saltos", { name: tx("s.ha.hops"), value_template: "{{ value_json.saltos }}", state_class: "measurement", entity_category: "diagnostic", icon: "mdi:transit-connection-variant" }));
       pon("sensor", nodo, "snr", nd("snr", { name: "SNR", value_template: "{{ value_json.snr }}", unit_of_measurement: "dB", state_class: "measurement", suggested_display_precision: 1, entity_category: "diagnostic", icon: "mdi:signal" }));
       for (const a of alarmasPosibles(num, S.cfg.watched[num], S)) {
         pon("binary_sensor", nodo, `alarma_${a.slug}`, nd(`alarma_${a.slug}`, {
           name: a.nombre, device_class: "problem", value_template: `{{ value_json.a.${a.slug} }}`,
           json_attributes_topic: T.nodo(num), json_attributes_template: `{{ value_json.d.${a.slug} | tojson }}`,
         }));
-        pon("button", nodo, `enterado_${a.slug}`, { unique_id: `vigia_${id}_enterado_${a.slug}`, device: dev, name: `Enterado · ${a.nombre}`, command_topic: T.enterado(num), payload_press: a.slug, icon: "mdi:check" });
+        pon("button", nodo, `enterado_${a.slug}`, { unique_id: `vigia_${id}_enterado_${a.slug}`, device: dev, name: tx("s.ha.ack", { name: a.nombre }), command_topic: T.enterado(num), payload_press: a.slug, icon: "mdi:check" });
       }
     }
     return out;
@@ -265,14 +271,14 @@ export function crearSalidaHA({ S, motor, eventos, registro }, conexion, { base 
       const a = alarmasPosibles(num, S.cfg.watched[num], S).find((x) => x.slug === slug);
       const al = a && S.active.get(a.key);
       if (!al || al.acked) return;
-      registro.info(`Home Assistant: Enterado de «${motor.alarmTitle(al)}»`);
+      registro.info(tx("s.j.haAck", { title: motor.alarmTitle(al) }));
       motor.ack(a.key);
     }),
     conexion.suscribir(T.todas, () => {
       // Todas las que ve Home Assistant: las de los datos MQTT no le llegan, así que tampoco las da por vistas.
       const suyas = deNodos().filter((x) => !x.acked);
       if (!suyas.length) return;
-      registro.info("Home Assistant: Enterado todas");
+      registro.info(tx("s.j.haAckAll"));
       for (const x of suyas) motor.ack(x.key);
     }),
     // HA avisa así al arrancar: hay que volver a contarle todo (no siempre guarda lo retenido).

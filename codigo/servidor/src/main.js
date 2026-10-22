@@ -14,7 +14,7 @@ const args = process.argv.slice(2);
 const opcion = (n) => { const i = args.indexOf(n); return i >= 0 ? args[i + 1] : undefined; };
 
 if (args.includes("--version")) {
-  console.log(`Vigía servidor ${VERSION} (Node ${process.versions.node})`);
+  console.log(`Talaia Hub ${VERSION} (Node ${process.versions.node})`);
   process.exit(0);
 }
 
@@ -28,7 +28,7 @@ if (args.includes("--puertos")) {
 // node:sqlite llega en Node 22.13 (sin opciones) y en 23.4.
 const [maj, min] = process.versions.node.split(".").map(Number);
 if (maj < 22 || (maj === 22 && min < 13)) {
-  console.error(`Vigía servidor necesita Node 22.13 o más reciente (tienes ${process.versions.node}). El instalador pone uno en /opt/vigia/node.`);
+  console.error(`Talaia Hub necesita Node 22.13 o más reciente (tienes ${process.versions.node}). El instalador pone uno en /opt/vigia/node.`);
   process.exit(1);
 }
 // Aviso de «SQLite es experimental» en cada arranque: no aporta nada en el diario.
@@ -49,7 +49,7 @@ process.on("unhandledRejection", (e) => registro.error(`Error sin atender: ${e?.
 // Una excepción sin atender deja el estado en duda: se apunta y se sale; systemd vuelve a arrancar en 5 s.
 process.on("uncaughtException", (e) => { registro.error(`Excepción sin atender, se reinicia: ${e?.stack || e}`); process.exit(70); });
 
-registro.info(`Vigía servidor ${VERSION} · Node ${process.versions.node} · configuración: ${fs.existsSync(rutaConfig) ? rutaConfig : "por defecto"} · datos: ${config.datos}`);
+registro.info(`Talaia Hub ${VERSION} · Node ${process.versions.node} · configuración: ${fs.existsSync(rutaConfig) ? rutaConfig : "por defecto"} · datos: ${config.datos}`);
 const { crearVigia } = await import("./vigia.js");
 let vigia;
 try {
@@ -61,22 +61,23 @@ try {
 }
 vigia.arrancar();
 const { crearWeb, direcciones } = await import("./web.js");
+const { tx } = await import("@vigia/nucleo/idioma.js"); // from here on, in the server's language (read by crearVigia)
 const web = crearWeb(vigia, config, registro);
 try {
   const puerto = await web.escuchar();
   const dirs = direcciones(puerto);
-  registro.info(`Pantalla: ${dirs.length ? dirs.join(" · ") : `puerto ${puerto}`}`);
+  registro.info(tx("s.j.screen", { where: dirs.length ? dirs.join(" · ") : tx("s.j.port", { n: puerto }) }));
 } catch (e) {
-  registro.error(`No se pudo abrir la pantalla en el puerto ${config.web.puerto}: ${e.code === "EADDRINUSE" ? "otro programa ya lo usa; cambia web.puerto en la configuración" : e.message}`);
+  registro.error(tx("s.j.screenFail", { n: config.web.puerto, why: e.code === "EADDRINUSE" ? tx("s.j.portBusy") : e.message }));
 }
 
 let parando = false;
 async function parar(senal) {
   if (parando) return;
   parando = true;
-  registro.info(`Parando (${senal})…`);
+  registro.info(tx("s.j.stopping", { signal: senal }));
   const t = setTimeout(() => process.exit(0), 5000);
-  try { await web.cerrar(); await vigia.detener(); } catch (e) { registro.error(`Al parar: ${e.message}`); }
+  try { await web.cerrar(); await vigia.detener(); } catch (e) { registro.error(tx("s.j.stopFail", { e: e.message })); }
   clearTimeout(t);
   process.exit(0);
 }

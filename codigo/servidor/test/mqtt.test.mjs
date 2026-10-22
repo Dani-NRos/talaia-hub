@@ -13,6 +13,7 @@ import { abrirAlmacen } from "../src/almacen.js";
 import { instantanea } from "../src/sincro.js";
 import { normalizarUrl, comprobarBroker, comprobarHA, migrarMqtt, coincide, textoError } from "../src/mqtt.js";
 import { NodoFalso, hasta, CASETA, ME } from "./nodo-falso.mjs";
+import { setLanguage } from "@vigia/nucleo/idioma.js";
 
 const ID = CASETA.toString(16).padStart(8, "0");
 const CFG = (tipo, ent, nodo = `vigia_${ID}`) => `homeassistant/${tipo}/${nodo}/${ent}/config`;
@@ -112,7 +113,7 @@ test("al conectar publica «online», el servidor y la caseta vigilada; la contr
   await hasta(() => ha.json(`vigia/nodo/${ID}/estado`), 5000, "estado de la caseta");
   const temp = ha.json(CFG("sensor", "temperature"));
   assert.equal(temp.name, "Temperatura");
-  assert.equal(temp.device.name, "Vigía · Caseta huerto");
+  assert.equal(temp.device.name, "Talaia · Caseta huerto");
   assert.equal(temp.device_class, "temperature");
   assert.equal(temp.unit_of_measurement, "°C");
   assert.equal(temp.availability_topic, "vigia/estado");
@@ -130,6 +131,24 @@ test("al conectar publica «online», el servidor y la caseta vigilada; la contr
   assert.equal(broker1(vigia).hayClave, true);
   await hasta(() => broker1(vigia).estado.fase === "conectada", 3000, "conectada");
   assert.doesNotMatch(JSON.stringify(instantanea(vigia.S)), /secreta/);
+});
+
+test("server language in English: Home Assistant gets the names again; ids and topics stay the same", async (t) => {
+  t.after(() => setLanguage("es"));
+  const { puerto } = await broker(t);
+  const ha = await espia(t, puerto);
+  const { vigia } = await montar(t);
+  await conHA(vigia, puerto);
+  await hasta(() => ha.json(CFG("sensor", "temperature"))?.name === "Temperatura", 5000, "en español");
+  const antes = ha.json(CFG("sensor", "temperature"));
+  vigia.idioma("en");
+  await hasta(() => ha.json(CFG("sensor", "temperature"))?.name === "Temperature", 5000, "en inglés");
+  const despues = ha.json(CFG("sensor", "temperature"));
+  assert.equal(despues.unique_id, antes.unique_id);
+  assert.equal(despues.state_topic, antes.state_topic);
+  assert.equal(despues.device.name, "Talaia · Caseta huerto");
+  assert.deepEqual(despues.device.identifiers, antes.device.identifiers);
+  assert.deepEqual(ha.json(CFG("event", "alarmas", "vigia_servidor")).event_types, ["alarma", "resuelta", "vista"]);
 });
 
 test("alarma: sensor binario encendido y evento; «Enterado» desde HA queda visto en Vigía", async (t) => {

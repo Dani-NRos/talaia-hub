@@ -27,6 +27,8 @@ import {
 import { registrarMetricas } from "@vigia/nucleo/metrics.js";
 import { RE, trendKey, conexionKey } from "@vigia/nucleo/motor.js";
 import { hhmm } from "@vigia/nucleo/textos.js";
+import { tx } from "@vigia/nucleo/idioma.js";
+import "./textos.js";
 
 const BUSCAR_MS = 3000; // al buscar temas, cuánto se escucha cada broker
 const BUSCAR_MAX = 2000; // un broker con mucho retenido (Home Assistant, zigbee2mqtt…) tiene cientos
@@ -92,7 +94,7 @@ export function migrarEstacion({ almacen, S, registro }) {
   almacen.guardar("mallaUltimo", almacen.leer("estacionUltimo", null));
   almacen.guardar("estacionVieja", est); // por si acaso
   almacen.guardar("estacion", null);
-  registro.info(`Paneles: la estación pasa al panel del receptor (${cfg.paneles[me]?.datos.length || 0} datos)`);
+  registro.info(tx("s.j.stationMoved", { n: cfg.paneles[me]?.datos.length || 0 }));
 }
 
 /**
@@ -139,7 +141,7 @@ export function crearPaneles({ S, motor, eventos, almacen, registro, receptor, b
   function temaProhibido(tema) {
     const base = S.mqtt?.ha?.base || "vigia";
     if (tema === base || tema.startsWith(`${base}/`) || tema.split("/").some((p) => p.startsWith("vigia_"))) {
-      return "ese tema es de lo que publica Vigía: mandaría lo que ya viene de él.";
+      return tx("s.pan.ownTopic");
     }
     return null;
   }
@@ -151,10 +153,10 @@ export function crearPaneles({ S, motor, eventos, almacen, registro, receptor, b
       if (!d.malla) continue;
       const x = valores.get(d.clave);
       const nombre = nombreDato(d);
-      if (!x) faltan.push(`${nombre} (aún no ha llegado)`);
+      if (!x) faltan.push(tx("s.pan.missingNotYet", { name: nombre }));
       else if (x.error) faltan.push(`${nombre} (${x.error})`);
-      else if (x.nulo) faltan.push(`${nombre} (no disponible)`);
-      else if (d.caduca && ahora - x.t > d.caduca * 60000) faltan.push(`${nombre} (sin datos nuevos desde las ${hhmm.format(new Date(x.t))})`);
+      else if (x.nulo) faltan.push(tx("s.pan.missingNull", { name: nombre }));
+      else if (d.caduca && ahora - x.t > d.caduca * 60000) faltan.push(tx("s.pan.missingStale", { name: nombre, time: hhmm.format(new Date(x.t)) }));
       else vals[d.tipo] = x.v;
     }
     return { vals, faltan };
@@ -226,7 +228,7 @@ export function crearPaneles({ S, motor, eventos, almacen, registro, receptor, b
     if (o && !o.error && o.v === r.v) { // el dispositivo dice que lo ha hecho
       clearTimeout(o.timer);
       ordenes.delete(d.clave);
-      motor.addLog("info", `${nombrePanel(num)} · ${nombreDato(d)}: ${textoDato(d, r.v)} (orden desde Vigía)`, num);
+      motor.addLog("info", tx("s.log.cmdDone", { panel: nombrePanel(num), datum: nombreDato(d), value: textoDato(d, r.v) }), num);
       contar(); // a las pantallas ya, junto con el estado nuevo (sin el segundo de espera de los valores)
     } else if (o?.error) ordenes.delete(d.clave); // ya ha dicho algo: fuera el «no ha contestado»
   }
@@ -331,34 +333,34 @@ export function crearPaneles({ S, motor, eventos, almacen, registro, receptor, b
     const m = cfg.malla;
     const { vals, faltan } = alDia(ahora);
     const canal = S.channels.find((c) => c.index === m.canal);
-    const destino = canal ? `canal «${canal.name}»` : `canal ${m.canal}`;
-    const rec = { t: ahora, texto: textoValores(vals), destino, faltan, resultado: "enviando…", ok: null, manual };
+    const destino = canal ? tx("mesh.channel", { name: canal.name }) : tx("s.pan.channelN", { n: m.canal });
+    const rec = { t: ahora, texto: textoValores(vals), destino, faltan, resultado: tx("mesh.r.sending"), ok: null, manual };
     ultimo = rec;
     const fin = (resultado, ok) => {
       Object.assign(rec, { resultado, ok, tDone: Date.now() });
       if (ok) {
-        registro.depurar(`A la malla: ${rec.texto} → ${destino}: ${resultado}`);
-        if (ultimoFallo) registro.info(`A la malla: vuelve a salir bien (${destino})`);
+        registro.depurar(tx("s.j.meshOk", { text: rec.texto, to: destino, result: resultado }));
+        if (ultimoFallo) registro.info(tx("s.j.meshBack", { to: destino }));
         ultimoFallo = null;
       } else if (resultado !== ultimoFallo) {
-        registro.aviso(`A la malla: ${rec.texto || "sin datos"}: ${resultado}`); // el mismo fallo, una vez
+        registro.aviso(tx("s.j.meshFail", { text: rec.texto || tx("s.pan.noData"), result: resultado })); // el mismo fallo, una vez
         ultimoFallo = resultado;
       }
       if (ultimo === rec) { almacen.guardar("mallaUltimo", rec); contar(); }
     };
-    if (!rec.texto) return fin("nada que mandar: ningún dato al día", false);
+    if (!rec.texto) return fin(tx("s.pan.r.nothing"), false);
     const r = receptor();
-    if (!r || S.link.state !== "ready") return fin("no ha salido: el receptor no está conectado", false);
-    if (!canal) return fin(m.canal == null ? "no ha salido: falta elegir el canal" : "no ha salido: ese canal ya no está en el receptor", false);
+    if (!r || S.link.state !== "ready") return fin(tx("s.pan.r.noReceiver"), false);
+    if (!canal) return fin(tx(m.canal == null ? "s.pan.r.noChannel" : "s.pan.r.channelGone"), false);
     contar();
     try {
       await r.sendTelemetry(m.canal, telemetriaAmbiente(vals, Math.floor(ahora / 1000)), m.saltos).done;
-      fin("repetido por la malla", true);
+      fin(tx("mesh.r.relayed"), true);
     } catch (e) {
       const code = e && typeof e === "object" && "error" in e ? e.error : "send";
-      fin(code === RE.TIMEOUT ? "sin confirmación: no se oyó a nadie repetirlo"
-        : code === RE.MAX_RETRANSMIT ? "nadie lo repitió (¿hay nodos al alcance?)"
-          : `no ha salido: ${motor.askFailText(code)}`, false);
+      fin(code === RE.TIMEOUT ? tx("s.pan.r.noConfirm")
+        : code === RE.MAX_RETRANSMIT ? tx("mesh.r.nobody")
+          : tx("s.pan.r.failed", { why: motor.askFailText(code) }), false);
     }
   }
 
@@ -438,16 +440,16 @@ export function crearPaneles({ S, motor, eventos, almacen, registro, receptor, b
       .concat(Object.entries(cfg.paneles).filter(([, p]) => p.conexion?.broker === id).map(([k]) => `${nombrePanel(Number(k))} (conexión)`)),
     arrancar() {
       const n = porClave.size;
-      if (n) registro.info(`Paneles: ${n} datos por MQTT${cfg.malla.activado ? `; a la malla cada ${cfg.malla.cada} min por el canal ${cfg.malla.canal}` : ""}`);
+      if (n) registro.info(tx("s.j.panels", { n, mesh: cfg.malla.activado ? tx("s.j.panelsMesh", { every: cfg.malla.cada, ch: cfg.malla.canal }) : "" }));
       programar();
     },
 
     /** Un panel nuevo, sin nodo: sus datos llegarán por MQTT. */
     crearPanel({ nombre, tipo }) {
       nombre = nombreOk(nombre);
-      if (!nombre) return { ok: false, error: "Ponle un nombre al panel." };
-      if (nombre.length > 40) return { ok: false, error: "El nombre es demasiado largo (hasta 40 letras)." };
-      if (!TIPOS_PANEL[tipo]) return { ok: false, error: "Elige qué es." };
+      if (!nombre) return { ok: false, error: tx("s.pan.nameMissing") };
+      if (nombre.length > 40) return { ok: false, error: tx("s.pan.nameLong") };
+      if (!TIPOS_PANEL[tipo]) return { ok: false, error: tx("s.pan.chooseType") };
       const num = -cfg.siguiente.panel++;
       cfg.paneles[num] = { nombre, tipo, datos: [] };
       guardar();
@@ -456,20 +458,20 @@ export function crearPaneles({ S, motor, eventos, almacen, registro, receptor, b
       S.cfg.watched[num] = { offlineMin: 0, rules: {} };
       motor.guardar("cfg");
       motor.guardar("nodes");
-      motor.addLog("info", `Panel nuevo: ${nombre}`, num);
+      motor.addLog("info", tx("s.log.panelNew", { name: nombre }), num);
       contar();
-      return { ok: true, num, toast: `Panel «${nombre}» creado: añade sus datos.` };
+      return { ok: true, num, toast: tx("s.pan.created", { name: nombre }) };
     },
     /** Quita un panel sin nodo, con sus datos y su histórico. */
     quitarPanel(num) {
       const p = panel(num);
-      if (num >= 0 || !p) return { ok: false, error: "Ese panel no se puede quitar (los de los nodos se dejan de vigilar)." };
+      if (num >= 0 || !p) return { ok: false, error: tx("s.pan.cantRemove") };
       for (const d of p.datos) olvidarDato(num, d.clave);
       olvidarConexion(num);
       delete cfg.paneles[num];
       guardar();
       for (const k of [...S.active.keys()]) if (S.active.get(k).num === num) motor.clearAlarm(k, { silent: true });
-      motor.addLog("info", `Panel quitado: ${p.nombre}`, num);
+      motor.addLog("info", tx("s.log.panelRemoved", { name: p.nombre }), num);
       delete S.cfg.watched[num];
       S.nodes.delete(num);
       almacen.lecturas.borrar(num);
@@ -478,16 +480,16 @@ export function crearPaneles({ S, motor, eventos, almacen, registro, receptor, b
       motor.guardar("cfg");
       motor.guardar("nodes");
       contar();
-      return { ok: true, toast: `Panel «${p.nombre}» quitado.` };
+      return { ok: true, toast: tx("s.pan.removed", { name: p.nombre }) };
     },
     /** El nombre del panel en Vigía. Vacío, en el de un nodo, vuelve a su nombre de Meshtastic. */
     renombrar(num, nombre) {
       nombre = nombreOk(nombre);
-      if (nombre.length > 40) return { ok: false, error: "El nombre es demasiado largo (hasta 40 letras)." };
+      if (nombre.length > 40) return { ok: false, error: tx("s.pan.nameLong") };
       if (num < 0) {
-        if (!panel(num)) return { ok: false, error: "Ese panel ya no existe." };
-        if (!nombre) return { ok: false, error: "Ponle un nombre al panel." };
-      } else if (!S.nodes.has(num)) return { ok: false, error: "Ese nodo no está." };
+        if (!panel(num)) return { ok: false, error: tx("s.pan.gone") };
+        if (!nombre) return { ok: false, error: tx("s.pan.nameMissing") };
+      } else if (!S.nodes.has(num)) return { ok: false, error: tx("s.pan.noNode") };
       const antes = nombrePanel(num);
       cfg.paneles[num] ||= { datos: [] };
       if (nombre) cfg.paneles[num].nombre = nombre;
@@ -496,15 +498,15 @@ export function crearPaneles({ S, motor, eventos, almacen, registro, receptor, b
       aplicar();
       motor.guardar("nodes");
       const ahora = nombrePanel(num);
-      if (ahora !== antes) motor.addLog("info", `${antes} se llama ahora ${ahora}`, num);
+      if (ahora !== antes) motor.addLog("info", tx("s.log.renamed", { old: antes, name: ahora }), num);
       contar();
-      return { ok: true, toast: nombre ? `Ahora se llama «${ahora}».` : `Vuelve a su nombre: «${ahora}».` };
+      return { ok: true, toast: tx(nombre ? "s.pan.renamed" : "s.pan.renamedBack", { name: ahora }) };
     },
     /** Qué es un panel sin nodo (Shelly, Tasmota…): solo la etiqueta. */
     tipoPanel(num, tipo) {
       const p = panel(num);
-      if (num >= 0 || !p) return { ok: false, error: "Ese panel ya no existe." };
-      if (!TIPOS_PANEL[tipo]) return { ok: false, error: "Elige qué es." };
+      if (num >= 0 || !p) return { ok: false, error: tx("s.pan.gone") };
+      if (!TIPOS_PANEL[tipo]) return { ok: false, error: tx("s.pan.chooseType") };
       p.tipo = tipo;
       guardar();
       aplicar();
@@ -517,13 +519,13 @@ export function crearPaneles({ S, motor, eventos, almacen, registro, receptor, b
      * conexión ({ broker, tema, campo, avisar } o null; sin darlo, se queda el que tenga).
      */
     guardarDatos(num, lista, conexion) {
-      if (!S.cfg.watched[num]) return { ok: false, error: "Ese panel ya no está." };
+      if (!S.cfg.watched[num]) return { ok: false, error: tx("s.pan.notWatched") };
       const ids = new Set(brokers().map((b) => b.id));
       const r = comprobarDatos(lista, { temaProhibido, brokers: ids, receptor: num === S.myNode });
       if (r.error) return { ok: false, error: r.error };
       let con;
       if (conexion !== undefined) {
-        if (num >= 0 && conexion?.tema) return { ok: false, error: "El tema de conexión es de los paneles sin nodo (el nodo ya dice si tiene señal)." };
+        if (num >= 0 && conexion?.tema) return { ok: false, error: tx("s.pan.connNoNode") };
         const c = comprobarConexion(conexion, { temaProhibido, brokers: ids });
         if (c.error) return { ok: false, error: c.error };
         con = c.conexion;
@@ -553,10 +555,10 @@ export function crearPaneles({ S, motor, eventos, almacen, registro, receptor, b
       suscribirse();
       motor.guardar("cfg");
       motor.guardar("nodes");
-      registro.info(`Paneles: ${nombrePanel(num)} con ${r.datos.length} datos por MQTT`);
+      registro.info(tx("s.j.panelData", { panel: nombrePanel(num), n: r.datos.length }));
       programar();
       for (const id of conexiones.keys()) pedirEstados(id); // si hay un Shelly nuevo, que diga ya cómo está
-      return { ok: true, toast: "Datos guardados." };
+      return { ok: true, toast: tx("s.pan.dataSaved") };
     },
     /**
      * Enciende (v = 1) o apaga (v = 0) un dato ON/OFF que tenga orden: publica su mensaje y espera a que su tema de
@@ -564,26 +566,26 @@ export function crearPaneles({ S, motor, eventos, almacen, registro, receptor, b
      */
     async mandar(num, clave, v) {
       const d = panel(num)?.datos.find((x) => x.clave === clave);
-      if (!S.cfg.watched[num] || !d) return { ok: false, error: "Ese dato ya no está." };
-      if (!d.orden) return { ok: false, error: "Ese dato no se puede encender ni apagar desde Vigía." };
+      if (!S.cfg.watched[num] || !d) return { ok: false, error: tx("s.pan.datumGone") };
+      if (!d.orden) return { ok: false, error: tx("s.pan.noCmd") };
       if (v !== 0 && v !== 1) return { ok: false };
       const con = conexiones.get(d.broker);
-      if (!con?.conectada) return { ok: false, error: `El broker de «${nombreDato(d)}» no está conectado.` };
+      if (!con?.conectada) return { ok: false, error: tx("s.pan.brokerDown", { name: nombreDato(d) }) };
       const antes = ordenes.get(clave);
-      if (antes && !antes.error) return { ok: false, error: "Espera: aún no ha contestado a la orden anterior." };
+      if (antes && !antes.error) return { ok: false, error: tx("s.pan.waitCmd") };
       // Pending before publishing: a device on the same broker can answer before the broker acknowledges (qos 1),
       // and its answer has to find the order waiting.
       const o = { num, v, t: Date.now(), timer: null };
       ordenes.set(clave, o);
       if (!(await con.publicar(d.orden.tema, v ? d.orden.on : d.orden.off, { qos: 1 }))) {
         if (ordenes.get(clave) === o) ordenes.delete(clave);
-        return { ok: false, error: "No se pudo mandar la orden al broker." };
+        return { ok: false, error: tx("s.pan.cmdFailed") };
       }
       if (ordenes.get(clave) !== o) return { ok: true }; // it has already said it did it
       o.timer = setTimeout(() => {
         if (ordenes.get(clave) !== o) return;
-        ordenes.set(clave, { v, t: o.t, error: "No ha contestado" });
-        motor.addLog("info", `${nombrePanel(num)} · ${nombreDato(d)}: no ha contestado a la orden «${textoDato(d, v)}»`, num);
+        ordenes.set(clave, { v, t: o.t, error: tx("s.pan.noAnswer") });
+        motor.addLog("info", tx("s.log.cmdNoAnswer", { panel: nombrePanel(num), datum: nombreDato(d), value: textoDato(d, v) }), num);
         contar();
       }, ORDEN_MS);
       o.timer.unref?.();
@@ -596,9 +598,9 @@ export function crearPaneles({ S, motor, eventos, almacen, registro, receptor, b
       if (error) return { ok: false, error };
       cfg.malla = malla;
       guardar();
-      registro.info(malla.activado ? `A la malla: cada ${malla.cada} min por el canal ${malla.canal}` : "A la malla: apagado");
+      registro.info(malla.activado ? tx("s.j.mesh", { every: malla.cada, ch: malla.canal }) : tx("s.j.meshOff"));
       programar();
-      return { ok: true, toast: malla.activado ? `Guardado. Próximo envío a las ${hhmm.format(new Date(proximo))}.` : "Guardado. No se manda nada a la malla." };
+      return { ok: true, toast: malla.activado ? tx("s.pan.meshSaved", { time: hhmm.format(new Date(proximo)) }) : tx("s.pan.meshSavedOff") };
     },
     /**
      * Escucha los brokers conectados unos segundos y devuelve los temas con números o estados:
@@ -606,18 +608,23 @@ export function crearPaneles({ S, motor, eventos, almacen, registro, receptor, b
      */
     async buscarTemas() {
       const conectadas = [...conexiones].filter(([, c]) => c.conectada);
-      if (!conectadas.length) return { ok: false, error: "Primero conecta algún broker MQTT (en Ajustes → MQTT)." };
+      if (!conectadas.length) return { ok: false, error: tx("s.pan.connectBroker") };
       const porBroker = await Promise.all(conectadas.map(([id, c]) => buscarEn(id, c)));
       const temas = porBroker.flat().sort((a, b) => a.tema.localeCompare(b.tema) || a.campo.localeCompare(b.campo) || a.broker.localeCompare(b.broker));
-      return { ok: true, temas, toast: temas.length ? `${temas.length} con números o estados` : "No ha llegado ningún tema con números o estados" };
+      return { ok: true, temas, toast: temas.length ? tx("s.pan.found", { n: temas.length }) : tx("s.pan.foundNone") };
     },
     /** Manda ya a la malla lo que haya (sin esperar al siguiente envío). */
     enviarAhora() {
-      if (!panel(S.myNode)?.datos.some((d) => d.malla)) return { ok: false, error: "Marca «A la malla» en algún dato del receptor y guárdalo." };
-      if (Date.now() - aMano < A_MANO_MS) return { ok: false, error: "Espera un minuto entre envíos a mano." };
+      if (!panel(S.myNode)?.datos.some((d) => d.malla)) return { ok: false, error: tx("s.pan.markMesh") };
+      if (Date.now() - aMano < A_MANO_MS) return { ok: false, error: tx("s.pan.waitMinute") };
       aMano = Date.now();
       enviar(true);
-      return { ok: true, toast: "Enviando…" };
+      return { ok: true, toast: tx("s.pan.sending") };
+    },
+    /** After a change of the server's language: the names of the data without a name of their own (their type's). */
+    reetiquetar() {
+      registrarMetricas(metasDe(cfg.paneles));
+      contar();
     },
     parar() {
       // Lo que esperaba su minuto se guarda ya: que no se pierda el último dato al reiniciar.

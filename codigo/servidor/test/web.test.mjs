@@ -12,6 +12,7 @@ import { comprobar } from "../src/config.js";
 import { crearRegistro } from "../src/registro.js";
 import { abrirAlmacen } from "../src/almacen.js";
 import { NodoFalso, hasta, PORT, CASETA, AVISADO } from "./nodo-falso.mjs";
+import { setLanguage } from "@vigia/nucleo/idioma.js";
 
 async function montar(t) {
   const nodo = new NodoFalso();
@@ -100,7 +101,7 @@ test("órdenes: vigilar y poner un límite; la alarma y el «Enterado» llegan a
   t.after(() => { a.cerrar(); b.cerrar(); });
   await hasta(() => a.ev.length && b.ev.length, 3000, "dos pantallas");
   let r = await orden(base, { orden: "vigilar", num: CASETA });
-  assert.deepEqual(r.json, { ok: true, toast: "Caseta huerto fijado arriba. Ponle límites en su ficha." });
+  assert.deepEqual(r.json, { ok: true, toast: "Caseta huerto está ahora en el tablero. Ponle límites en su ficha." });
   r = await orden(base, { orden: "limite", num: CASETA, metrica: "temperature", lado: "max", valor: 30 });
   assert.equal(r.json.toast, "Límite guardado");
   r = await orden(base, { orden: "limite", num: CASETA, metrica: "temperature", lado: "min", valor: 31 });
@@ -227,10 +228,29 @@ test("series y CSV del histórico", async (t) => {
   assert.equal(s.length, 1);
   assert.equal(s[0].v, 18.25);
   r = await pedir(base, "/api/lecturas.csv");
-  assert.match(r.headers["content-disposition"], /attachment; filename="vigia-servidor-\d{4}-\d{2}-\d{2}\.csv"/);
+  assert.match(r.headers["content-disposition"], /attachment; filename="talaia-\d{4}-\d{2}-\d{2}\.csv"/);
   const lineas = r.cuerpo.replace(/^﻿/, "").trim().split("\n");
   assert.equal(lineas[0], "fecha;nodo;nombre;metrica;valor;unidad");
   assert.ok(lineas.some((l) => l.endsWith(`;!${CASETA.toString(16)};"Caseta huerto";temperature;18,25;°C`)));
+});
+
+test("server language in English: replies to the screens and the CSV for an English spreadsheet", async (t) => {
+  t.after(() => setLanguage("es"));
+  const { base, nodo, vigia } = await montar(t);
+  let r = await orden(base, { orden: "idioma", idioma: "en" });
+  assert.deepEqual(r.json, { ok: true, toast: "Saved. What the server writes from now on, in English." });
+  assert.equal(vigia.S.settings.language, "en");
+  r = await orden(base, { orden: "idioma", idioma: 3 });
+  assert.equal(r.status, 400);
+  r = await orden(base, { orden: "vigilar", num: CASETA });
+  assert.equal(r.json.toast, "Caseta huerto is now on the dashboard. Set its limits in its sheet.");
+  nodo.ambiente(CASETA, { temperature: 18.25 });
+  await hasta(() => vigia.S.nodes.get(CASETA).metrics.temperature?.v === 18.25, 3000, "lectura");
+  await new Promise((res) => setTimeout(res, 300));
+  r = await pedir(base, "/api/lecturas.csv");
+  const lineas = r.cuerpo.replace(/^\ufeff/, "").trim().split("\n");
+  assert.equal(lineas[0], "time,node,name,metric,value,unit");
+  assert.ok(lineas.some((l) => l.endsWith(`,!${CASETA.toString(16)},"Caseta huerto",temperature,18.25,°C`)), lineas.join("\n"));
 });
 
 test("CSV de un histórico grande: por bloques, sin perder ni repetir filas, y sin parar el servidor", async (t) => {

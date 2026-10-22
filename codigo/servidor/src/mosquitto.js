@@ -10,6 +10,8 @@ import crypto from "node:crypto";
 import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
+import { tx } from "@vigia/nucleo/idioma.js";
+import "./textos.js";
 
 export const USUARIO_INTERNO = "vigia-servidor";
 const NOMBRE_OK = /^[A-Za-z0-9._-]{1,64}$/;
@@ -31,10 +33,10 @@ export function claveValida(clave, cifrada) {
 
 /** Por qué no vale un usuario nuevo (o null si vale). */
 export function comprobarUsuario(nombre, clave) {
-  if (!NOMBRE_OK.test(String(nombre || ""))) return "El usuario solo puede llevar letras sin tildes, números, «.», «-» y «_» (hasta 64).";
-  if (nombre === USUARIO_INTERNO) return `«${USUARIO_INTERNO}» es el usuario de Vigía: elige otro nombre.`;
-  if (clave != null && String(clave).length < CLAVE_MIN) return `La contraseña tiene que tener al menos ${CLAVE_MIN} caracteres.`;
-  if (clave != null && /[\r\n]/.test(clave)) return "La contraseña no puede llevar saltos de línea.";
+  if (!NOMBRE_OK.test(String(nombre || ""))) return tx("s.mq.badUser");
+  if (nombre === USUARIO_INTERNO) return tx("s.mq.internal", { name: USUARIO_INTERNO });
+  if (clave != null && String(clave).length < CLAVE_MIN) return tx("s.mq.passShort", { n: CLAVE_MIN });
+  if (clave != null && /[\r\n]/.test(clave)) return tx("s.mq.passLines");
   return null;
 }
 
@@ -73,7 +75,7 @@ export function crearBrokerLocal({ config, almacen, registro }) {
       fs.mkdirSync(path.dirname(fichero), { recursive: true });
       fs.writeFileSync(fichero, txt, { mode: 0o600 });
     } catch (e) {
-      registro.error(`No se pudo escribir los usuarios del broker en ${fichero}: ${e.message}`);
+      registro.error(tx("s.j.mqWriteFail", { file: fichero, e: e.message }));
     }
   }
   function guardar() { almacen.guardar("mosquitto", guardado); escribir(); }
@@ -94,16 +96,16 @@ export function crearBrokerLocal({ config, almacen, registro }) {
       else guardado.usuarios.push({ nombre, cifrada: cifrarClave(clave) });
       guardado.usuarios.sort((a, b) => a.nombre.localeCompare(b.nombre));
       guardar();
-      registro.info(`Broker de este equipo: ${u ? "nueva contraseña para" : "nuevo usuario"} «${nombre}»`);
-      return { ok: true, toast: u ? `Contraseña de «${nombre}» cambiada.` : `Usuario «${nombre}» creado.` };
+      registro.info(tx(u ? "s.j.mqPass" : "s.j.mqUser", { name: nombre }));
+      return { ok: true, toast: tx(u ? "s.mq.passChanged" : "s.mq.userCreated", { name: nombre }) };
     },
     quitarUsuario(nombre) {
       const n = guardado.usuarios.length;
       guardado.usuarios = guardado.usuarios.filter((x) => x.nombre !== nombre);
-      if (guardado.usuarios.length === n) return { ok: false, error: "Ese usuario no existe." };
+      if (guardado.usuarios.length === n) return { ok: false, error: tx("s.mq.noUser") };
       guardar();
-      registro.info(`Broker de este equipo: usuario «${nombre}» quitado`);
-      return { ok: true, toast: `Usuario «${nombre}» quitado: ya no puede conectarse.` };
+      registro.info(tx("s.j.mqUserRemoved", { name: nombre }));
+      return { ok: true, toast: tx("s.mq.userRemoved", { name: nombre }) };
     },
     escribir,
   };

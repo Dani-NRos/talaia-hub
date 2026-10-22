@@ -5,6 +5,8 @@ import { Protobuf } from "@meshtastic/core";
 import { ReceptorBase, LinkError } from "@vigia/nucleo/receptor-base.js";
 import { EnlaceFlujo, abrirSerie, abrirTcp } from "./enlace.js";
 import { listarPuertos, elegirPuerto, describirPuerto } from "./puertos.js";
+import { tx } from "@vigia/nucleo/idioma.js";
+import "./textos.js";
 
 /**
  * Qué decir según el fallo. Además de los de la app (busy, noapi, lost):
@@ -29,14 +31,9 @@ export function clasificar(err, tipo) {
   return "other";
 }
 
-export const CONSEJO = {
-  permiso: "El servicio no tiene permiso para abrir el puerto: su usuario tiene que estar en el grupo «dialout» (el instalador lo hace; si lo cambiaste a mano, reinicia el servicio).",
-  busy: "No se pudo abrir el puerto: otro programa lo tiene abierto (la web de Meshtastic, un monitor serie, otro servidor…). Ciérralo.",
-  unplugged: "Al enchufarlo, el servidor conecta solo en menos de un minuto.",
-  noapi: "El puerto se abre pero el nodo no contesta como Meshtastic: ¿es el puerto correcto? ¿Está arrancando o colgado? Prueba a reiniciarlo.",
-  red: "No se llega al nodo por la red: comprueba la IP, que esté encendido y en la misma red, y que tenga el WiFi o Ethernet activado.",
-  lost: "Se cortó la conexión con el nodo. Si es por TCP y pasa a menudo, otro cliente (la app de Meshtastic, Home Assistant…) puede estar conectándose al mismo nodo: el firmware solo admite uno y echa al anterior.",
-};
+/** What to do about each kind of failure (empty if there is nothing to say). */
+export const consejo = (kind) => (CONSEJOS.includes(kind) ? tx(`s.rx.tip.${kind}`) : "");
+const CONSEJOS = ["permiso", "busy", "unplugged", "noapi", "red", "lost"];
 
 export class ReceptorNodo extends ReceptorBase {
   /**
@@ -102,7 +99,7 @@ export class ReceptorNodo extends ReceptorBase {
     if (this.userClosed) return null;
     if (!puerto) { this._fail(new LinkError("unplugged", null, motivo)); return null; }
     if (nota && this.ruta !== puerto.ruta) this.diag(nota);
-    if (this.ruta !== puerto.ruta) this.diag(`Puerto: ${describirPuerto(puerto)}`);
+    if (this.ruta !== puerto.ruta) this.diag(tx("s.rx.port", { port: describirPuerto(puerto) }));
     this.ruta = puerto.ruta;
     this.h.onDevice?.({ kind: "serial", name: puerto.producto || puerto.ruta, ruta: puerto.ruta, vid: puerto.vid, pid: puerto.pid });
     return new EnlaceFlujo(() => (this.opts.abrirSerie || abrirSerie)(puerto.ruta), hooks);

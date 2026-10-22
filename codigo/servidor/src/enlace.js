@@ -5,6 +5,8 @@ import net from "node:net";
 import { Types } from "@meshtastic/core";
 import { LinkError } from "@vigia/nucleo/receptor-base.js";
 import { frame, createFramer, createLines, HEARTBEAT, HEARTBEAT_MS, DISCONNECT, wakeBytes } from "@vigia/nucleo/tramas.js";
+import { tx } from "@vigia/nucleo/idioma.js";
+import "./textos.js";
 
 const ST = Types.DeviceStatusEnum;
 const BAUD = 115200;
@@ -50,8 +52,8 @@ export class EnlaceFlujo {
     this.s = s;
     s.on("data", (chunk) => this._rx(chunk));
     s.on("error", (e) => this.fail(new LinkError("io", e)));
-    s.on("close", () => { if (!this.closing) this.fail(new LinkError("lost", null, "se ha cerrado la conexión con el nodo")); });
-    this.log(`Conexión abierta en ${Date.now() - t0} ms`);
+    s.on("close", () => { if (!this.closing) this.fail(new LinkError("lost", null, tx("s.link.closed"))); });
+    this.log(tx("s.link.open", { ms: Date.now() - t0 }));
     this._fromDevice = new ReadableStream({
       start: (c) => {
         this.ctrl = c;
@@ -64,7 +66,7 @@ export class EnlaceFlujo {
           await this.writeRaw(frame(chunk));
         } catch (e) {
           // ECONNRESET hace que la cola de la librería deje de reintentar en bucle.
-          throw Object.assign(new Error(e.message || "escritura fallida"), { code: "ECONNRESET" });
+          throw Object.assign(new Error(e.message || tx("s.link.writeFail")), { code: "ECONNRESET" });
         }
       },
     });
@@ -82,7 +84,7 @@ export class EnlaceFlujo {
   /** Escrituras en fila: el latido no se cruza con un paquete. */
   writeRaw(bytes) {
     const run = () => new Promise((resolve, reject) => {
-      if (this.failed || this.closing || !this.s) return reject(new LinkError("io", null, "conexión cerrada"));
+      if (this.failed || this.closing || !this.s) return reject(new LinkError("io", null, tx("s.link.gone")));
       this.s.write(Buffer.from(bytes), (e) => {
         if (!e) return resolve();
         this.fail(new LinkError("io", e));
@@ -107,7 +109,7 @@ export class EnlaceFlujo {
   fail(err) {
     if (this.failed || this.closing) return;
     this.failed = true;
-    if (this.textTail.length && !this.rxCount) this.log(`Último texto del nodo: ${this.textTail.join(" | ").slice(0, 300)}`);
+    if (this.textTail.length && !this.rxCount) this.log(tx("s.link.lastText", { text: this.textTail.join(" | ").slice(0, 300) }));
     try { this.ctrl?.enqueue({ type: "status", data: { status: ST.DeviceDisconnected, reason: err.stage } }); } catch { /* cerrado */ }
     this.cleanup();
     this.h.onFail?.(err);
@@ -157,7 +159,7 @@ export async function abrirSerie(ruta) {
 export function abrirTcp(host, puerto = 4403, esperaMs = 10000) {
   return new Promise((resolve, reject) => {
     const s = net.connect({ host, port: puerto });
-    const t = setTimeout(() => s.destroy(Object.assign(new Error(`sin respuesta de ${host}:${puerto} en ${esperaMs / 1000} s`), { code: "ETIMEDOUT" })), esperaMs);
+    const t = setTimeout(() => s.destroy(Object.assign(new Error(tx("s.link.timeout", { addr: `${host}:${puerto}`, s: esperaMs / 1000 })), { code: "ETIMEDOUT" })), esperaMs);
     s.once("error", (e) => { clearTimeout(t); reject(e); });
     s.once("connect", () => {
       clearTimeout(t);

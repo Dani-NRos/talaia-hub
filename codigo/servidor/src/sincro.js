@@ -10,7 +10,7 @@ const peticion = (r) => ({ num: r.num, type: r.type, state: r.state, t0: r.t0, t
 const avisoMalla = (m) => (m ? { tg: m.tg, text: m.text, tq: m.tq, t: m.t, result: m.result, ok: m.ok, tDone: m.tDone ?? null } : null);
 /** Ficha del receptor: lo que necesita la pantalla (la clave pública como lista de números). */
 const miFicha = (u) => (u ? { longName: u.longName, shortName: u.shortName, isLicensed: !!u.isLicensed, publicKey: u.publicKey ? [...u.publicKey] : [] } : null);
-const ajustes = (s) => ({ defaultOfflineMin: s.defaultOfflineMin, retentionDays: s.retentionDays, mesh: s.mesh ?? null });
+const ajustes = (s) => ({ defaultOfflineMin: s.defaultOfflineMin, retentionDays: s.retentionDays, mesh: s.mesh ?? null, language: s.language || "es" });
 
 /** Cada parte del estado y cómo se manda. */
 export const PARTES = {

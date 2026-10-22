@@ -4,6 +4,8 @@
 import fs from "node:fs";
 import path from "node:path";
 import { USB_VENDORS } from "@vigia/nucleo/tramas.js";
+import { tx } from "@vigia/nucleo/idioma.js";
+import "./textos.js";
 
 const hex4 = (n) => n.toString(16).padStart(4, "0");
 const leer = (f) => { try { return fs.readFileSync(f, "utf8").trim(); } catch { return ""; } };
@@ -65,18 +67,18 @@ export function elegirPuerto(conf, lista) {
     // Una ruta fija: vale aunque no salga en /sys (p. ej. un puerto virtual para pruebas).
     const p = lista.find((x) => x.ruta === c || x.porId === c);
     if (p) return { puerto: { ...p, ruta: c } };
-    return fs.existsSync(c) ? { puerto: { ruta: c, porId: null, vid: null, pid: null, producto: "", conocido: false } } : { puerto: null, motivo: `no existe ${c} (¿está enchufado?)` };
+    return fs.existsSync(c) ? { puerto: { ruta: c, porId: null, vid: null, pid: null, producto: "", conocido: false } } : { puerto: null, motivo: tx("s.port.noPath", { path: c }) };
   }
   const m = /^([0-9a-f]{4}):([0-9a-f]{4})$/i.exec(c);
   if (m) {
     const vid = parseInt(m[1], 16), pid = parseInt(m[2], 16);
     const p = lista.find((x) => x.vid === vid && x.pid === pid);
-    return p ? { puerto: p } : { puerto: null, motivo: `no hay ningún aparato USB ${c.toLowerCase()} enchufado` };
+    return p ? { puerto: p } : { puerto: null, motivo: tx("s.port.noUsb", { id: c.toLowerCase() }) };
   }
   const nodos = lista.filter((x) => x.conocido);
   if (!nodos.length) {
-    return { puerto: null, motivo: lista.length ? `hay puertos serie (${lista.map(describirPuerto).join(", ")}) pero ninguno parece un nodo Meshtastic; pon su ruta en la configuración` : "no hay ningún nodo enchufado por USB" };
+    return { puerto: null, motivo: lista.length ? tx("s.port.noneLooks", { list: lista.map(describirPuerto).join(", ") }) : tx("s.port.none") };
   }
-  if (nodos.length > 1) return { puerto: nodos[0], nota: `hay ${nodos.length} nodos enchufados; se usa ${describirPuerto(nodos[0])}. Para elegir otro, pon su ruta en la configuración` };
+  if (nodos.length > 1) return { puerto: nodos[0], nota: tx("s.port.several", { n: nodos.length, port: describirPuerto(nodos[0]) }) };
   return { puerto: nodos[0] };
 }

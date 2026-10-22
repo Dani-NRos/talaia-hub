@@ -5,10 +5,11 @@ Zero 2 W) de nodos Meshtastic y dispositivos MQTT, con histórico en SQLite, Hom
 con Tailscale. Dentro de la app se llama solo **«Talaia»**. Este repositorio (`talaia-hub`, rama `main`) es el de la
 **versión 2.0** (plan abajo); trae la historia de la rama `mapa` de `vigia-mesh`.
 
-Hasta que se cambien (rediseño y Docker, ver el plan), los nombres de dentro siguen siendo de Vigía: textos de la app,
-paquetes `@vigia/*`, servicio `vigia-servidor`, `/opt/vigia`, `/etc/vigia`, `/var/lib/vigia`, usuario `vigia`, y los
-identificadores y temas `vigia…` de Home Assistant (cambiarlos sin migrar duplicaría los dispositivos en HA y perdería
-su histórico).
+Lo que se ve ya dice Talaia (la app, los avisos por la malla «⚠ Talaia: …», los nombres en Home Assistant «Talaia ·
+Caseta», el CSV `talaia-fecha.csv`). Hasta que se cambien (Docker, ver el plan), los nombres de dentro siguen siendo de
+Vigía: paquetes `@vigia/*`, servicio `vigia-servidor`, `/opt/vigia`, `/etc/vigia`, `/var/lib/vigia`, usuario `vigia`,
+y los identificadores y temas `vigia…` de Home Assistant (cambiarlos sin migrar duplicaría los dispositivos en HA y
+perdería su histórico).
 
 El repositorio `vigia-mesh` sigue aparte:
 - `main`: la **app ligera** (PWA de Bluetooth y cable) **congelada en la 1.20**, publicada en GitHub Pages
@@ -38,8 +39,9 @@ codigo/                 raíz de npm workspaces: npm install, npm test, npm run 
     src/receptor-base.js  ciclo de conexión, lectura inicial, reintentos y peticiones con id (app y servidor)
     src/textos.js       tiempos y textos comunes (dur, ago, stamp…)
     src/idioma.js       idioma de los textos del núcleo (alarmas, tiempos, nombres de métricas, peticiones, estados):
-                        tx("clave"). La pantalla pone el de quien la mira; el servidor, el suyo (3.4). También los
-                        formatos de número (1015 hPa; miles a partir de cinco cifras) y de hora
+                        tx("clave"). La pantalla pone el de quien la mira; el servidor, el suyo (Ajustes → Sistema).
+                        También los formatos de número (1015 hPa; miles a partir de cinco cifras) y de hora. El
+                        servidor añade sus textos con addTexts (servidor/src/textos.js)
     src/canales.js      qué canal es privado (`kind`: el porqué, que cada pantalla dice en su idioma con
                         channelWhy); recorte a 200 bytes
     src/tramas.js       tramas del puerto serie (0x94 0xC3), troceado propio, latido, despertar, fabricantes USB
@@ -77,6 +79,8 @@ codigo/                 raíz de npm workspaces: npm install, npm test, npm run 
     src/main.js         arranque (systemd o a mano); src/vigia.js: motor + receptor + SQLite + tareas periódicas
     src/receptor.js enlace.js puertos.js   nodo por USB (serialport, con binarios: no compila) o TCP 4403
     src/almacen.js      SQLite (node:sqlite): lecturas y el estado que la app guarda en localStorage
+    src/textos.js       los textos del servidor en español e inglés (claves «s.*»: s.j.* el diario, s.log.* el
+                        registro, s.ha.* Home Assistant…); se piden con tx() como los del núcleo
     src/web.js sincro.js  la app servida en la red de casa y su API (SSE + órdenes), sin contraseña (decisión de Dani)
     src/mqtt.js         MQTT (MQTT.js): varios brokers a la vez (una conexión cada uno), configurados en Ajustes y
                         guardados en SQLite; reconexión; testamento solo en el de Home Assistant; migra lo de la 1.16
@@ -117,7 +121,7 @@ La app ligera congelada tiene su propia copia del código en `main`: aquí ya no
 - Se configura en **Ajustes → MQTT** (solo en modo Servidor): los brokers (con usuario y contraseña opcionales; la
   contraseña se guarda en SQLite y nunca sale por la API) y, aparte, en cuál se publica para Home Assistant (apagado
   por defecto).
-- A HA van **solo los nodos vigilados**, como dispositivos «Vigía · nombre»; **sin posición**. Un sensor binario y un
+- A HA van **solo los nodos vigilados**, como dispositivos «Vigía · nombre» («Talaia · nombre» desde la 3.4); **sin posición**. Un sensor binario y un
   botón «Enterado» por cada alarma puesta, «Enterado todas» y un evento por alarma/resuelta/vista para notificar.
   Las alarmas y límites se cambian solo en Vigía.
 
@@ -212,8 +216,16 @@ con Tasmota/ESPHome, Zigbee por zigbee2mqtt, ESPHome, Home Assistant…).
   demo ni modo sin servidor; la prueba de peticiones pasó al núcleo); 3.2) esqueleto, estilo, logo, nombre «Talaia» e
   idioma (hecho: lo elige cada pantalla; por defecto, el del navegador, español también para ca/eu/gl); 3.3) cada
   sección en los dos idiomas (hecho, 23 oct. 2026; app/test/i18n.test.mjs comprueba que cada texto que se pide está en
-  los dos y con los mismos huecos); 3.4) lo que sale del servidor (malla, Home Assistant, registro) con un idioma del
-  servidor. No se pierde ninguna función.
+  los dos y con los mismos huecos); 3.4) lo que sale del servidor con un idioma del servidor (hecho, 23 oct. 2026).
+  No se pierde ninguna función.
+- Idioma del servidor (3.4, Dani 23 oct. 2026): se elige en Ajustes → Sistema (`S.settings.language`, «es» por
+  defecto) y vale para todo lo que escribe el servidor: el registro (Alarmas → Registro), los avisos y resultados por
+  la malla, los nombres en Home Assistant (al cambiarlo se le vuelven a anunciar; los `unique_id`, temas y tipos de
+  evento no cambian), lo que contesta a las órdenes, el diario (journalctl) y el CSV (en español, «;» y coma decimal;
+  en inglés, «,» y punto). Lo que ya está en el registro se queda en el idioma en que se escribió. Siguen en español
+  hasta el paso 5 (Docker): las líneas de main.js antes de arrancar y los errores de configuración (config.js).
+  servidor/test/textos.test.mjs comprueba que cada clave que se pide con tx() está en los dos idiomas con los mismos
+  huecos.
 - Estilo (3.2): arena y verde bosque de día, «guardia nocturna» (fondo casi negro verdoso, texto color arena) de
   noche; oliva para lo que se pulsa; naranja de señal (#c2410c / #e2531b; de noche #ff6b2b) solo para alarmas.
   Letras Overpass y Overpass Mono (OFL, de npm @fontsource-variable, incrustadas por build.mjs: sin internet se ve
@@ -222,7 +234,7 @@ con Tasmota/ESPHome, Zigbee por zigbee2mqtt, ESPHome, Home Assistant…).
   (unicode-range). Ajustes, en cinco apartados con pestañas, cada uno con su dirección (#/settings/mesh…): Malla
   (sin señal para los nodos nuevos, avisos por la malla), MQTT (brokers, usuarios del broker de este equipo, Home
   Assistant), Receptor (estado, nodo, radio, canales, diagnóstico; ahí lleva el botón de estado de arriba), Sistema
-  (histórico, acerca de) y Esta pantalla (idioma, tema, sonido, notificaciones, pantalla encendida, mapa sin
+  (idioma del servidor, histórico, acerca de) y Esta pantalla (idioma, tema, sonido, notificaciones, pantalla encendida, mapa sin
   internet: todo lo que es de cada aparato). Cada aparato recuerda el último abierto. Ajustes, en una columna centrada (texto a la izquierda). Los registros y alarmas están en Alarmas; el Tablero
   tiene el aviso de alarmas y los paneles; el mapa es una sección (map.js ya no usa un diálogo).
 - Orden (1 y 2, hechos): 1) nombre y política de idioma; 2) congelar la webapp y reorganizar el repositorio;

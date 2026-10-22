@@ -10,6 +10,7 @@ import { comprobar } from "../src/config.js";
 import { crearRegistro } from "../src/registro.js";
 import { abrirAlmacen } from "../src/almacen.js";
 import { NodoFalso, hasta, PORT, ME, CASETA } from "./nodo-falso.mjs";
+import { getLanguage, setLanguage } from "@vigia/nucleo/idioma.js";
 
 async function montar(t, { almacen, datos } = {}) {
   const nodo = new NodoFalso();
@@ -96,6 +97,32 @@ test("al reiniciar recuerda nodos, alarmas activas y registro", async (t) => {
   assert.ok(v.S.log.some((e) => e.type === "ack"));
   // Las lecturas recientes de los vigilados vuelven a memoria para el cambio rápido.
   assert.equal(v.S.recent.get(`${CASETA}|temperature`).length, 1);
+});
+
+test("server language: the journal and the replies in English, and it stays after a restart", async (t) => {
+  t.after(() => setLanguage("es"));
+  const datos = fs.mkdtempSync(path.join(os.tmpdir(), "vigia-"));
+  const a1 = abrirAlmacen(path.join(datos, "vigia.db"));
+  a1.guardar("cfg", { watched: { [CASETA]: { offlineMin: 60, rules: { temperature: { max: 30 } } } } });
+  a1.cerrar();
+  {
+    const { v, nodo, salida } = await montar(t, { datos });
+    assert.equal(v.S.settings.language, "es");
+    v.arrancar();
+    await hasta(() => v.S.link.state === "ready", 8000, "receptor listo");
+    assert.deepEqual(v.idioma("fr"), { ok: false });
+    assert.deepEqual(v.idioma("en"), { ok: true, toast: "Saved. What the server writes from now on, in English." });
+    assert.ok(salida.some((l) => l.msg === "Server language: English"));
+    nodo.ambiente(CASETA, { temperature: 33 });
+    await hasta(() => v.S.active.size === 1, 3000, "alarma");
+    assert.ok(salida.some((l) => l.nivel === "aviso" && l.msg === "Alarm: Caseta huerto · Temperature above 30.0 °C"));
+    assert.equal(v.S.log[0].text, "Caseta huerto · Temperature above 30.0 °C");
+    await v.detener();
+  }
+  setLanguage("es"); // as a new process would start
+  const { v } = await montar(t, { datos });
+  assert.equal(v.S.settings.language, "en");
+  assert.equal(getLanguage(), "en");
 });
 
 test("pedir datos desde el servidor sale por el receptor con el id capturado", async (t) => {

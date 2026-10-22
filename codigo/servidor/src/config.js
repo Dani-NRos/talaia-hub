@@ -13,6 +13,8 @@
 // «mosquitto» lo pone el instalador cuando instala Mosquitto: Vigía escribe sus usuarios en
 // <datos>/mosquitto/passwd y un servicio del sistema (vigia-mosquitto.path) lo pasa a Mosquitto y lo recarga.
 import fs from "node:fs";
+import { tx } from "@vigia/nucleo/idioma.js";
+import "./textos.js";
 
 export const RUTA_CONFIG = "/etc/vigia/servidor.json";
 
@@ -74,4 +76,4 @@ export function comprobar(dada) {
 }
 
 /** «por TCP en 192.168.1.60:4403», «por USB», «por USB en /dev/ttyACM0»: para el registro. */
-export const describirReceptor = (r) => (r.tipo === "tcp" ? `por TCP en ${r.host}:${r.puerto}` : r.puerto === "auto" ? "por USB" : `por USB en ${r.puerto}`);
+export const describirReceptor = (r) => (r.tipo === "tcp" ? tx("s.rx.desc.tcp", { addr: `${r.host}:${r.puerto}` }) : r.puerto === "auto" ? tx("s.rx.desc.usb") : tx("s.rx.desc.usbAt", { port: r.puerto }));

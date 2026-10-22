@@ -5,6 +5,8 @@
 import { EventEmitter } from "node:events";
 import mqtt from "mqtt";
 import { direccionesLocales } from "./mosquitto.js";
+import { tx } from "@vigia/nucleo/idioma.js";
+import "./textos.js";
 
 /** El broker de este equipo: no se guarda en la lista, sale de la configuración del servidor. */
 export const BROKER_LOCAL = "local";
@@ -66,11 +68,11 @@ export function comprobarBroker(dado, antes = {}) {
   b.nombre = String(b.nombre || "").trim();
   b.usuario = String(b.usuario || "").trim();
   b.url = String(b.url || "").trim();
-  if (!b.nombre) return { error: "Ponle un nombre al broker (por ejemplo, Home Assistant)." };
-  if (!b.url) return { error: "Falta la dirección del broker." };
-  if (!normalizarUrl(b.url)) return { error: "No entiendo la dirección del broker. Pon la IP o el nombre, por ejemplo 192.168.1.20 (o 192.168.1.20:1883)." };
-  if (b.clave && !b.usuario) return { error: "Con contraseña hace falta también el usuario (MQTT no admite una sin el otro)." };
-  if (b.nombre.length > 40 || b.url.length > 200 || b.usuario.length > 100 || b.clave.length > 200) return { error: "Algún dato es demasiado largo." };
+  if (!b.nombre) return { error: tx("s.mqtt.noName") };
+  if (!b.url) return { error: tx("s.mqtt.noUrl") };
+  if (!normalizarUrl(b.url)) return { error: tx("s.mqtt.badUrl") };
+  if (b.clave && !b.usuario) return { error: tx("s.mqtt.passNoUser") };
+  if (b.nombre.length > 40 || b.url.length > 200 || b.usuario.length > 100 || b.clave.length > 200) return { error: tx("s.mqtt.tooLong") };
   return { broker: { id: antes.id ?? dado.id, nombre: b.nombre, url: b.url, usuario: b.usuario, clave: b.clave, activado: b.activado } };
 }
 
@@ -78,10 +80,10 @@ export function comprobarBroker(dado, antes = {}) {
 export function comprobarHA(dado, antes = MQTT_DEFECTO.ha, existe = () => true) {
   const h = { ...MQTT_DEFECTO.ha, ...antes, ...dado };
   h.activado = !!h.activado;
-  if (h.activado && !h.broker) return { error: "Elige en qué broker publicar para Home Assistant." };
-  if (h.broker != null && !existe(h.broker)) return { error: "Ese broker ya no está en la lista." };
-  if (!TEMA_OK.test(h.base)) return { error: "El tema base solo puede llevar letras, números, «-», «_» y «/» (por ejemplo, vigia)." };
-  if (!TEMA_OK.test(h.prefijo)) return { error: "El prefijo de Home Assistant solo puede llevar letras, números, «-», «_» y «/» (normalmente, homeassistant)." };
+  if (h.activado && !h.broker) return { error: tx("s.mqtt.haBroker") };
+  if (h.broker != null && !existe(h.broker)) return { error: tx("s.mqtt.gone") };
+  if (!TEMA_OK.test(h.base)) return { error: tx("s.mqtt.badBase") };
+  if (!TEMA_OK.test(h.prefijo)) return { error: tx("s.mqtt.badPrefix") };
   return { ha: { activado: h.activado, broker: h.broker ?? null, base: h.base, prefijo: h.prefijo } };
 }
 
@@ -93,12 +95,12 @@ export function textoError(err) {
   const code = err?.code;
   const msg = String(err?.message || "");
   // Mosquitto contesta «no autorizado» (5) también cuando la contraseña está mal.
-  if ([4, 5, 134, 135].includes(code) || /bad user ?name or password|not authori[sz]ed/i.test(msg)) return "usuario o contraseña incorrectos, o el broker no deja entrar sin ellos";
-  if (code === "ECONNREFUSED") return "no hay ningún broker escuchando en esa dirección y puerto (¿está Mosquitto en marcha? ¿es el puerto 1883?)";
-  if (code === "ENOTFOUND" || code === "EAI_AGAIN") return "no se encuentra ese nombre en la red; prueba con la IP";
-  if (code === "ETIMEDOUT" || code === "EHOSTUNREACH" || code === "ENETUNREACH" || /timeout/i.test(msg)) return "no se llega a esa dirección (¿encendido? ¿en la misma red?)";
-  if (/certificate|self.signed|tls|ssl/i.test(msg)) return `problema con el cifrado (mqtts): ${msg}`;
-  return msg || String(code || "fallo desconocido");
+  if ([4, 5, 134, 135].includes(code) || /bad user ?name or password|not authori[sz]ed/i.test(msg)) return tx("s.mqtt.e.auth");
+  if (code === "ECONNREFUSED") return tx("s.mqtt.e.refused");
+  if (code === "ENOTFOUND" || code === "EAI_AGAIN") return tx("s.mqtt.e.notFound");
+  if (code === "ETIMEDOUT" || code === "EHOSTUNREACH" || code === "ENETUNREACH" || /timeout/i.test(msg)) return tx("s.mqtt.e.unreachable");
+  if (/certificate|self.signed|tls|ssl/i.test(msg)) return tx("s.mqtt.e.tls", { msg });
+  return msg || String(code || tx("s.mqtt.e.unknown"));
 }
 
 /** La promesa, o valor si tarda más de ms. */
@@ -160,27 +162,27 @@ export class ConexionMqtt extends EventEmitter {
     c.on("connect", () => {
       if (!mia()) return;
       this.ultimoError = null;
-      this.r.info(`${this.quien}: conectado a ${url}`);
+      this.r.info(tx("s.j.mqttUp", { who: this.quien, url }));
       this._fase("conectada");
       for (const s of this.subs) c.subscribe(s.patron, { qos: 0 });
       this.emit("conectada");
     });
     c.on("reconnect", () => { if (mia() && this.estado.fase !== "error") this._fase("conectando"); });
     c.on("close", () => {
-      if (mia() && this.estado.fase === "conectada") { this.r.aviso(`${this.quien}: se ha cortado la conexión con ${url}; reintentando`); this._fase("conectando"); }
+      if (mia() && this.estado.fase === "conectada") { this.r.aviso(tx("s.j.mqttCut", { who: this.quien, url })); this._fase("conectando"); }
     });
     c.on("error", (e) => {
       if (!mia()) return;
       const txt = textoError(e);
       // El mismo fallo se cuenta una vez, no en cada reintento (cada 5 s).
-      if (txt !== this.ultimoError) this.r.aviso(`${this.quien}: no se pudo conectar con ${url}: ${txt}`);
+      if (txt !== this.ultimoError) this.r.aviso(tx("s.j.mqttFail", { who: this.quien, url, why: txt }));
       this.ultimoError = txt;
       this._fase("error", txt);
     });
     c.on("message", (tema, carga, paquete) => {
       for (const s of this.subs) {
         if (!coincide(s.patron, tema)) continue;
-        try { s.fn(tema, carga, paquete); } catch (e) { this.r.error(`MQTT: al atender ${tema}: ${e.stack || e}`); }
+        try { s.fn(tema, carga, paquete); } catch (e) { this.r.error(tx("s.j.mqttHandler", { topic: tema, e: e.stack || e })); }
       }
     });
   }
@@ -235,7 +237,7 @@ export async function crearServicioMqtt(vigia, { crearSalidaHA, clienteId = "vig
   let cfg = { brokers: Array.isArray(leido.brokers) ? leido.brokers : [], ha: comprobarHA(leido.ha || {}).ha || { ...MQTT_DEFECTO.ha } };
   const activas = new Map(); // id → { conexion, soltar: [], ha, testamento }
 
-  const brokerLocal = () => (local ? { id: BROKER_LOCAL, nombre: "Este servidor", url: local.url, usuario: local.interno.usuario, clave: local.interno.clave, activado: true, local: true } : null);
+  const brokerLocal = () => (local ? { id: BROKER_LOCAL, nombre: tx("s.mqtt.localName"), url: local.url, usuario: local.interno.usuario, clave: local.interno.clave, activado: true, local: true } : null);
   const lista = () => [brokerLocal(), ...cfg.brokers].filter(Boolean);
   const buscar = (id) => lista().find((b) => b.id === id) || null;
   const despedida = () => ({ tema: `${cfg.ha.base}/estado`, carga: "offline" });
@@ -289,9 +291,9 @@ export async function crearServicioMqtt(vigia, { crearSalidaHA, clienteId = "vig
     },
     /** Añade (id null) o cambia un broker. Devuelve { ok, id?, toast?, error? }. */
     async configurarBroker(id, cambio) {
-      if (id === BROKER_LOCAL) return { ok: false, error: "El broker de este servidor no se cambia aquí: sus usuarios, abajo." };
+      if (id === BROKER_LOCAL) return { ok: false, error: tx("s.mqtt.localNoEdit") };
       const antes = id ? cfg.brokers.find((b) => b.id === id) : null;
-      if (id && !antes) return { ok: false, error: "Ese broker ya no está en la lista." };
+      if (id && !antes) return { ok: false, error: tx("s.mqtt.gone") };
       const { broker, error } = comprobarBroker(cambio, antes || {});
       if (error) return { ok: false, error };
       if (!antes) {
@@ -304,25 +306,25 @@ export async function crearServicioMqtt(vigia, { crearSalidaHA, clienteId = "vig
       await pararUno(broker.id, { retirarHA: !!antes && esHA(broker.id) && (otroSitio || !broker.activado) });
       cfg.brokers = antes ? cfg.brokers.map((b) => (b.id === broker.id ? broker : b)) : [...cfg.brokers, broker];
       guardar();
-      registro.info(`MQTT: broker «${broker.nombre}» (${normalizarUrl(broker.url)}) ${antes ? "cambiado" : "añadido"}${broker.activado ? "" : ", desconectado"}`);
+      registro.info(tx(antes ? "s.j.brokerChanged" : "s.j.brokerAdded", { name: broker.nombre, url: normalizarUrl(broker.url), off: broker.activado ? "" : tx("s.j.brokerOff") }));
       arrancarUno(broker);
       contar();
-      return { ok: true, id: broker.id, toast: broker.activado ? `Guardado. Conectando con ${broker.nombre}…` : "Guardado. Desconectado." };
+      return { ok: true, id: broker.id, toast: broker.activado ? tx("s.mqtt.savedConnecting", { name: broker.nombre }) : tx("s.mqtt.savedOff") };
     },
     /** Quita un broker que no use nadie. */
     async quitarBroker(id) {
-      if (id === BROKER_LOCAL) return { ok: false, error: "El broker de este servidor no se puede quitar." };
+      if (id === BROKER_LOCAL) return { ok: false, error: tx("s.mqtt.localNoRemove") };
       const b = cfg.brokers.find((x) => x.id === id);
-      if (!b) return { ok: false, error: "Ese broker ya no está en la lista." };
+      if (!b) return { ok: false, error: tx("s.mqtt.gone") };
       const quien = [...(esHA(id) ? ["Home Assistant"] : []), ...usos(id)];
-      if (quien.length) return { ok: false, error: `Lo usa: ${quien.join(", ")}. Cámbialo antes de quitarlo.` };
+      if (quien.length) return { ok: false, error: tx("s.mqtt.inUse", { who: quien.join(", ") }) };
       await pararUno(id);
       cfg.brokers = cfg.brokers.filter((x) => x.id !== id);
       if (cfg.ha.broker === id) cfg.ha.broker = null;
       guardar();
-      registro.info(`MQTT: broker «${b.nombre}» quitado`);
+      registro.info(tx("s.j.brokerRemoved", { name: b.nombre }));
       contar();
-      return { ok: true, toast: `Broker «${b.nombre}» quitado.` };
+      return { ok: true, toast: tx("s.mqtt.removed", { name: b.nombre }) };
     },
     /** La salida a Home Assistant: si se publica y en qué broker. */
     async configurarHA(cambio) {
@@ -336,21 +338,21 @@ export async function crearServicioMqtt(vigia, { crearSalidaHA, clienteId = "vig
       if (ahoraOn && ha.broker !== antes.broker) await pararUno(ha.broker);
       cfg.ha = ha;
       guardar();
-      registro.info(ahoraOn ? `Home Assistant: publicando en «${buscar(ha.broker).nombre}»` : "Home Assistant: apagado");
+      registro.info(ahoraOn ? tx("s.j.haOn", { name: buscar(ha.broker).nombre }) : tx("s.j.haOff"));
       if (antesOn) arrancarUno(buscar(antes.broker));
       if (ahoraOn) arrancarUno(buscar(ha.broker));
       contar();
-      return { ok: true, toast: ahoraOn ? "Guardado. Publicando en Home Assistant." : "Guardado. No se publica en Home Assistant." };
+      return { ok: true, toast: tx(ahoraOn ? "s.mqtt.haSaved" : "s.mqtt.haSavedOff") };
     },
     /** Usuarios del broker de este equipo. */
     ponerUsuario(nombre, clave) {
-      if (!local) return { ok: false, error: "En este equipo no hay broker propio (no se instaló Mosquitto)." };
+      if (!local) return { ok: false, error: tx("s.mqtt.noLocal") };
       const r = local.ponerUsuario(nombre, clave);
       contar();
       return r;
     },
     quitarUsuario(nombre) {
-      if (!local) return { ok: false, error: "En este equipo no hay broker propio." };
+      if (!local) return { ok: false, error: tx("s.mqtt.noLocalShort") };
       const r = local.quitarUsuario(nombre);
       contar();
       return r;

@@ -24,6 +24,8 @@ import { esClaveMqtt } from "@vigia/nucleo/mqtt-datos.js";
 import { ASK_ALL } from "@vigia/nucleo/motor.js";
 import { metricMeta } from "@vigia/nucleo/metrics.js";
 import { crearSincro, instantanea } from "./sincro.js";
+import { tx, getLanguage } from "@vigia/nucleo/idioma.js";
+import "./textos.js";
 
 const TIPOS = { ".html": "text/html; charset=utf-8", ".js": "text/javascript; charset=utf-8", ".css": "text/css; charset=utf-8",
   ".json": "application/json", ".webmanifest": "application/manifest+json", ".png": "image/png", ".svg": "image/svg+xml", ".ico": "image/x-icon" };
@@ -38,7 +40,7 @@ const esNodo = (n) => Number.isInteger(n) && n >= 0 && n <= 0xffffffff; // un no
 const esPanel = (n) => esNodo(n) || (Number.isInteger(n) && n < 0 && n >= -1e6); // o un panel sin nodo (negativo)
 const esMetrica = (k) => typeof k === "string" && /^[A-Za-z0-9]{1,40}$/.test(k);
 const esValor = (v) => v === null || (typeof v === "number" && Number.isFinite(v));
-function exigir(cond, que) { if (!cond) throw new ErrorOrden(`orden no válida: ${que}`); }
+function exigir(cond, que) { if (!cond) throw new ErrorOrden(tx("s.web.badOrder", { what: que })); }
 
 /** Las órdenes que puede mandar una pantalla. Cada una devuelve { ok, toast?, error? }. */
 function crearOrdenes(vigia) {
@@ -66,6 +68,7 @@ function crearOrdenes(vigia) {
     quitarValla: ({ num }) => { exigir(esNodo(num), "num"); return acciones.quitarValla(num); },
     sinSenalDefecto: ({ valor }) => { exigir(esValor(valor), "valor"); return acciones.sinSenalPorDefecto(valor); },
     retencion: ({ dias }) => { exigir(typeof dias === "number", "dias"); const r = acciones.retencion(dias); return { ok: r.ok }; },
+    idioma: ({ idioma }) => { exigir(typeof idioma === "string", "idioma"); return vigia.idioma(idioma); },
     malla: ({ cambio }) => {
       exigir(cambio && typeof cambio === "object", "cambio");
       const ks = Object.keys(cambio);
@@ -203,19 +206,19 @@ export function crearWeb(vigia, config, registro, opts = {}) {
   const leerCuerpo = (req) => new Promise((resolve, reject) => {
     let n = 0;
     const partes = [];
-    req.on("data", (c) => { n += c.length; if (n > MAX_CUERPO) { reject(new ErrorOrden("orden demasiado grande")); req.destroy(); } else partes.push(c); });
+    req.on("data", (c) => { n += c.length; if (n > MAX_CUERPO) { reject(new ErrorOrden(tx("s.web.tooBig"))); req.destroy(); } else partes.push(c); });
     req.on("end", () => resolve(Buffer.concat(partes).toString("utf8")));
     req.on("error", reject);
   });
 
   /* ── rutas ── */
   async function orden(req, res) {
-    if (!mismoOrigen(req)) return json(res, 403, { ok: false, error: "orden desde otra página" });
-    if (!/^application\/json\b/i.test(req.headers["content-type"] || "")) return json(res, 415, { ok: false, error: "las órdenes van en JSON" });
+    if (!mismoOrigen(req)) return json(res, 403, { ok: false, error: tx("s.web.otherPage") });
+    if (!/^application\/json\b/i.test(req.headers["content-type"] || "")) return json(res, 415, { ok: false, error: tx("s.web.json") });
     let cuerpo;
     try { cuerpo = JSON.parse(await leerCuerpo(req)); } catch (e) { return json(res, 400, { ok: false, error: e instanceof ErrorOrden ? e.message : "JSON no válido" }); }
     const f = ordenes[cuerpo?.orden];
-    if (!f) return json(res, 400, { ok: false, error: `orden desconocida: ${cuerpo?.orden}` });
+    if (!f) return json(res, 400, { ok: false, error: tx("s.web.unknownOrder", { what: cuerpo?.orden }) });
     // Los avisos cortos del motor durante la orden (p. ej. «espera 20 s») vuelven a quien la mandó.
     const avisos = [];
     const oir = (m) => avisos.push(m);
@@ -226,8 +229,8 @@ export function crearWeb(vigia, config, registro, opts = {}) {
       json(res, 200, { ok: !!r?.ok, toast: r?.toast || avisos[0], error: r?.error, ...(r?.radio != null ? { radio: r.radio } : {}), ...(r?.valor != null ? { valor: r.valor } : {}), ...(r?.temas ? { temas: r.temas } : {}), ...(r?.num != null ? { num: r.num } : {}) });
     } catch (e) {
       if (e instanceof ErrorOrden) return json(res, 400, { ok: false, error: e.message });
-      registro.error(`Orden «${cuerpo.orden}»: ${e.stack || e}`);
-      json(res, 500, { ok: false, error: "fallo del servidor" });
+      registro.error(tx("s.j.orderFail", { what: cuerpo.orden, e: e.stack || e }));
+      json(res, 500, { ok: false, error: tx("s.web.fail") });
     } finally {
       eventos.off("toast", oir);
     }
@@ -244,7 +247,7 @@ export function crearWeb(vigia, config, registro, opts = {}) {
   async function serie(url, res) {
     const num = Number(url.searchParams.get("nodo")), k = url.searchParams.get("metrica");
     const desde = Number(url.searchParams.get("desde") || 0), hasta = Number(url.searchParams.get("hasta") || Number.MAX_SAFE_INTEGER);
-    if (!esPanel(num) || !esMetrica(k) || !Number.isFinite(desde) || !Number.isFinite(hasta)) return json(res, 400, { error: "nodo, metrica, desde y hasta" });
+    if (!esPanel(num) || !esMetrica(k) || !Number.isFinite(desde) || !Number.isFinite(hasta)) return json(res, 400, { error: tx("s.web.seriesArgs") });
     json(res, 200, await S.store.series(num, k, desde, hasta));
   }
 
@@ -254,14 +257,16 @@ export function crearWeb(vigia, config, registro, opts = {}) {
    * resto del servidor entre bloque y bloque, para no parar las alarmas ni llenar la memoria.
    */
   async function csv(req, res) {
-    // El mismo formato que la exportación de la app: punto y coma, coma decimal y BOM para Excel.
+    // For a spreadsheet in the server's language: in Spanish, semicolons and decimal comma; in English, commas and
+    // decimal point. With a BOM, so Excel reads the accents.
     const fecha = new Date().toISOString().slice(0, 10);
-    res.writeHead(200, { "content-type": "text/csv; charset=utf-8", "content-disposition": `attachment; filename="vigia-servidor-${fecha}.csv"` });
+    const es = getLanguage() === "es", sep = es ? ";" : ",", dec = (v) => (es ? String(v).replace(".", ",") : String(v));
+    res.writeHead(200, { "content-type": "text/csv; charset=utf-8", "content-disposition": `attachment; filename="talaia-${fecha}.csv"` });
     const nombre = (n) => `"${vigia.motor.nodeName(n).replaceAll('"', "'")}"`;
     const bloque = vigia.almacen.db.prepare("SELECT nodo, metrica, t, v FROM lecturas WHERE (t, nodo, metrica) > (?, ?, ?) ORDER BY t, nodo, metrica LIMIT ?");
     let cortado = false;
     req.on("close", () => { cortado = true; });
-    let txt = "\ufefffecha;nodo;nombre;metrica;valor;unidad\n";
+    let txt = `\ufeff${tx("s.csv.head").split(",").join(sep)}\n`;
     let ultimo = [-1, -1, ""];
     for (;;) {
       const filas = bloque.all(...ultimo, CSV_BLOQUE);
@@ -269,7 +274,7 @@ export function crearWeb(vigia, config, registro, opts = {}) {
         const id = r.nodo < 0 ? `panel${-r.nodo}` : `!${(r.nodo >>> 0).toString(16).padStart(8, "0")}`;
         // Los datos MQTT, con su nombre («Temperatura nevera») en vez de su clave interna («mq3»).
         const met = esClaveMqtt(r.metrica) ? `"${metricMeta(r.metrica).label.replaceAll('"', "'")}"` : r.metrica;
-        txt += [new Date(r.t).toISOString(), id, nombre(r.nodo), met, String(r.v).replace(".", ","), metricMeta(r.metrica).unit].join(";") + "\n";
+        txt += [new Date(r.t).toISOString(), id, nombre(r.nodo), met, dec(r.v), metricMeta(r.metrica).unit].join(sep) + "\n";
       }
       if (filas.length < CSV_BLOQUE) break;
       const u = filas[filas.length - 1];
@@ -286,13 +291,13 @@ export function crearWeb(vigia, config, registro, opts = {}) {
     let rel = decodeURIComponent(url.pathname);
     if (rel === "/" || rel === "") rel = "/index.html";
     const f = path.resolve(appDir, `.${rel}`);
-    if (!f.startsWith(path.resolve(appDir) + path.sep)) return json(res, 404, { error: "no existe" });
+    if (!f.startsWith(path.resolve(appDir) + path.sep)) return json(res, 404, { error: tx("s.web.notFound") });
     if (!fs.existsSync(f) || !fs.statSync(f).isFile()) {
       if (rel === "/index.html") {
         res.writeHead(503, { "content-type": "text/html; charset=utf-8" });
-        return res.end(`<!doctype html><meta charset="utf-8"><title>Vigía servidor</title><p>El servidor está en marcha, pero la pantalla no está compilada (falta ${appDir}). Vuelve a ejecutar el instalador.</p>`);
+        return res.end(`<!doctype html><meta charset="utf-8"><title>Talaia</title><p>${tx("s.web.noApp", { dir: appDir })}</p>`);
       }
-      return json(res, 404, { error: "no existe" });
+      return json(res, 404, { error: tx("s.web.notFound") });
     }
     const tipo = TIPOS[path.extname(f)] || "application/octet-stream";
     if (rel === "/index.html") {
@@ -308,24 +313,24 @@ export function crearWeb(vigia, config, registro, opts = {}) {
   const servidor = http.createServer(async (req, res) => {
     try {
       if (req.headers["tailscale-funnel-request"]) {
-        if (!avisadoFunnel) { avisadoFunnel = true; registro.aviso("Web: llegan visitas por Tailscale Funnel (desde internet) y se rechazan: Vigía no tiene contraseña. Quita el Funnel («tailscale funnel reset») y usa «tailscale serve»."); }
-        return json(res, 403, { error: "Vigía no se puede abrir desde internet (Tailscale Funnel): solo desde tu red de Tailscale" });
+        if (!avisadoFunnel) { avisadoFunnel = true; registro.aviso(tx("s.j.funnel")); }
+        return json(res, 403, { error: tx("s.web.funnel") });
       }
-      if (!hostValido(req.headers.host)) return json(res, 421, { error: "nombre de servidor no admitido; añádelo a web.nombres en la configuración" });
+      if (!hostValido(req.headers.host)) return json(res, 421, { error: tx("s.web.host") });
       const url = new URL(req.url, "http://x");
       const p = url.pathname;
       if (req.method === "POST" && p === "/api/orden") return await orden(req, res);
-      if (req.method !== "GET" && req.method !== "HEAD") return json(res, 405, { error: "método no admitido" });
+      if (req.method !== "GET" && req.method !== "HEAD") return json(res, 405, { error: tx("s.web.method") });
       if (p === "/api/eventos") return eventosSse(req, res);
       if (p === "/api/estado") return json(res, 200, instantanea(S));
       if (p === "/api/serie") return await serie(url, res);
       if (p === "/api/lecturas.csv") return await csv(req, res);
       if (p === "/api/salud") return json(res, 200, { ok: true, receptor: S.link.state, nodos: S.nodes.size, alarmas: S.active.size, lecturas: await S.store.count() });
-      if (p.startsWith("/api/")) return json(res, 404, { error: "no existe" });
+      if (p.startsWith("/api/")) return json(res, 404, { error: tx("s.web.notFound") });
       return estatico(url, res);
     } catch (e) {
       registro.error(`Web: ${e.stack || e}`);
-      if (!res.headersSent) json(res, 500, { error: "fallo del servidor" });
+      if (!res.headersSent) json(res, 500, { error: tx("s.web.fail") });
       else res.end();
     }
   });

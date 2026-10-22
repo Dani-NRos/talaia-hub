@@ -37,7 +37,7 @@ test("contraseñas cifradas como las de mosquitto_passwd; usuarios válidos", ()
   }
   assert.equal(comprobarUsuario("shelly_salon", "12345678"), null);
   assert.match(comprobarUsuario("con espacio", "12345678"), /solo puede llevar/);
-  assert.match(comprobarUsuario(USUARIO_INTERNO, "12345678"), /es el usuario de Vigía/);
+  assert.match(comprobarUsuario(USUARIO_INTERNO, "12345678"), /es el usuario de Talaia/);
   assert.match(comprobarUsuario("shelly", "corta"), /al menos 8/);
 });
 

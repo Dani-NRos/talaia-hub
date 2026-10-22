@@ -7,6 +7,7 @@ import { crearMotor, estadoInicial, RE, askKey, trendKey, estadoKey, conexionKey
 import { crearAcciones } from "../src/acciones.js";
 import { registrarMetricas } from "../src/metrics.js";
 import { metaDato } from "../src/mqtt-datos.js";
+import { setLanguage } from "../src/idioma.js";
 
 const PORT = Protobuf.Portnums.PortNum;
 const T0 = Date.UTC(2026, 9, 18, 7, 0, 0); // 09:00 en Madrid
@@ -160,7 +161,7 @@ test("estado ON/OFF (servidor): «abierta más de 10 min», «desde» se mantien
   assert.equal(ev.alarmas.length, 1);
   assert.equal(motor.alarmTitle(al), "Garaje · Puerta: Abierta más de 10 min");
   assert.match(motor.alarmDetail(al), /^Abierta desde /);
-  assert.match(motor.meshText("raise", al), /^⚠ Vigía: Garaje · Puerta: Abierta desde las \d\d:\d\d · /);
+  assert.match(motor.meshText("raise", al), /^⚠ Talaia: Garaje · Puerta: Abierta desde las \d\d:\d\d · /);
   assert.equal(S.log[0].mqtt, true); // no va a Home Assistant
   // La lectura que guarda el servidor no le quita el «desde».
   motor.ingest(P, { mq1: 1 }, Date.now());
@@ -168,7 +169,7 @@ test("estado ON/OFF (servidor): «abierta más de 10 min», «desde» se mantien
   llega(0);
   assert.ok(!S.active.has(key));
   assert.equal(S.log[0].text, "Garaje · Puerta: Cerrada (tras 10 min)");
-  assert.match(motor.meshText("clear", al, { v: 0 }), /^✓ Vigía: Garaje · Puerta: Cerrada · /);
+  assert.match(motor.meshText("clear", al, { v: 0 }), /^✓ Talaia: Garaje · Puerta: Cerrada · /);
   // Al momento, cuando esté cerrada.
   assert.equal(acciones.ponerEstado(P, "mq1", 0, null).toast, "Avisará con «Cerrada»");
   assert.equal(motor.alarmTitle(S.active.get(key)), "Garaje · Puerta: Cerrada");
@@ -186,7 +187,7 @@ test("estado ON/OFF (servidor): «abierta más de 10 min», «desde» se mantien
   const c = { key: conexionKey(P), num: P, kind: "conexion", value: T0 };
   assert.equal(motor.alarmTitle(c), "Garaje · Sin conexión");
   assert.equal(motor.clearText(c, {}), "Garaje · Conectado otra vez");
-  assert.match(motor.meshText("raise", c), /^⚠ Vigía: Garaje sin conexión desde las /);
+  assert.match(motor.meshText("raise", c), /^⚠ Talaia: Garaje sin conexión desde las /);
 });
 
 test("valla antirrobo: hacen falta dos posiciones fuera; se cierra al volver dentro del 80 % del radio", (t) => {
@@ -353,14 +354,33 @@ test("aviso a un canal privado al saltar y al resolverse", async (t) => {
   motor.ingest(CASETA, { temperature: 31.2 }, T0);
   await flush();
   assert.equal(enviados.length, 1);
-  assert.deepEqual(enviados[0].args, ["broadcast", 1, "⚠ Vigía: Caseta · Temperatura 31,2 °C (máx 30,0) · 09:00"]);
+  assert.deepEqual(enviados[0].args, ["broadcast", 1, "⚠ Talaia: Caseta · Temperatura 31,2 °C (máx 30,0) · 09:00"]);
   enviados[0].ok();
   await flush();
   assert.equal(S.meshLast.result, "repetido por la malla");
   t.mock.timers.tick(10 * MIN);
   motor.ingest(CASETA, { temperature: 25 }, Date.now());
   await flush();
-  assert.equal(enviados[1].args[2], "✓ Vigía: Caseta · Temperatura de vuelta en rango (25,0 °C) · 09:10");
+  assert.equal(enviados[1].args[2], "✓ Talaia: Caseta · Temperatura de vuelta en rango (25,0 °C) · 09:10");
+});
+
+test("in English: the alert, its result and the log follow the server's language", async (t) => {
+  setLanguage("en");
+  t.after(() => setLanguage("es"));
+  const mesh = { enabled: true, channel: 1, node: null, onClear: true };
+  const { S, motor, enviados } = montar(t, { mesh, watched: { [CASETA]: vigilado({ temperature: { max: 30 } }) } });
+  motor.node(CASETA).long = "Caseta";
+  motor.ingest(CASETA, { temperature: 31.2 }, T0);
+  await flush();
+  assert.deepEqual(enviados[0].args, ["broadcast", 1, "⚠ Talaia: Caseta · Temperature 31.2 °C (max 30.0) · 09:00"]);
+  enviados[0].ok();
+  await flush();
+  assert.equal(S.meshLast.result, "relayed by the mesh");
+  assert.match(S.log.map((l) => l.text).join("\n"), /Caseta · Temperature above 30\.0 °C/);
+  t.mock.timers.tick(10 * MIN);
+  motor.ingest(CASETA, { temperature: 25 }, Date.now());
+  await flush();
+  assert.equal(enviados[1].args[2], "✓ Talaia: Caseta · Temperature back in range (25.0 °C) · 09:10");
 });
 
 test("un canal público nunca recibe avisos, aunque esté guardado", async (t) => {

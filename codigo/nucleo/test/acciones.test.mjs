@@ -3,6 +3,7 @@ import test from "node:test";
 import assert from "node:assert/strict";
 import { crearMotor, estadoInicial } from "../src/motor.js";
 import { crearAcciones } from "../src/acciones.js";
+import { setLanguage } from "../src/idioma.js";
 
 const T0 = Date.UTC(2026, 9, 18, 7);
 const CASETA = 0x3c6e19a2, GARAJE = 0x5d20b7f1;
@@ -24,7 +25,7 @@ test("vigilar: lo fija con el «sin señal» por defecto, lo apunta y evalúa; d
   const { S, a, guardado } = montar(t);
   S.settings.defaultOfflineMin = 45;
   const r = a.vigilar(CASETA);
-  assert.equal(r.toast, "Caseta fijado arriba. Ponle límites en su ficha.");
+  assert.equal(r.toast, "Caseta está ahora en el tablero. Ponle límites en su ficha.");
   assert.deepEqual(S.cfg.watched[CASETA], { offlineMin: 45, rules: {} });
   assert.equal(S.log[0].text, "Vigilando Caseta");
   assert.ok(guardado.includes("cfg"));
@@ -107,4 +108,15 @@ test("ajustes: «sin señal» por defecto y días de histórico", async (t) => {
   const r = a.retencion(365);
   assert.equal(S.settings.retentionDays, 365);
   await r.poda;
+});
+
+test("in English: replies and log lines in the server's language", (t) => {
+  setLanguage("en");
+  t.after(() => setLanguage("es"));
+  const { S, a } = montar(t);
+  assert.equal(a.vigilar(CASETA).toast, "Caseta is now on the dashboard. Set its limits in its sheet.");
+  assert.equal(S.log[0].text, "Watching Caseta");
+  assert.equal(a.ponerLimite(CASETA, "temperature", "max", 20).error, undefined);
+  assert.equal(a.ponerLimite(CASETA, "temperature", "min", 25).error, "For temperature the minimum has to be lower than the maximum.");
+  assert.match(a.avisosMalla({ channel: 0 }).toast, /public/i);
 });

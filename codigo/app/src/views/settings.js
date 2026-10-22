@@ -358,7 +358,13 @@ const RETENTION = [7, 30, 90, 365];
 function systemTab() {
   const s = S();
   const ret = RETENTION.map((d) => `<option value="${d}"${s.settings.retentionDays === d ? " selected" : ""}>${esc(d === 365 ? t("sys.keepYear") : t("sys.keepDays", { n: d }))}</option>`).join("");
-  return `<section class="blk"><h3>${esc(t("sys.history"))}</h3>
+  const srv = s.settings.language || "es";
+  const langs = LANGS.map((l) => `<option value="${l.code}"${l.code === srv ? " selected" : ""}>${l.name}</option>`).join("");
+  return `<section class="blk"><h3>${esc(t("sys.lang"))}</h3>
+      <div class="set-row"><label for="srvLang">${esc(t("screen.lang"))}</label><select id="srvLang" class="inp sel lang">${langs}</select></div>
+      <p class="hint">${esc(t("sys.langHint"))}</p>
+    </section>
+    <section class="blk"><h3>${esc(t("sys.history"))}</h3>
       <div class="set-row"><span id="histCount">${esc(t("sys.counting"))}</span><select id="setRet" class="inp sel" aria-label="${esc(t("sys.keepLabel"))}">${ret}</select></div>
       <p class="hint">${esc(t("sys.historyHint"))}</p>
       <div class="btns"><button type="button" class="btn ghost" data-export>${esc(t("sys.export"))}</button><button type="button" class="btn danger-ghost" data-wipe>${esc(t("sys.wipe"))}</button></div>
@@ -496,6 +502,11 @@ async function onChange(ev) {
     return renderSettings();
   }
   if (el.id === "setRet") { await orden({ orden: "retencion", dias: Number(el.value) }); return renderSettings(); }
+  if (el.id === "srvLang") {
+    const r = await orden({ orden: "idioma", idioma: el.value });
+    if (!r.ok) { el.value = s.settings.language || "es"; return toast(r.error); }
+    return toast(r.toast);
+  }
 }
 
 function onInput(ev) {

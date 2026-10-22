@@ -181,9 +181,9 @@ nodos vigilados*, elige el broker de Home Assistant y pulsa *Guardar* (viene apa
    Home Assistant (como `192.168.1.20`; si no pones puerto, usa el 1883), ese usuario y su contraseña. Luego, en
    *Home Assistant*, actívalo y elige ese broker.
 3. En Home Assistant aparecen solos, en Ajustes → Dispositivos y servicios → MQTT:
-   - **Vigía servidor**: receptor conectado, alarmas sin atender (sí/no y cuántas), alarmas activas, nodos oídos en la
+   - **Talaia** (el servidor): receptor conectado, alarmas sin atender (sí/no y cuántas), alarmas activas, nodos oídos en la
      última hora, último aviso por la malla, el evento *Alarmas* y el botón *Enterado todas*.
-   - **Vigía · Caseta huerto** (uno por cada nodo vigilado): sus lecturas (temperatura, humedad, batería…), cuándo se
+   - **Talaia · Caseta huerto** (uno por cada nodo vigilado): sus lecturas (temperatura, humedad, batería…), cuándo se
      oyó por última vez, saltos y SNR; y por cada alarma que le tengas puesta, un sensor (encendido mientras salta,
      con el detalle en sus atributos) y su botón *Enterado*. La posición no se manda.
 
@@ -335,4 +335,4 @@ mqtt_statestream:
 
 Con `publish_attributes: true` sale también la unidad de cada uno y Vigía la elige sola. Cada uno sale en
 `ha_estados/sensor/estacion_temperatura/state` (retenido: Vigía lo tiene nada más conectar). No incluyas los sensores
-«Vigía · …»: Vigía rechaza sus propios temas para no volver a recibir lo que ya publica él.
+«Talaia · …»: Vigía rechaza sus propios temas para no volver a recibir lo que ya publica él.

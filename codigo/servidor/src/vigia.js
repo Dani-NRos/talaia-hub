@@ -6,13 +6,15 @@ import { crearMotor, estadoInicial, INFO_SUPPRESS } from "@vigia/nucleo/motor.js
 import { crearAcciones } from "@vigia/nucleo/acciones.js";
 import { HOUR, DAY } from "@vigia/nucleo/textos.js";
 import { abrirAlmacen } from "./almacen.js";
-import { ReceptorNodo, CONSEJO } from "./receptor.js";
+import { ReceptorNodo, consejo } from "./receptor.js";
 import { describirReceptor } from "./config.js";
 import os from "node:os";
 import { crearServicioMqtt, migrar as migrarMqtt } from "./mqtt.js";
 import { crearSalidaHA } from "./homeassistant.js";
 import { crearPaneles, migrarEstacion } from "./paneles.js";
 import { crearBrokerLocal } from "./mosquitto.js";
+import { tx, setLanguage, localeOf, LANGUAGES } from "@vigia/nucleo/idioma.js";
+import "./textos.js";
 
 const GUARDAR_NODOS_MS = 30000; // la lista de nodos (cientos) se guarda como mucho cada 30 s
 const DIAG_MAX = 200;
@@ -29,6 +31,9 @@ export async function crearVigia(config, registro, opts = {}) {
 
   /* ── estado guardado ── */
   S.settings = { ...S.settings, retentionDays: config.retencionDias, ...almacen.leer("settings", {}) };
+  // What the server writes (log, mesh alerts, Home Assistant, replies, the journal), in its language.
+  if (!LANGUAGES.includes(S.settings.language)) S.settings.language = "es";
+  setLanguage(S.settings.language);
   S.cfg = almacen.leer("cfg", { watched: {} }) || { watched: {} };
   if (!S.cfg.watched) S.cfg.watched = {};
   S.nodes = new Map((almacen.leer("nodes", []) || []).map((n) => [n.num, n]));
@@ -47,7 +52,7 @@ export async function crearVigia(config, registro, opts = {}) {
     add(rows) {
       if (cerrado) return Promise.resolve();
       eventos.emit("filas", rows);
-      return almacen.lecturas.add(rows).catch((e) => registro.error(`No se pudo guardar una lectura: ${e.message}`));
+      return almacen.lecturas.add(rows).catch((e) => registro.error(tx("s.j.saveFail", { e: e.message })));
     },
   };
 
@@ -65,7 +70,7 @@ export async function crearVigia(config, registro, opts = {}) {
     channels: () => almacen.guardar("channels", S.channels),
     lora: () => almacen.guardar("lora", S.lora),
     my: () => almacen.guardar("my", S.myNode),
-    settings: () => almacen.guardar("settings", { defaultOfflineMin: S.settings.defaultOfflineMin, retentionDays: S.settings.retentionDays, mesh: S.settings.mesh }),
+    settings: () => almacen.guardar("settings", { defaultOfflineMin: S.settings.defaultOfflineMin, retentionDays: S.settings.retentionDays, mesh: S.settings.mesh, language: S.settings.language }),
   };
   // Lo que entra en el registro de Vigía (alarmas, Enterado, peticiones, avisos) va también al del sistema.
   let ultimo = S.log[0] || null;
@@ -73,7 +78,7 @@ export async function crearVigia(config, registro, opts = {}) {
     const nuevas = [];
     for (const e of S.log) { if (e === ultimo) break; nuevas.push(e); }
     ultimo = S.log[0] || null;
-    for (const e of nuevas.reverse()) (e.type === "raise" ? registro.aviso : registro.info)(`${e.type === "raise" ? "Alarma" : e.type === "clear" ? "Resuelta" : e.type === "ack" ? "Vista" : "Registro"}: ${e.text}`);
+    for (const e of nuevas.reverse()) (e.type === "raise" ? registro.aviso : registro.info)(tx(`s.j.log.${["raise", "clear", "ack"].includes(e.type) ? e.type : "info"}`, { text: e.text }));
   }
 
   /* ── motor ── */
@@ -110,7 +115,7 @@ export async function crearVigia(config, registro, opts = {}) {
     S.diag.unshift(e);
     if (S.diag.length > DIAG_MAX) S.diag.length = DIAG_MAX;
     // Cada fallo ya lo cuenta onTrouble (y no en cada reintento): aquí, solo con el nivel «depurar».
-    (/^Fallo en fase/.test(e.msg) ? registro.depurar : registro.info)(`Receptor: ${e.msg}`);
+    (e.stage ? registro.depurar : registro.info)(tx("s.j.receiver", { msg: e.msg }));
     eventos.emit("diag", e);
   }
 
@@ -124,7 +129,7 @@ export async function crearVigia(config, registro, opts = {}) {
     onStatus(state, extra) {
       const antes = S.link.state;
       S.link = { state, extra: extra || null };
-      if (state !== antes) registro.depurar(`Receptor: ${state}`);
+      if (state !== antes) registro.depurar(tx("s.j.receiver", { msg: state }));
       eventos.emit("cambio");
     },
     onDevice(dev) { S.device = dev; },
@@ -135,8 +140,8 @@ export async function crearVigia(config, registro, opts = {}) {
       avisados = 0;
       motor.clearAlarm("link", {});
       if (S.myNode != null) S.device = { ...S.device, name: motor.nodeName(S.myNode) };
-      motor.addLog("info", `Receptor listo ${receptor.kind === "tcp" ? "por la red" : "por cable"}: ${S.myNode != null ? motor.nodeName(S.myNode) : S.device?.name || "nodo"}`);
-      registro.info(`Base de nodos: ${S.nodes.size.toLocaleString("es-ES")} nodos conocidos, ${Object.keys(S.cfg.watched).length} vigilados`);
+      motor.addLog("info", tx(receptor.kind === "tcp" ? "s.log.readyNet" : "s.log.readyUsb", { name: S.myNode != null ? motor.nodeName(S.myNode) : S.device?.name || tx("s.node") }));
+      registro.info(tx("s.j.nodes", { n: S.nodes.size.toLocaleString(localeOf()), watched: Object.keys(S.cfg.watched).length }));
       motor.evalOffline();
       eventos.emit("cambio");
     },
@@ -145,11 +150,11 @@ export async function crearVigia(config, registro, opts = {}) {
       motor.evalOffline();
     },
     onTrouble(info) {
-      S.trouble = { ...info, consejo: CONSEJO[info.kind] || "" };
+      S.trouble = { ...info, consejo: consejo(info.kind) };
       // Al principio, cada fallo; luego, de vez en cuando, para no llenar el diario si el nodo está desenchufado.
       avisados++;
       if (avisados <= 3 || avisados % 20 === 0) {
-        registro.aviso(`No se pudo conectar con el receptor ${describirReceptor(config.receptor)} (intento ${info.count}): ${info.detail || info.kind}. ${CONSEJO[info.kind] || ""}`.trim());
+        registro.aviso(tx("s.j.rxFail", { how: describirReceptor(config.receptor), n: info.count, why: info.detail || info.kind, tip: consejo(info.kind) }).trim());
       }
       eventos.emit("cambio");
     },
@@ -181,9 +186,9 @@ export async function crearVigia(config, registro, opts = {}) {
     try {
       const n = await almacen.lecturas.prune(Date.now() - dias * DAY);
       const total = await almacen.lecturas.count();
-      registro.info(`Histórico: ${total.toLocaleString("es-ES")} lecturas de los últimos ${dias} días${n ? ` (${n.toLocaleString("es-ES")} más antiguas borradas)` : ""}; base de datos de ${(almacen.tamano() / 1048576).toFixed(1)} MB`);
+      registro.info(tx("s.j.history", { total: total.toLocaleString(localeOf()), days: dias, pruned: n ? tx("s.j.historyPruned", { n: n.toLocaleString(localeOf()) }) : "", mb: (almacen.tamano() / 1048576).toLocaleString(localeOf(), { minimumFractionDigits: 1, maximumFractionDigits: 1 }) }));
     } catch (e) {
-      registro.error(`No se pudo podar el histórico: ${e.message}`);
+      registro.error(tx("s.j.pruneFail", { e: e.message }));
     }
   }
   await podar();
@@ -194,18 +199,31 @@ export async function crearVigia(config, registro, opts = {}) {
     const oidos = [...S.nodes.values()].filter((n) => n.num >= 0 && n.lastHeard >= hace).length;
     const lecturas = await almacen.lecturas.count(hace).catch(() => 0);
     const activas = [...S.active.values()];
-    const estado = S.link.state === "ready" ? "conectado" : S.link.state === "idle" ? "parado" : "sin conexión, reintentando";
-    registro.info(`Resumen de la última hora: receptor ${estado}; ${oidos} nodos oídos; ${lecturas} lecturas guardadas; ${activas.length ? `${activas.length} alarmas activas (${activas.filter((a) => !a.acked).length} sin ver)` : "sin alarmas"}`);
+    const estado = tx(S.link.state === "ready" ? "s.j.sum.up" : S.link.state === "idle" ? "s.j.sum.idle" : "s.j.sum.down");
+    const alarmas = activas.length ? tx("s.j.sum.alarms", { n: activas.length, unseen: activas.filter((a) => !a.acked).length }) : tx("s.j.sum.noAlarms");
+    registro.info(tx("s.j.summary", { state: estado, heard: oidos, readings: lecturas, alarms: alarmas }));
   }
   const resumenId = setInterval(resumen, HOUR);
 
   return {
     S, motor, acciones, almacen, eventos, mqtt, paneles,
     get receptor() { return receptor; },
+    /** The server's language: what it writes from now on (what is already in the log stays as it was). */
+    idioma(l) {
+      if (!LANGUAGES.includes(l)) return { ok: false };
+      if (l !== S.settings.language) {
+        S.settings.language = l;
+        setLanguage(l);
+        paneles.reetiquetar();
+        motor.guardar("settings"); // to the screens; Home Assistant gets its names again
+        registro.info(tx("s.j.language", { name: tx(`s.lang.${l}`) }));
+      }
+      return { ok: true, toast: tx("s.lang.saved") };
+    },
     /** Empieza a conectar con el receptor (y a reintentar mientras no se pare). */
     arrancar() {
-      registro.info(`Receptor ${describirReceptor(config.receptor)}${config.receptor.tipo === "usb" && config.receptor.puerto === "auto" ? " (el nodo que haya enchufado)" : ""}`);
-      registro.info(`Avisos por la malla: ${S.settings.mesh?.enabled ? "encendidos" : "apagados"}`);
+      registro.info(tx("s.j.rxStart", { how: describirReceptor(config.receptor), auto: config.receptor.tipo === "usb" && config.receptor.puerto === "auto" ? tx("s.j.rxAuto") : "" }));
+      registro.info(tx(S.settings.mesh?.enabled ? "s.j.alertsOn" : "s.j.alertsOff"));
       receptor.start();
       mqtt.arrancar();
       paneles.arrancar();

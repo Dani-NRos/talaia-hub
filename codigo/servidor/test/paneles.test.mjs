@@ -152,7 +152,7 @@ test("estados ON/OFF y conexión: un enchufe Tasmota con su LWT y una puerta de 
     { tipo: "estado", nombre: "Enchufe", broker: "b1", tema: "stat/enchufe/POWER" },
     { tipo: "estado", nombre: "Puerta", nombres: "abierta", invertir: true, broker: "b1", tema: "zigbee2mqtt/Puerta", campo: "contact" },
   ];
-  assert.match(paneles.guardarDatos(num, datos, { broker: "b1", tema: "vigia/estado" }).error, /publica Vigía/);
+  assert.match(paneles.guardarDatos(num, datos, { broker: "b1", tema: "vigia/estado" }).error, /publica Talaia/);
   assert.equal(paneles.guardarDatos(num, datos, { broker: "b1", tema: "tele/enchufe/LWT", avisar: true }).ok, true);
   const n = S.nodes.get(num);
   await hasta(() => n.metrics.mq1?.v === 1 && n.metrics.mq2?.v === 0 && n.conectado === false, 3000, "estados y conexión");
@@ -270,7 +270,7 @@ test("encender y apagar un Shelly desde Vigía: espera a que diga que lo ha hech
   assert.equal(S.paneles.ordenes.mq1.enviando, true);
   await hasta(() => n.metrics.mq1.v === 1 && n.metrics.mq3?.v === 45, 3000, "encendido");
   await hasta(() => !S.paneles.ordenes.mq1, 3000, "confirmada");
-  assert.equal(S.log[0].text, "Taller · Enchufe: Encendido (orden desde Vigía)");
+  assert.equal(S.log[0].text, "Taller · Enchufe: Encendido (orden desde Talaia)");
   assert.match((await paneles.mandar(num, "mq3", 1)).error, /no se puede encender ni apagar/);
   assert.match((await paneles.mandar(num, "mq9", 1)).error, /ya no está/);
   // A device that answers before the broker acknowledges the order (on the same broker it can): it still counts.
@@ -280,7 +280,7 @@ test("encender y apagar un Shelly desde Vigía: espera a que diga que lo ha hech
   assert.equal((await paneles.mandar(num, "mq1", 0)).ok, true);
   con.publicar = publicar;
   assert.equal(S.paneles.ordenes.mq1, undefined, "nada esperando");
-  assert.equal(S.log[0].text, "Taller · Enchufe: Apagado (orden desde Vigía)");
+  assert.equal(S.log[0].text, "Taller · Enchufe: Apagado (orden desde Talaia)");
   // Uno que no contesta: a los 10 s, «no ha contestado» (aquí, con el reloj de la prueba).
   t.mock.timers.enable({ apis: ["setTimeout"] });
   assert.equal((await paneles.mandar(num, "mq2", 1)).ok, true);
@@ -343,7 +343,7 @@ test("panel de un nodo: renombrar, datos MQTT junto a los suyos (sin tocar cuán
   // A Home Assistant va lo del nodo, no lo MQTT; y el nombre del dispositivo es el de Vigía.
   const ID = CASETA.toString(16).padStart(8, "0");
   await hasta(() => ha.visto.get(`homeassistant/sensor/vigia_${ID}/temperature/config`), 5000, "sensor del nodo en HA");
-  await hasta(() => JSON.parse(ha.visto.get(`homeassistant/sensor/vigia_${ID}/temperature/config`)).device.name === "Vigía · Huerto", 5000, "nombre en HA");
+  await hasta(() => JSON.parse(ha.visto.get(`homeassistant/sensor/vigia_${ID}/temperature/config`)).device.name === "Talaia · Huerto", 5000, "nombre en HA");
   await new Promise((r) => setTimeout(r, 1500));
   assert.ok(![...ha.visto.keys()].some((k) => k.includes("/mq1/")), "el dato MQTT no va a HA");
   assert.ok(!("mq1" in (JSON.parse(ha.visto.get(`vigia/nodo/${ID}/estado`) || "{}").m || {})));

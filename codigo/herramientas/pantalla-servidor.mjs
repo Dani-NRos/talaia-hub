@@ -182,7 +182,7 @@ await paso("avisos por la malla desde el servidor: canal privado", async () => {
   nodo.paquete({ from: ME, payloadVariant: { case: "decoded", value: create(M.DataSchema, { portnum: PORT.ROUTING_APP, payload: rout, requestId: p.id }) } });
   await sleep(800);
   await ir(movil, "settings/mesh");
-  await esperarTexto(movil, /Último: «⚠ Vigía: Caseta huerto · Temperatura 33,0 °C[\s\S]*repetido por la malla/, "último aviso en ajustes del móvil");
+  await esperarTexto(movil, /Último: «⚠ Talaia: Caseta huerto · Temperatura 33,0 °C[\s\S]*repetido por la malla/, "último aviso en ajustes del móvil");
 });
 await foto(movil, "movil-ajustes");
 await ir(movil, "dashboard");
@@ -234,7 +234,7 @@ await paso("MQTT desde Ajustes: añadir el broker de Home Assistant (con contras
   await esperarMqtt(() => visto.get("vigia/estado") === "online", "online");
   await esperarMqtt(() => visto.get(`homeassistant/sensor/vigia_${ID}/temperature/config`), "sensor de temperatura");
   const cfg = JSON.parse(visto.get(`homeassistant/sensor/vigia_${ID}/temperature/config`));
-  if (cfg.device.name !== "Vigía · Caseta huerto") throw new Error(`nombre del dispositivo: ${cfg.device.name}`);
+  if (cfg.device.name !== "Talaia · Caseta huerto") throw new Error(`nombre del dispositivo: ${cfg.device.name}`);
   if (/clave-secreta/.test(await (await fetch(`${URL0}api/estado`)).text())) throw new Error("la contraseña sale en /api/estado");
 });
 
@@ -385,7 +385,7 @@ await paso("renombrar un nodo desde el móvil: sale con su nombre nuevo en el PC
   await esperarTexto(movil, /Ahora se llama «Huerto»/, "aviso del nombre");
   await movil.keyboard.press("Escape");
   await esperarTexto(pc, /Paneles[\s\S]*Huerto/i, "el nombre nuevo en el PC");
-  await esperarMqtt(() => JSON.parse(visto.get(`homeassistant/sensor/vigia_${ID}/temperature/config`) || "{}").device?.name === "Vigía · Huerto", "dispositivo renombrado en HA");
+  await esperarMqtt(() => JSON.parse(visto.get(`homeassistant/sensor/vigia_${ID}/temperature/config`) || "{}").device?.name === "Talaia · Huerto", "dispositivo renombrado en HA");
 });
 
 await paso("panel nuevo sin nodo (Tasmota): sus datos, una alarma y nada a Home Assistant", async () => {
@@ -517,7 +517,7 @@ await paso("encender y apagar un Shelly desde la tarjeta del móvil: propone el 
   await esperarTexto(movil, /SHELLY\s*Encendido/i, "encendido en la tarjeta del móvil");
   if (!output) throw new Error("el Shelly no se ha encendido");
   await ir(pc, "alarms");
-  await esperarTexto(pc, /Shelly: Encendido \(orden desde Vigía\)/, "en el registro del PC");
+  await esperarTexto(pc, /Shelly: Encendido \(orden desde Talaia\)/, "en el registro del PC");
   await ir(pc, "dashboard");
   if ((await sw.getAttribute("aria-checked")) !== "true") throw new Error("el interruptor no está encendido");
   await foto(movil, "movil-interruptor");
@@ -556,6 +556,23 @@ await paso("quitar el panel del enchufe desde el móvil", async () => {
   if (st.active.some((a) => a.num < 0)) throw new Error("su alarma sigue activa");
 });
 await foto(movil, "movil-tras-reinicio");
+await paso("idioma del servidor: en inglés para Home Assistant y lo que contesta; las dos pantallas lo ven; vuelta al español", async () => {
+  const cfgTemp = () => JSON.parse(visto.get(`homeassistant/sensor/vigia_${ID}/temperature/config`) || "{}");
+  await ir(pc, "settings/system");
+  await ir(movil, "settings/system");
+  await pc.selectOption("#srvLang", "en");
+  await esperarTexto(pc, /What the server writes from now on, in English/, "respuesta en inglés");
+  await esperarMqtt(() => cfgTemp().name === "Temperature", "nombres en inglés en HA");
+  if (cfgTemp().device?.name !== "Talaia · Huerto") throw new Error(`dispositivo: ${cfgTemp().device?.name}`);
+  for (let i = 0; i < 20 && (await movil.inputValue("#srvLang")) !== "en"; i++) await sleep(200);
+  if ((await movil.inputValue("#srvLang")) !== "en") throw new Error("el móvil no ve el idioma nuevo");
+  await foto(pc, "pc-idioma-servidor");
+  await pc.selectOption("#srvLang", "es");
+  await esperarTexto(pc, /Lo que escriba el servidor desde ahora, en español/, "respuesta en español");
+  await esperarMqtt(() => cfgTemp().name === "Temperatura", "nombres en español en HA");
+  await ir(pc, "dashboard");
+  await ir(movil, "dashboard");
+});
 await paso("al pararse avisa a Home Assistant (offline) y al volver se conecta solo (online)", async () => {
   await esperarMqtt(() => estados.lastIndexOf("offline") >= 0 && estados.lastIndexOf("online") > estados.lastIndexOf("offline"), "offline y luego online", 15000);
 });

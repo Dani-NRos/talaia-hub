@@ -214,20 +214,20 @@ export function leerValor(carga, campo = "") {
   let x = s;
   if (campo) {
     let j;
-    try { j = JSON.parse(s); } catch { return { error: "no llega un JSON" }; }
+    try { j = JSON.parse(s); } catch { return { error: tx("md.noJson") }; }
     for (const k of campo.split(".")) {
-      if (j == null || typeof j !== "object" || Array.isArray(j) || !(k in j)) return { error: `el JSON no trae «${campo}»`, falta: true };
+      if (j == null || typeof j !== "object" || Array.isArray(j) || !(k in j)) return { error: tx("md.noField", { field: campo }), falta: true };
       j = j[k];
     }
     if (j == null) return { nulo: true };
     if (typeof j === "number") return Number.isFinite(j) ? { v: j } : { nulo: true };
-    if (typeof j !== "string") return { error: `«${campo}» no es un número` };
+    if (typeof j !== "string") return { error: tx("md.fieldNotNumber", { field: campo }) };
     x = j.trim();
   }
   if (NO_DISPONIBLE.test(x)) return { nulo: true };
-  if (!campo && /^[{[]/.test(x)) return { error: "llega un JSON: indica el campo" };
+  if (!campo && /^[{[]/.test(x)) return { error: tx("md.isJson") };
   const n = Number(/^-?\d+,\d+$/.test(x) ? x.replace(",", ".") : x);
-  return Number.isFinite(n) ? { v: n } : { error: `«${x.slice(0, 30)}» no es un número` };
+  return Number.isFinite(n) ? { v: n } : { error: tx("md.notNumber", { x: x.slice(0, 30) }) };
 }
 
 const ES_ON = /^(on|true|1|yes|si|sí|open|opened|abierto|abierta|online|connected|conectado|detected|wet|occupied|motion|active|high|encendido|power_on|running)$/i;
@@ -242,20 +242,20 @@ export function leerEstado(carga, campo = "", invertir = false) {
   let x = String(carga ?? "").trim();
   if (campo) {
     let j;
-    try { j = JSON.parse(x); } catch { return { error: "no llega un JSON" }; }
+    try { j = JSON.parse(x); } catch { return { error: tx("md.noJson") }; }
     for (const k of campo.split(".")) {
-      if (j == null || typeof j !== "object" || Array.isArray(j) || !(k in j)) return { error: `el JSON no trae «${campo}»`, falta: true };
+      if (j == null || typeof j !== "object" || Array.isArray(j) || !(k in j)) return { error: tx("md.noField", { field: campo }), falta: true };
       j = j[k];
     }
     if (j == null) return { nulo: true };
     if (typeof j === "boolean") return { v: j !== invertir ? 1 : 0 };
-    if (typeof j !== "string" && typeof j !== "number") return { error: `«${campo}» no es un estado ON/OFF` };
+    if (typeof j !== "string" && typeof j !== "number") return { error: tx("md.fieldNotState", { field: campo }) };
     x = String(j).trim();
   }
   if (NO_DISPONIBLE.test(x)) return { nulo: true };
-  if (!campo && /^[{[]/.test(x)) return { error: "llega un JSON: indica el campo" };
+  if (!campo && /^[{[]/.test(x)) return { error: tx("md.isJson") };
   const on = ES_ON.test(x), off = !on && ES_OFF.test(x);
-  if (!on && !off) return { error: `«${x.slice(0, 30)}» no es un estado ON/OFF` };
+  if (!on && !off) return { error: tx("md.notState", { x: x.slice(0, 30) }) };
   return { v: on !== invertir ? 1 : 0 };
 }
 /** ¿Parece un estado (y no un número)? Para buscar temas. */
@@ -277,7 +277,7 @@ export function convertir(tipo, unidad, v) {
   const f = t.otras?.[unidad];
   const x = f ? f(v) : v;
   const [lo, hi] = t.rango || [-Infinity, Infinity];
-  if (!(x >= lo && x <= hi)) return { error: `${textoValor(tipo, x, unidad)} no es normal: ¿está bien la unidad?` };
+  if (!(x >= lo && x <= hi)) return { error: tx("md.odd", { v: textoValor(tipo, x, unidad) }) };
   return { v: Math.round(x * 1e4) / 1e4 };
 }
 
@@ -307,10 +307,10 @@ export function comprobarMalla(dada, antes = MALLA_DEFECTO) {
   const c = { ...MALLA_DEFECTO, ...antes, ...dada };
   c.activado = !!c.activado;
   c.cada = Number(c.cada);
-  if (!MALLA_CADA.includes(c.cada)) return { error: "Elige cada cuánto se manda." };
-  if (c.canal != null && !(entero(c.canal) && c.canal >= 0 && c.canal <= 7)) return { error: "El canal no es válido." };
-  if (c.saltos != null && !(entero(c.saltos) && c.saltos >= 1 && c.saltos <= MALLA_MAX_SALTOS)) return { error: "Los saltos no son válidos." };
-  if (c.activado && c.canal == null) return { error: "Elige por qué canal se manda." };
+  if (!MALLA_CADA.includes(c.cada)) return { error: tx("md.every") };
+  if (c.canal != null && !(entero(c.canal) && c.canal >= 0 && c.canal <= 7)) return { error: tx("md.channel") };
+  if (c.saltos != null && !(entero(c.saltos) && c.saltos >= 1 && c.saltos <= MALLA_MAX_SALTOS)) return { error: tx("md.hops") };
+  if (c.activado && c.canal == null) return { error: tx("md.chooseChannel") };
   return { malla: { activado: c.activado, cada: c.cada, canal: c.canal, saltos: c.saltos } };
 }
 
@@ -320,63 +320,63 @@ export function comprobarMalla(dada, antes = MALLA_DEFECTO) {
  *       brokers: ids de los brokers que hay (null: no se comprueba); receptor: es el panel del receptor (malla).
  */
 export function comprobarDatos(lista, { temaProhibido = () => null, brokers = null, receptor = false } = {}) {
-  if (!Array.isArray(lista) || lista.length > MAX_DATOS) return { error: "La lista de datos no es válida." };
+  if (!Array.isArray(lista) || lista.length > MAX_DATOS) return { error: tx("md.list") };
   const datos = [], nombres = new Set(), aLaMalla = new Set();
   for (const d of lista) {
-    if (!d || typeof d !== "object") return { error: "La lista de datos no es válida." };
+    if (!d || typeof d !== "object") return { error: tx("md.list") };
     const tipo = d.tipo;
-    if (!TIPOS[tipo]) return { error: "Elige qué tipo de dato es cada uno." };
+    if (!TIPOS[tipo]) return { error: tx("md.type") };
     const nombre = String(d.nombre ?? "").trim();
-    if (nombre.length > 40) return { error: `El nombre «${nombre.slice(0, 20)}…» es demasiado largo (hasta 40 letras).` };
+    if (nombre.length > 40) return { error: tx("md.nameLong", { name: nombre.slice(0, 20) }) };
     const visto = nombreDato({ nombre, tipo });
-    if (nombres.has(visto.toLowerCase())) return { error: `Hay dos «${visto}»: ponle un nombre distinto a cada uno.` };
+    if (nombres.has(visto.toLowerCase())) return { error: tx("md.twice", { name: visto }) };
     nombres.add(visto.toLowerCase());
-    if (d.clave != null && !esClaveMqtt(d.clave)) return { error: "La lista de datos no es válida." };
+    if (d.clave != null && !esClaveMqtt(d.clave)) return { error: tx("md.list") };
     const tema = String(d.tema ?? "").trim();
     const campo = String(d.campo ?? "").trim();
-    if (!tema) return { error: `Falta el tema MQTT de «${visto}».` };
-    if (/[+#\0]/.test(tema)) return { error: `El tema de «${visto}» no puede llevar «+» ni «#»: tiene que ser uno concreto.` };
-    if (tema.length > 250 || campo.length > 100) return { error: `El tema o el campo de «${visto}» es demasiado largo.` };
-    if (campo && campo.split(".").some((p) => !p)) return { error: `El campo de «${visto}» no es válido (por ejemplo, temperature o ENERGY.Power).` };
+    if (!tema) return { error: tx("md.noTopic", { name: visto }) };
+    if (/[+#\0]/.test(tema)) return { error: tx("md.wildcard", { name: visto }) };
+    if (tema.length > 250 || campo.length > 100) return { error: tx("md.topicLong", { name: visto }) };
+    if (campo && campo.split(".").some((p) => !p)) return { error: tx("md.field", { name: visto }) };
     const broker = String(d.broker ?? "").trim();
-    if (!broker) return { error: `Elige el broker de «${visto}».` };
-    if (brokers && !brokers.has(broker)) return { error: `El broker de «${visto}» ya no está en la lista.` };
+    if (!broker) return { error: tx("md.broker", { name: visto }) };
+    if (brokers && !brokers.has(broker)) return { error: tx("md.brokerGone", { name: visto }) };
     const prohibido = temaProhibido(tema);
-    if (prohibido) return { error: `«${visto}»: ${prohibido}` };
+    if (prohibido) return { error: tx("md.forbidden", { name: visto, why: prohibido }) };
     let unidad = String(d.unidad ?? "").trim();
     const extra = {};
     if (esEstado(tipo)) {
       unidad = "";
       const nombres = d.nombres ?? "encendido";
-      if (!NOMBRES_ESTADO[nombres]) return { error: `Elige cómo se llaman los estados de «${visto}».` };
+      if (!NOMBRES_ESTADO[nombres]) return { error: tx("md.stateNames", { name: visto }) };
       Object.assign(extra, { nombres, invertir: !!d.invertir });
       if (d.orden != null) { // encender y apagar desde Vigía
         const o = d.orden;
-        if (typeof o !== "object") return { error: "La lista de datos no es válida." };
+        if (typeof o !== "object") return { error: tx("md.list") };
         const ot = String(o.tema ?? "").trim(), on = String(o.on ?? ""), off = String(o.off ?? "");
-        if (!ot) return { error: `Falta el tema al que se mandan las órdenes de «${visto}».` };
-        if (/[+#\0]/.test(ot)) return { error: `El tema de las órdenes de «${visto}» no puede llevar «+» ni «#».` };
-        if (ot.length > 250) return { error: `El tema de las órdenes de «${visto}» es demasiado largo.` };
+        if (!ot) return { error: tx("md.cmdTopic", { name: visto }) };
+        if (/[+#\0]/.test(ot)) return { error: tx("md.cmdWildcard", { name: visto }) };
+        if (ot.length > 250) return { error: tx("md.cmdLong", { name: visto }) };
         const prohibidoO = temaProhibido(ot);
-        if (prohibidoO) return { error: `Órdenes de «${visto}»: ${prohibidoO}` };
-        if (!on.trim() || !off.trim()) return { error: `Faltan los mensajes para encender y apagar «${visto}».` };
-        if (on.length > 200 || off.length > 200) return { error: `Los mensajes de las órdenes de «${visto}» son demasiado largos.` };
-        if (on === off) return { error: `Los mensajes para encender y apagar «${visto}» no pueden ser iguales.` };
+        if (prohibidoO) return { error: tx("md.cmdForbidden", { name: visto, why: prohibidoO }) };
+        if (!on.trim() || !off.trim()) return { error: tx("md.cmdMsgs", { name: visto }) };
+        if (on.length > 200 || off.length > 200) return { error: tx("md.cmdMsgsLong", { name: visto }) };
+        if (on === off) return { error: tx("md.cmdSame", { name: visto }) };
         extra.orden = { tema: ot, on, off };
       }
     } else if (tipo === "otro") {
-      if (unidad.length > 12) return { error: `La unidad de «${visto}» es demasiado larga (hasta 12 letras).` };
+      if (unidad.length > 12) return { error: tx("md.unitLong", { name: visto }) };
     } else {
       unidad ||= unidades(tipo)[0];
-      if (!unidades(tipo).includes(unidad)) return { error: `La unidad de «${visto}» no es válida.` };
+      if (!unidades(tipo).includes(unidad)) return { error: tx("md.unit", { name: visto }) };
     }
     const caduca = Number(d.caduca || 0);
-    if (!CADUCA.includes(caduca)) return { error: `Elige cuándo deja de mandarse «${visto}» si no llega nada nuevo.` };
+    if (!CADUCA.includes(caduca)) return { error: tx("md.stale", { name: visto }) };
     const malla = !!d.malla;
     if (malla) {
-      if (!receptor) return { error: `«${visto}»: solo los datos del panel del receptor pueden salir a la malla.` };
-      if (!tipoMalla(tipo)) return { error: `«${visto}»: la telemetría de Meshtastic no tiene hueco para ${TIPOS[tipo].label.toLowerCase()}.` };
-      if (aLaMalla.has(tipo)) return { error: `Dos datos de ${TIPOS[tipo].label.toLowerCase()} van a la malla: la telemetría solo tiene un hueco para cada tipo.` };
+      if (!receptor) return { error: tx("md.meshReceiver", { name: visto }) };
+      if (!tipoMalla(tipo)) return { error: tx("md.meshNoSlot", { name: visto, type: TIPOS[tipo].label.toLowerCase() }) };
+      if (aLaMalla.has(tipo)) return { error: tx("md.meshTwice", { type: TIPOS[tipo].label.toLowerCase() }) };
       aLaMalla.add(tipo);
     }
     datos.push({ ...(d.clave ? { clave: d.clave } : {}), nombre, tipo, broker, tema, campo, unidad, caduca, malla, ...extra });
@@ -390,17 +390,17 @@ export function comprobarDatos(lista, { temaProhibido = () => null, brokers = nu
  */
 export function comprobarConexion(c, { temaProhibido = () => null, brokers = null } = {}) {
   if (c == null) return { conexion: null };
-  if (typeof c !== "object") return { error: "El tema de conexión no es válido." };
+  if (typeof c !== "object") return { error: tx("md.conn") };
   const tema = String(c.tema ?? "").trim();
   if (!tema) return { conexion: null };
   const campo = String(c.campo ?? "").trim();
-  if (/[+#\0]/.test(tema)) return { error: "El tema de conexión no puede llevar «+» ni «#»: tiene que ser uno concreto." };
-  if (tema.length > 250 || campo.length > 100) return { error: "El tema o el campo de la conexión es demasiado largo." };
-  if (campo && campo.split(".").some((p) => !p)) return { error: "El campo de la conexión no es válido (por ejemplo, state)." };
+  if (/[+#\0]/.test(tema)) return { error: tx("md.connWildcard") };
+  if (tema.length > 250 || campo.length > 100) return { error: tx("md.connLong") };
+  if (campo && campo.split(".").some((p) => !p)) return { error: tx("md.connField") };
   const broker = String(c.broker ?? "").trim();
-  if (!broker) return { error: "Elige el broker del tema de conexión." };
-  if (brokers && !brokers.has(broker)) return { error: "El broker del tema de conexión ya no está en la lista." };
+  if (!broker) return { error: tx("md.connBroker") };
+  if (brokers && !brokers.has(broker)) return { error: tx("md.connBrokerGone") };
   const prohibido = temaProhibido(tema);
-  if (prohibido) return { error: `Tema de conexión: ${prohibido}` };
+  if (prohibido) return { error: tx("md.connForbidden", { why: prohibido }) };
   return { conexion: { broker, tema, campo, avisar: !!c.avisar } };
 }

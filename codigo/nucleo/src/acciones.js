@@ -9,6 +9,7 @@ import { fmtDist } from "./geo.js";
 import { parseTrendRule } from "./trend.js";
 import { MIN, HOUR, isNum, dur, trendVerb, hoursText } from "./textos.js";
 import { seriesKey, trendKey, estadoKey } from "./motor.js";
+import { tx } from "./idioma.js";
 
 export function crearAcciones(motor) {
   const { S } = motor;
@@ -33,16 +34,16 @@ export function crearAcciones(motor) {
     S.cfg.watched[num] = { offlineMin: S.settings.defaultOfflineMin, rules: {} };
     saveCfg();
     const recientes = cargarRecientes([num]);
-    motor.addLog("info", `Vigilando ${motor.nodeName(num)}`, num);
+    motor.addLog("info", tx("log.watch", { name: motor.nodeName(num) }), num);
     motor.evalNode(num);
-    return { ok: true, recientes, toast: `${motor.nodeName(num)} fijado arriba. Ponle límites en su ficha.` };
+    return { ok: true, recientes, toast: tx("act.watched", { name: motor.nodeName(num) }) };
   }
 
   function dejarDeVigilar(num) {
     delete S.cfg.watched[num];
     saveCfg();
     for (const k of [...S.active.keys()]) if (S.active.get(k).num === num) motor.clearAlarm(k, { silent: true });
-    motor.addLog("info", `Ya no se vigila ${motor.nodeName(num)}`, num);
+    motor.addLog("info", tx("log.unwatch", { name: motor.nodeName(num) }), num);
     return { ok: true };
   }
 
@@ -50,28 +51,28 @@ export function crearAcciones(motor) {
   function ponerSinSenal(num, v) {
     const w = S.cfg.watched[num];
     if (!w) return { ok: false };
-    if (Number.isNaN(v) || (v !== null && v < 1)) return { ok: false, error: "Pon un número de minutos (1 o más) o déjalo vacío." };
+    if (Number.isNaN(v) || (v !== null && v < 1)) return { ok: false, error: tx("act.offErr") };
     w.offlineMin = v === null ? 0 : Math.round(v);
     saveCfg();
     motor.evalOffline();
-    return { ok: true, toast: v === null ? "Aviso de nodo sin señal desactivado" : `Avisará tras ${dur(w.offlineMin * MIN)} sin señal` };
+    return { ok: true, toast: v === null ? tx("act.offOff") : tx("act.offOn", { d: dur(w.offlineMin * MIN) }) };
   }
 
   /** Mínimo o máximo de una métrica (side: «min» o «max»; v: número o null para quitarlo). */
   function ponerLimite(num, k, side, v) {
     const w = S.cfg.watched[num];
     if (!w || (side !== "min" && side !== "max")) return { ok: false };
-    if (v !== null && !isNum(v)) return { ok: false, error: "No es un número." };
+    if (v !== null && !isNum(v)) return { ok: false, error: tx("act.notNumber") };
     w.rules = w.rules || {};
     const r = { ...(w.rules[k] || {}) };
     if (v === null) delete r[side]; else r[side] = v;
-    if (isNum(r.min) && isNum(r.max) && r.min >= r.max) return { ok: false, error: `En ${metricMeta(k).label.toLowerCase()} el mínimo tiene que ser menor que el máximo.` };
+    if (isNum(r.min) && isNum(r.max) && r.min >= r.max) return { ok: false, error: tx("act.minMax", { label: metricMeta(k).label.toLowerCase() }) };
     if (isNum(r.min) || isNum(r.max) || r.trend || r.estado) w.rules[k] = r; else delete w.rules[k];
     saveCfg();
     const cur = S.nodes.get(num)?.metrics[k];
     if (cur) motor.evalThreshold(num, k, cur.v, cur.t);
     else { motor.clearAlarm(`${num}|${k}|high`, { silent: true }); motor.clearAlarm(`${num}|${k}|low`, { silent: true }); }
-    return { ok: true, toast: "Límite guardado" };
+    return { ok: true, toast: tx("act.limitSaved") };
   }
 
   /** Aviso de cambio rápido: rule = { dir: «down» | «up», delta, hours }. */
@@ -84,9 +85,9 @@ export function crearAcciones(motor) {
     const had = !!w.rules[k]?.trend;
     w.rules[k] = { ...(w.rules[k] || {}), trend: ok };
     saveCfg();
-    motor.addLog("info", `${motor.nodeName(num)} · Aviso de cambio rápido: ${metricMeta(k).label} si ${trendVerb(ok.dir)} ${fmtLimit(k, ok.delta, true)} o más en ${hoursText(ok.hours)}`, num);
+    motor.addLog("info", tx("log.trendSet", { name: motor.nodeName(num), label: metricMeta(k).label, verb: trendVerb(ok.dir), limit: fmtLimit(k, ok.delta, true), hours: hoursText(ok.hours) }), num);
     motor.evalTrend(num, k, { strict: true });
-    return { ok: true, toast: had ? "Aviso de cambio rápido actualizado" : "Aviso de cambio rápido añadido" };
+    return { ok: true, toast: tx(had ? "act.trendUpdated" : "act.trendAdded") };
   }
 
   /**
@@ -99,15 +100,15 @@ export function crearAcciones(motor) {
     if (!w || !m.estados) return { ok: false };
     if (cuando !== null && cuando !== 0 && cuando !== 1) return { ok: false };
     const minutos = min == null ? 0 : min;
-    if (!(Number.isInteger(minutos) && minutos >= 0 && minutos <= 7 * 24 * 60)) return { ok: false, error: "Pon los minutos como un número entero (hasta una semana) o déjalo vacío." };
+    if (!(Number.isInteger(minutos) && minutos >= 0 && minutos <= 7 * 24 * 60)) return { ok: false, error: tx("act.stateMinErr") };
     w.rules = w.rules || {};
     const r = { ...(w.rules[k] || {}) };
     if (cuando === null) delete r.estado; else r.estado = { cuando, min: minutos };
     if (Object.keys(r).length) w.rules[k] = r; else delete w.rules[k];
     saveCfg();
     motor.evalEstado(num, k, { strict: true });
-    if (cuando === null) { motor.clearAlarm(estadoKey(num, k), { silent: true }); return { ok: true, toast: "Aviso quitado" }; }
-    return { ok: true, toast: `Avisará con «${m.estados[cuando ? 0 : 1]}»${minutos ? ` durante más de ${dur(minutos * MIN)}` : ""}` };
+    if (cuando === null) { motor.clearAlarm(estadoKey(num, k), { silent: true }); return { ok: true, toast: tx("act.alarmRemoved") }; }
+    return { ok: true, toast: tx("act.stateSet", { state: m.estados[cuando ? 0 : 1], d: minutos ? tx("act.stateFor", { d: dur(minutos * MIN) }) : "" }) };
   }
 
   function quitarTendencia(num, k) {
@@ -117,24 +118,24 @@ export function crearAcciones(motor) {
     if (!Object.keys(w.rules[k]).length) delete w.rules[k];
     saveCfg();
     motor.clearAlarm(trendKey(num, k), { silent: true });
-    motor.addLog("info", `${motor.nodeName(num)} · Quitado el aviso de cambio rápido de ${metricMeta(k).label.toLowerCase()}`, num);
-    return { ok: true, toast: "Aviso quitado" };
+    motor.addLog("info", tx("log.trendRemoved", { name: motor.nodeName(num), label: metricMeta(k).label.toLowerCase() }), num);
+    return { ok: true, toast: tx("act.alarmRemoved") };
   }
 
   /* ── valla antirrobo ── */
   const radioMal = (r) => !r || Number.isNaN(r) || r < 20;
   function fijarValla(num, r) {
     if (!S.cfg.watched[num] || !S.nodes.get(num)?.pos) return { ok: false };
-    if (radioMal(r)) return { ok: false, error: "Pon un radio de 20 m o más." };
+    if (radioMal(r)) return { ok: false, error: tx("act.radiusErr") };
     if (!motor.setFence(num, r)) return { ok: false };
-    return { ok: true, toast: "Valla fijada en su posición actual" };
+    return { ok: true, toast: tx("act.fenceSet") };
   }
   function radioValla(num, r) {
     const w = S.cfg.watched[num];
     if (!w?.fence) return { ok: false };
-    if (radioMal(r)) return { ok: false, error: "Pon un radio de 20 m o más.", radio: w.fence.r };
+    if (radioMal(r)) return { ok: false, error: tx("act.radiusErr"), radio: w.fence.r };
     motor.setFenceRadius(num, r);
-    return { ok: true, toast: `Radio de la valla: ${fmtDist(w.fence.r)}` };
+    return { ok: true, toast: tx("act.radius", { r: fmtDist(w.fence.r) }) };
   }
   function quitarValla(num) {
     return { ok: motor.delFence(num) };
@@ -143,10 +144,10 @@ export function crearAcciones(motor) {
   /* ── ajustes ── */
   /** Minutos sin señal que se ponen a los nodos que se empiezan a vigilar. */
   function sinSenalPorDefecto(v) {
-    if (!v || Number.isNaN(v) || v < 1) return { ok: false, error: "Pon un número de minutos (1 o más).", valor: S.settings.defaultOfflineMin };
+    if (!v || Number.isNaN(v) || v < 1) return { ok: false, error: tx("act.offDefaultErr"), valor: S.settings.defaultOfflineMin };
     S.settings.defaultOfflineMin = Math.round(v);
     motor.guardar("settings");
-    return { ok: true, toast: "Guardado" };
+    return { ok: true, toast: tx("act.saved") };
   }
   function retencion(dias) {
     if (!(Number.isFinite(dias) && dias >= 1)) return { ok: false };
@@ -163,13 +164,13 @@ export function crearAcciones(motor) {
     if ("enabled" in cambio || "onClear" in cambio) {
       if ("enabled" in cambio) cfg.enabled = !!cambio.enabled; else cfg.onClear = !!cambio.onClear;
       saveMeshCfg();
-      if (cambio.enabled && cfg.channel == null && cfg.node == null) return { ok: true, toast: "Elige ahora un canal privado o un nodo." };
+      if (cambio.enabled && cfg.channel == null && cfg.node == null) return { ok: true, toast: tx("act.chooseTarget") };
       return { ok: true };
     }
     if ("channel" in cambio) {
       const v = cambio.channel;
       const ch = S.channels.find((c) => c.index === v);
-      if (v != null && !ch?.private) { cfg.channel = null; saveMeshCfg(); return { ok: false, toast: "Ese canal es público: no se puede usar para avisos." }; }
+      if (v != null && !ch?.private) { cfg.channel = null; saveMeshCfg(); return { ok: false, toast: tx("act.publicChannel") }; }
       cfg.channel = v;
       saveMeshCfg();
       return { ok: true };
@@ -182,7 +183,7 @@ export function crearAcciones(motor) {
     return { ok: false };
   }
   function pruebaMalla() {
-    if (!S.demo && S.link.state !== "ready") return { ok: false, toast: "Conecta el receptor para enviar la prueba." };
+    if (!S.demo && S.link.state !== "ready") return { ok: false, toast: tx("act.connectForTest") };
     motor.meshNotify("test");
     return { ok: true };
   }
@@ -190,7 +191,7 @@ export function crearAcciones(motor) {
   async function borrarHistorico() {
     await S.store.clear();
     S.recent = new Map();
-    return { ok: true, toast: "Histórico borrado" };
+    return { ok: true, toast: tx("act.historyWiped") };
   }
 
   return {
