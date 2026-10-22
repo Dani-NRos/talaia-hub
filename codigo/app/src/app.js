@@ -3,11 +3,12 @@ import { createMapView } from "./map.js";
 import { ctx } from "./ctx.js";
 import { $, $$, esc, setHTML, LS, parseNum, ICON } from "./ui.js";
 import { requestBlock, requestStatus, positionBlock, refreshPosition, copyText, switchHTML, patchSwitches } from "./views/node-parts.js";
+import { renderNodes, onNodesQuery, saveNodesView } from "./views/nodes.js";
+import { renderLog } from "./views/alarms.js";
 import { boardHTML, renderCards, toggleCard, toggleAllCards, moveCard, panelState, metaLine, stateRuleText, trendShort, displayName, saveCardUi } from "./views/dashboard.js";
 import { relays, snrQuality, loraSf, weakest, UNKNOWN_NODE, PRESET_NAME } from "@vigia/nucleo/route.js";
-import { fmtDist } from "@vigia/nucleo/geo.js";
 import { trendDefault, parseTrendRule } from "@vigia/nucleo/trend.js";
-import { searchNodes, highlight, tokens, FILTERS, SORTS } from "./meshsearch.js";
+import { FILTERS } from "./meshsearch.js";
 import { conectarServidor, crearStoreRemoto } from "./remoto.js";
 import { t as tr, setLang, getLang, LANGS } from "./i18n.js";
 import { initShell, go, isView, setAlarms, relabel, getTheme, setTheme } from "./shell.js";
@@ -64,7 +65,7 @@ const motor = crearMotor(S, {
   radio: { listo: () => S.servidorOk },
 });
 const {
-  node, isWatched, trendNow, raise,
+  node, trendNow, raise,
   ack, unacked, alarmTitle, alarmDetail, canAsk, receptorUsesPki, hopName, meshCfg,
 } = motor;
 let servidor = null; // modo «Servidor»: la conexión con él
@@ -982,7 +983,7 @@ function render() {
     renderTop();
     renderBoard();
     renderCards();
-    renderMesh();
+    renderNodes();
     renderLog();
     if (isView("map")) mapView?.update();
     if (S.full) refreshFull(null);
@@ -1167,91 +1168,10 @@ async function drawFullCharts() {
 
 /* ───────────── resto de la malla y buscador ───────────── */
 
-/** Chips de filtro y orden. Se crean una vez y luego solo se cambia su estado, para no perder el foco. */
-const markHTML = (text, words) => highlight(text, words).map((p) => (p.hit ? `<mark>${esc(p.text)}</mark>` : esc(p.text))).join("");
 
-function renderMeshTools() {
-  const v = S.meshView;
-  const box = $("#meshFilters");
-  if (box.children.length !== FILTERS.length) {
-    box.innerHTML = FILTERS.map((f) => `<button type="button" class="fchip" data-mf="${f.key}" aria-pressed="false"${f.title ? ` title="${esc(f.title)}"` : ""}>${esc(f.label)}</button>`).join("");
-  }
-  for (const b of box.children) b.setAttribute("aria-pressed", String(v.filters.includes(b.dataset.mf)));
-  const sel = $("#meshSort");
-  const myPos = S.myNode != null ? S.nodes.get(S.myNode)?.pos : null;
-  setHTML(sel, SORTS.map((o) => {
-    const off = o.key === "dist" && !myPos;
-    return `<option value="${o.key}"${off ? " disabled" : ""}>${esc(o.label)}${off ? " (tu receptor no tiene ubicación)" : ""}</option>`;
-  }).join(""));
-  if (sel.value !== v.sort) sel.value = v.sort;
-}
-function saveMeshView() { LS.set("vigia.meshView", S.meshView); }
 
-function renderMesh() {
-  const el = $("#mesh");
-  const q = S.meshQ.trim();
-  const words = tokens(q);
-  const filters = new Set(S.meshView.filters);
-  const searching = words.length > 0 || filters.size > 0;
-  const malla = [...S.nodes.values()].filter((n) => n.num >= 0); // los paneles sin nodo no son de la malla
-  const rest = malla.filter((n) => !isWatched(n.num));
-  // Con texto también salen los vigilados, marcados: quien busca «DNN 4» espera encontrarlo esté donde esté.
-  const pool = words.length ? malla : rest;
-  const from = S.myNode != null ? S.nodes.get(S.myNode)?.pos : null;
-  const res = searchNodes(pool, { q, filters, sort: S.meshView.sort, now: Date.now(), from });
-  $("#meshTools").hidden = malla.length < 2;
-  renderMeshTools();
-  $("#meshCount").textContent = searching ? `${res.length} de ${pool.length}` : rest.length ? String(rest.length) : "";
-  const limit = S.meshExpanded ? Infinity : searching ? 50 : 8;
-  const shown = res.slice(0, limit);
-  let html;
-  if (!rest.length && !words.length) {
-    html = `<li class="empty-row">${S.link.state === "ready" ? "No hay más nodos en la base de datos del receptor." : "Conecta el receptor para ver los nodos que oye."}</li>`;
-  } else if (!res.length) {
-    const why = [q ? `con «${esc(q)}»` : "", filters.size ? "con esos filtros" : ""].filter(Boolean).join(" y ");
-    html = `<li class="empty-row">Ningún nodo coincide ${why}. <button type="button" class="link-btn" data-mesh-clear>Quitar la búsqueda</button></li>`;
-  } else {
-    html = shown.map(({ n, dist, score }) => {
-      const watched = isWatched(n.num);
-      const tags = [watched ? "vigilado" : "", n.num === S.myNode ? "receptor" : "", n.hasEnv ? "sensores" : "", n.num !== S.myNode && n.key === false && receptorUsesPki() ? "sin clave" : ""].filter(Boolean);
-      const chipCls = (t) => (t === "sin clave" ? " warn" : t === "vigilado" ? " watch" : "");
-      // Lo que decide el orden va delante, para que se vea aunque la línea se corte en el móvil.
-      const far = dist != null && n.num !== S.myNode ? `a ${fmtDist(dist)}` : "";
-      const sort = S.meshView.sort;
-      const lead = sort === "dist" ? far : sort === "snr" && isNum(n.snr) && n.snr !== 0 ? `SNR ${fmtNum(n.snr, 1)} dB` : "";
-      const meta = [lead, metaLine(n).replace(lead && sort === "snr" ? ` · ${lead}` : "\u0000", ""), lead === far ? "" : far].filter(Boolean).join(" · ");
-      // Si coincide solo por ID o modelo, se enseñan para que se vea por qué ha salido.
-      const why = score === 4 ? ` · ${markHTML(hexId(n.num), words)}${n.hw ? ` · ${markHTML(n.hw.replaceAll("_", " "), words)}` : ""}` : "";
-      const action = watched ? "" : `<button class="btn ghost" data-watch="${n.num}">Vigilar</button>`;
-      return `<li class="row"><button class="row-main" data-open="${n.num}"><span class="tag sm">${markHTML(n.short, words)}</span><span class="row-t"><span class="row-n">${markHTML(nom(n), words)}${tags.map((t) => `<span class="chip${chipCls(t)}">${t}</span>`).join("")}</span><span class="meta">${esc(meta)}${why}</span></span></button>${action}</li>`;
-    }).join("");
-  }
-  setHTML(el, html);
-  const more = $("#meshMore");
-  more.hidden = res.length <= (searching ? 50 : 8);
-  more.textContent = S.meshExpanded ? "Ver menos" : `Ver los ${res.length} nodos`;
-}
 
-let meshQT = null;
-function onMeshQuery(value) {
-  clearTimeout(meshQT);
-  meshQT = setTimeout(() => {
-    S.meshQ = value;
-    S.meshExpanded = false;
-    renderMesh();
-  }, 120);
-}
 
-function renderLog() {
-  const el = $("#log");
-  const list = S.logExpanded ? S.log : S.log.slice(0, 12);
-  el.innerHTML = list.length
-    ? list.map((e) => `<li class="lg lg-${e.type}"><time>${esc(stamp(e.t))}</time><span>${esc(e.text)}</span></li>`).join("")
-    : `<li class="empty-row">Todavía no ha pasado nada.</li>`;
-  const more = $("#logMore");
-  more.hidden = S.log.length <= 12;
-  more.textContent = S.logExpanded ? "Ver menos" : `Ver todo el registro (${S.log.length})`;
-}
 
 /* ───────────── mapa ───────────── */
 const TILE_CACHE = "teselas-osm"; // el mismo nombre que en sw.js
@@ -1767,21 +1687,21 @@ document.addEventListener("click", async (ev) => {
   }
   if ("range" in ds) { S.detail.range = ds.range; $$("#detail [data-range]").forEach((b) => b.setAttribute("aria-pressed", String(b.dataset.range === ds.range))); return drawCharts(); }
   if (t.id === "linkBtn") return openSettings();
-  if (t.id === "meshMore") { S.meshExpanded = !S.meshExpanded; return renderMesh(); }
+  if (t.id === "meshMore") { S.meshExpanded = !S.meshExpanded; return renderNodes(); }
   if ("mf" in ds) {
     const f = new Set(S.meshView.filters);
     if (f.has(ds.mf)) f.delete(ds.mf); else f.add(ds.mf);
     S.meshView.filters = FILTERS.map((x) => x.key).filter((k) => f.has(k));
     S.meshExpanded = false;
-    saveMeshView();
-    return renderMesh();
+    saveNodesView();
+    return renderNodes();
   }
   if ("meshClear" in ds) {
     S.meshQ = "";
     $("#meshQ").value = "";
     S.meshView.filters = [];
-    saveMeshView();
-    renderMesh();
+    saveNodesView();
+    renderNodes();
     return $("#meshQ").focus();
   }
   if (t.id === "logMore") { S.logExpanded = !S.logExpanded; return renderLog(); }
@@ -1803,15 +1723,13 @@ document.addEventListener("keydown", (ev) => {
     return;
   }
   if (ev.key === "Escape" && ev.target.id === "meshQ") {
-    if (ev.target.value) { ev.preventDefault(); ev.target.value = ""; onMeshQuery(""); } else ev.target.blur();
+    if (ev.target.value) { ev.preventDefault(); ev.target.value = ""; onNodesQuery(""); } else ev.target.blur();
     return;
   }
   if (ev.key === "Enter" && ev.target.id === "meshQ") {
     // Intro abre el primer resultado.
     ev.preventDefault();
-    clearTimeout(meshQT);
-    S.meshQ = ev.target.value;
-    renderMesh();
+    onNodesQuery(ev.target.value, true);
     const first = $("#mesh .row-main");
     if (first && S.meshQ.trim()) openDetail(Number(first.dataset.open));
     return;
@@ -1822,7 +1740,7 @@ document.addEventListener("keydown", (ev) => {
 });
 
 document.addEventListener("input", (ev) => {
-  if (ev.target.id === "meshQ") onMeshQuery(ev.target.value);
+  if (ev.target.id === "meshQ") onNodesQuery(ev.target.value);
   if (ev.target.closest?.("#mqttBox")) editarMqtt(ev.target);
   if (ev.target.id === "filtroTemas") {
     filtroTemas = ev.target.value;
@@ -1851,7 +1769,7 @@ document.addEventListener("change", async (ev) => {
   }
   if (t.id === "npTipo" || t.id === "npNombre") return;
   if (t.closest?.("#mqttBox")) return editarMqtt(t);
-  if (t.id === "meshSort") { S.meshView.sort = t.value; S.meshExpanded = false; saveMeshView(); return renderMesh(); }
+  if (t.id === "meshSort") { S.meshView.sort = t.value; S.meshExpanded = false; saveNodesView(); return renderNodes(); }
   if (t.id === "fence-r") return S.detail && setFenceRadius(S.detail.num, t);
   if (t.id === "tr-metric") return trendFormFill();
   if (t.closest(".tr-form")) return; // se guarda con el botón

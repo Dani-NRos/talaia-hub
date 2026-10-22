@@ -81,48 +81,6 @@ b.q-ok { color: var(--ok); } b.q-warn { color: var(--warn); } b.q-bad { color: v
 .rt-lbl.q-ok { color: #2b7a4b; } .rt-lbl.q-warn { color: #a8640a; } .rt-lbl.q-bad { color: #c0362c; } .rt-lbl.q-unk { color: #4f625d; }
 
 
-/* resto de la malla */
-.mesh { list-style: none; margin: 0; padding: 0; background: var(--surface); border: 1px solid var(--line); border-radius: var(--r); }
-.row { display: flex; align-items: center; gap: 10px; padding: 8px 12px 8px 8px; }
-.row + .row { border-top: 1px solid var(--line); }
-.row-main { flex: 1; min-width: 0; display: flex; align-items: center; gap: 10px; background: none; border: 0; padding: 4px; text-align: left; cursor: pointer; border-radius: 8px; }
-.row-t { display: grid; min-width: 0; }
-.row-n { font-weight: 600; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-.row .meta { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-.chip { font: 500 10px/1 var(--f-mono); text-transform: uppercase; letter-spacing: .06em; color: var(--accent); border: 1px solid color-mix(in oklab, var(--accent) 45%, transparent); padding: 3px 5px; border-radius: 5px; margin-left: 6px; vertical-align: 2px; }
-.row .btn { min-height: 36px; padding: 0 12px; }
-.empty-row { padding: 14px; color: var(--ink-2); font-size: 14px; list-style: none; }
-.mesh-tools { display: grid; gap: 8px; margin-bottom: 10px; }
-.mesh-tools[hidden] { display: none; }
-.search { position: relative; }
-.search svg { position: absolute; left: 11px; top: 50%; transform: translateY(-50%); width: 18px; height: 18px; color: var(--ink-2); pointer-events: none; }
-.search .inp { padding: 10px 40px 10px 38px; font: 500 16px/1.2 var(--f-body); }
-.search .inp::-webkit-search-cancel-button { cursor: pointer; }
-.search-k { position: absolute; right: 10px; top: 50%; transform: translateY(-50%); font: 500 12px/1 var(--f-mono); color: var(--ink-2); border: 1px solid var(--line); border-radius: 5px; padding: 3px 6px; pointer-events: none; }
-.search .inp:focus ~ .search-k, .search .inp:not(:placeholder-shown) ~ .search-k { display: none; }
-@media (hover: none) { .search-k { display: none; } }
-/* Filtros y orden en una sola fila; en el móvil se desliza de lado. */
-.mesh-f { display: flex; gap: 6px; align-items: center; overflow-x: auto; scrollbar-width: none; margin: 0 -16px; padding: 2px 16px; }
-.mesh-f::-webkit-scrollbar { display: none; }
-.fchips { display: flex; gap: 6px; flex: none; }
-.fchip { flex: none; white-space: nowrap; min-height: 32px; padding: 0 12px; border-radius: 999px; border: 1px solid var(--line); background: var(--surface); color: var(--ink); font: 500 13px/1 var(--f-body); cursor: pointer; }
-.fchip:hover { border-color: var(--accent); }
-.fchip[aria-pressed="true"] { background: var(--accent); border-color: var(--accent); color: var(--on-accent); }
-#meshSort { flex: none; width: auto; font-size: 14px; padding: 6px 9px; min-height: 32px; border-radius: 999px; }
-.mesh mark { background: color-mix(in oklab, var(--warn) 28%, transparent); color: inherit; border-radius: 3px; padding: 0 1px; }
-.row .chip.watch { color: var(--ok); border-color: color-mix(in oklab, var(--ok) 45%, transparent); }
-.more { margin-top: 8px; background: none; border: 0; color: var(--accent); font-weight: 600; cursor: pointer; padding: 6px 0; }
-
-/* registro */
-.log { list-style: none; margin: 0; padding: 0; display: grid; }
-.lg { display: grid; grid-template-columns: 9px auto 1fr; gap: 10px; align-items: baseline; padding: 7px 0; border-bottom: 1px solid var(--line); font-size: 14px; }
-.lg::before { content: ""; width: 7px; height: 7px; border-radius: 50%; background: var(--ink-2); transform: translateY(-1px); }
-.lg-raise::before { background: var(--crit); }
-.lg-clear::before { background: var(--ok); }
-.lg-info::before { background: var(--accent); }
-.lg-ack::before { background: var(--line); }
-.lg time { font: 400 12px/1 var(--f-mono); color: var(--ink-2); white-space: nowrap; font-variant-numeric: tabular-nums; }
-.lg span { min-width: 0; overflow-wrap: anywhere; }
 a.btn { color: inherit; text-decoration: none; }
 
 /* hojas (detalle y ajustes) */

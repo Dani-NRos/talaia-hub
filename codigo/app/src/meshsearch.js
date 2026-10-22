@@ -61,20 +61,21 @@ export function matchScore(n, words, whole = words.join(" ")) {
 }
 
 /** Filtros rápidos. «Cerca»: directo o a un salto. */
+// Their names are in i18n.js (nodes.f.*, nodes.sort.*).
 export const FILTERS = [
-  { key: "env", label: "Con sensores", test: (n) => !!n.hasEnv },
-  { key: "pos", label: "Con ubicación", test: (n) => !!n.pos },
-  { key: "near", label: "Cerca", title: "Directos o a un salto", test: (n) => Number.isFinite(n.hops) && n.hops <= 1 },
-  { key: "day", label: "Últimas 24 h", test: (n, now) => now - (n.lastHeard || 0) <= 24 * HOUR },
+  { key: "env", test: (n) => !!n.hasEnv },
+  { key: "pos", test: (n) => !!n.pos },
+  { key: "near", test: (n) => Number.isFinite(n.hops) && n.hops <= 1 },
+  { key: "day", test: (n, now) => now - (n.lastHeard || 0) <= 24 * HOUR },
 ];
 
 export const SORTS = [
-  { key: "auto", label: "Recomendado" },
-  { key: "recent", label: "Oídos hace menos" },
-  { key: "hops", label: "Menos saltos" },
-  { key: "dist", label: "Más cerca de ti" },
-  { key: "snr", label: "Mejor señal" },
-  { key: "name", label: "Nombre" },
+  { key: "auto" },
+  { key: "recent" },
+  { key: "hops" },
+  { key: "dist" },
+  { key: "snr" },
+  { key: "name" },
 ];
 
 const byRecent = (a, b) => (b.n.lastHeard || 0) - (a.n.lastHeard || 0);

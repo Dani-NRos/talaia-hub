@@ -56,7 +56,8 @@ codigo/                 raíz de npm workspaces: npm install, npm test, npm run 
                         En app.js se importa como `tr` (allí `t` es el elemento en los manejadores de eventos)
     src/ctx.js ui.js    lo que comparten las secciones (estado, motor, orden, toast) y utilidades ($, esc, LS, iconos)
     src/views/          una sección por fichero, en inglés: dashboard.js (aviso de alarmas y tarjetas),
-                        node-parts.js (pedir datos, ubicación y valla, interruptor: tarjeta y ficha)
+                        node-parts.js (pedir datos, ubicación y valla, interruptor: tarjeta y ficha), nodes.js
+                        (toda la malla, también los vigilados; 50 por página), alarms.js (registro)
     src/logo.js         la torre de vigilancia (logo, icono de la pestaña: su ventana se enciende con alarmas sin atender)
     src/css/            base.css (colores, letras), legacy.css (lo de la 1.x, sección a sección fuera), shell.css
     src/map.js mapdata.js meshsearch.js remoto.js
