@@ -130,9 +130,18 @@ con Tasmota/ESPHome, Zigbee por zigbee2mqtt, ESPHome, Home Assistant…).
   si no, «No ha contestado»); queda en el registro. A los Shelly se les pide el estado al conectar con el broker y al
   guardar los datos (`pedirEstadoShelly`: `status_update` en `…/command/switch:0`): solo información.
 - Fases: 1) brokers (Mosquitto propio + varios); 2) paneles, nombres, datos MQTT numéricos, estación al panel del
-  receptor; 3) ON/OFF; 4) control; 5) descubrimiento automático; 6) **controlar interruptores desde la malla** (a Dani
-  le interesa mucho). Más adelante: un segundo receptor 868 con firmware propio para estaciones meteorológicas
-  cercanas (si publica por MQTT, es otra fuente más).
+  receptor; 3) ON/OFF; 4) control; 5) descubrimiento automático (**congelada** por Dani el 22 oct. 2026 hasta que
+  haya más dispositivos compatibles; él tiene Shelly Plus/Pro/Gen3; idea: «Añadir panel» → «Buscar dispositivos»);
+  6) **controlar interruptores desde la malla** (a Dani le interesa mucho). Más adelante: un segundo receptor 868 con
+  firmware propio para estaciones meteorológicas cercanas (si publica por MQTT, es otra fuente más).
+
+### Tailscale (Dani, 22 oct. 2026)
+
+- Para abrir la pantalla fuera de casa: Tailscale en el BMAX (ya unido a su cuenta) y `sudo tailscale serve --bg 4404`
+  (https en `*.ts.net`, instalable como app). `tailscale serve` deja el Host tal cual, así valen las comprobaciones de
+  `web.js` (`ts.net` está entre los nombres de casa). Lo que llega por **Funnel** (cabecera `Tailscale-Funnel-Request`)
+  se rechaza: Vigía no tiene contraseña. Más adelante: notificaciones push y quizá usar `Tailscale-User-Login` para
+  saber quién manda cada orden.
 
 ## Publicar
 

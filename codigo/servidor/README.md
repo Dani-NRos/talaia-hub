@@ -112,6 +112,36 @@ queda visto en todos. El sonido y la pantalla encendida son de cada aparato.
   con https (Tailscale). Mientras tanto, la página suena y avisa mientras está abierta.
 - **No conectes también el móvil por Bluetooth** al nodo del servidor: el nodo repartiría lo que recibe entre los dos.
 
+## Desde fuera de casa (Tailscale)
+
+Con [Tailscale](https://tailscale.com), la pantalla se abre desde el móvil o el portátil fuera de casa, sin abrir
+puertos en el router: solo los aparatos de tu red de Tailscale llegan al servidor.
+
+1. **El servidor en Tailscale**: instalado y unido a tu cuenta (`tailscale status` lo dice, con su nombre y su IP
+   `100.…`). Así ya se puede abrir `http://100.x.y.z:4404` (o `http://nombre-del-equipo:4404`) desde cualquier aparato
+   de tu red de Tailscale.
+2. **Con https (recomendado)**: en la consola de Tailscale, *DNS*, deja activado *MagicDNS* y pulsa *Enable HTTPS*
+   (en *HTTPS Certificates*). En el servidor:
+   ```
+   sudo tailscale serve --bg 4404
+   ```
+   Dice la dirección, como `https://bmax.tail1234.ts.net`. Se queda puesto aunque se reinicie el equipo
+   (`tailscale serve status` para verlo; `sudo tailscale serve --https=443 off` para quitarlo). La primera vez tarda
+   unos segundos: está sacando el certificado.
+3. **En el móvil**: la app de Tailscale con la misma cuenta, conectada, y abre esa dirección en Chrome. Con https se
+   puede **instalar como app** (menú de Chrome → *Instalar aplicación*) y dejar que avise con notificaciones mientras
+   está abierta. Es otra app distinta de la de GitHub (la del servidor, con sus datos).
+
+Lo que hay que saber:
+
+- **Nada de Tailscale Funnel**: Funnel publica en internet, y Vigía no tiene contraseña. Si llega algo por Funnel,
+  Vigía lo rechaza y lo apunta en el diario. Usa `tailscale serve`, que solo es para tu red de Tailscale.
+- Cualquiera que esté en tu red de Tailscale puede abrir la pantalla y manejarla (mandar por la malla, encender y
+  apagar). Si compartes tu red de Tailscale con alguien, tenlo en cuenta.
+- El certificado de https sale en los registros públicos de certificados: el nombre del equipo y de tu red de
+  Tailscale se pueden ver (no se puede entrar con ellos).
+- Las notificaciones con la app cerrada (push) llegarán más adelante.
+
 ## Avisos por la malla
 
 Los activas en Ajustes → *Avisos por la malla*, como en la app (vienen apagados). Una vez activados, los manda el

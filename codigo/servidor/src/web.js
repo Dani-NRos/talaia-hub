@@ -11,6 +11,10 @@
 // Sin contraseña (la red de casa es la protección), pero sin dejar que una web ajena mande órdenes desde el
 // navegador de quien la visita: las órdenes solo se aceptan en JSON y desde la propia página, y no se atienden
 // nombres de dominio públicos (lo que usan los ataques de «DNS rebinding» contra aparatos de la red local).
+//
+// Desde fuera de casa, por Tailscale: directamente (http://100.x.y.z:4404, http://bmax:4404) o con «tailscale serve»
+// (https://bmax.<red>.ts.net), que deja el nombre tal cual (Host) y así valen las mismas comprobaciones. Lo que llega
+// por Tailscale Funnel (abierto a internet) se rechaza: sin contraseña, Vigía no puede estar en internet.
 import http from "node:http";
 import net from "node:net";
 import os from "node:os";
@@ -155,6 +159,7 @@ export function crearWeb(vigia, config, registro, opts = {}) {
   const nombres = new Set((config.web.nombres || []).map((n) => String(n).toLowerCase()));
   const ordenes = crearOrdenes(vigia);
   const clientes = new Set();
+  let avisadoFunnel = false;
 
   /* ── eventos a las pantallas ── */
   const emitir = (tipo, datos) => {
@@ -302,6 +307,10 @@ export function crearWeb(vigia, config, registro, opts = {}) {
 
   const servidor = http.createServer(async (req, res) => {
     try {
+      if (req.headers["tailscale-funnel-request"]) {
+        if (!avisadoFunnel) { avisadoFunnel = true; registro.aviso("Web: llegan visitas por Tailscale Funnel (desde internet) y se rechazan: Vigía no tiene contraseña. Quita el Funnel («tailscale funnel reset») y usa «tailscale serve»."); }
+        return json(res, 403, { error: "Vigía no se puede abrir desde internet (Tailscale Funnel): solo desde tu red de Tailscale" });
+      }
       if (!hostValido(req.headers.host)) return json(res, 421, { error: "nombre de servidor no admitido; añádelo a web.nombres en la configuración" });
       const url = new URL(req.url, "http://x");
       const p = url.pathname;

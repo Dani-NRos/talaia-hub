@@ -171,6 +171,19 @@ test("órdenes de los paneles: crear uno sin nodo (con su número), renombrar, l
   assert.match(r.json.error, /no se puede quitar/);
 });
 
+test("por Tailscale: «tailscale serve» (nombre .ts.net, mismo origen) funciona; lo de Funnel (internet), no", async (t) => {
+  const { base } = await montar(t);
+  const ts = "bmax.tail1234.ts.net";
+  // Así lo pasa «tailscale serve»: el nombre tal cual y el origen https.
+  let r = await pedir(base, "/api/salud", { cabeceras: { host: ts, "x-forwarded-proto": "https" } });
+  assert.equal(r.status, 200);
+  r = await orden(base, { orden: "ackAll" }, { host: ts, origin: `https://${ts}` });
+  assert.equal(r.status, 200);
+  r = await pedir(base, "/", { cabeceras: { host: ts, "tailscale-funnel-request": "?1" } });
+  assert.equal(r.status, 403);
+  assert.match(JSON.parse(r.cuerpo).error, /internet/);
+});
+
 test("una web ajena no puede mandar órdenes ni entrar con un nombre público", async (t) => {
   const { base, puerto } = await montar(t);
   // Sin JSON (lo que puede mandar un formulario de otra web sin preguntar al navegador).
