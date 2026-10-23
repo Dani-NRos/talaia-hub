@@ -6,10 +6,10 @@ import { ctx } from "../ctx.js";
 import { t } from "../i18n.js";
 import { $, esc, ICON } from "../ui.js";
 import { displayName } from "./dashboard.js";
-import { fmtNum } from "@vigia/nucleo/metrics.js";
-import { hhmm, ago } from "@vigia/nucleo/textos.js";
-import { channelWhy } from "@vigia/nucleo/canales.js";
-import { TIPOS, LISTA_TIPOS, TIPOS_PANEL, NOMBRES_ESTADO, tipoMalla, esEstado, unidades, adivinarTipo, adivinarEstado, proponerOrden, unidadDe, textoDato, MALLA_MAX_SALTOS } from "@vigia/nucleo/mqtt-datos.js";
+import { fmtNum } from "@talaia/nucleo/metrics.js";
+import { hhmm, ago } from "@talaia/nucleo/textos.js";
+import { channelWhy } from "@talaia/nucleo/canales.js";
+import { TIPOS, LISTA_TIPOS, TIPOS_PANEL, NOMBRES_ESTADO, tipoMalla, esEstado, unidades, adivinarTipo, adivinarEstado, proponerOrden, unidadDe, textoDato, MALLA_MAX_SALTOS } from "@talaia/nucleo/mqtt-datos.js";
 
 let dataDraft = null; // { num, datos, conexion }: a panel's MQTT data, changed and not saved yet
 let meshDraft = null; // { activado, cada, canal, saltos }

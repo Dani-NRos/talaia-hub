@@ -6,11 +6,11 @@ import os from "node:os";
 import path from "node:path";
 import { Duplex } from "node:stream";
 import { listarPuertos, elegirPuerto } from "../src/puertos.js";
-import { abrirAlmacen } from "../src/almacen.js";
+import { abrirAlmacen, rutaAlmacen } from "../src/almacen.js";
 import { comprobar, ErrorConfig } from "../src/config.js";
 import { EnlaceFlujo } from "../src/enlace.js";
 import { clasificar } from "../src/receptor.js";
-import { LinkError } from "@vigia/nucleo/receptor-base.js";
+import { LinkError } from "@talaia/nucleo/receptor-base.js";
 
 /* ── puertos ── */
 function sysFalso() {
@@ -85,7 +85,7 @@ test("almacén: el total de lecturas se lleva en memoria y cuadra con SQLite", a
 });
 
 test("almacén: en fichero, con WAL", () => {
-  const ruta = path.join(fs.mkdtempSync(path.join(os.tmpdir(), "vigia-")), "datos/vigia.db");
+  const ruta = path.join(fs.mkdtempSync(path.join(os.tmpdir(), "talaia-")), "datos/talaia.db");
   const a = abrirAlmacen(ruta);
   assert.equal(a.db.prepare("PRAGMA journal_mode").get().journal_mode, "wal");
   a.guardar("my", 7);
@@ -161,4 +161,15 @@ test("enlace: si el otro lado cierra, avisa una vez con «lost»", async () => {
   await new Promise((r) => setTimeout(r, 20));
   assert.equal(fallos.length, 1);
   assert.equal(fallos[0].stage, "lost");
+});
+
+test("the database of before 2.0 (vigia.db): the terminal uses it as it is; the service renames it, journal included", () => {
+  const datos = fs.mkdtempSync(path.join(os.tmpdir(), "talaia-"));
+  assert.equal(rutaAlmacen(datos), path.join(datos, "talaia.db")); // nothing yet: the new name
+  fs.writeFileSync(path.join(datos, "vigia.db"), "base");
+  fs.writeFileSync(path.join(datos, "vigia.db-wal"), "diario");
+  assert.equal(rutaAlmacen(datos), path.join(datos, "vigia.db"));
+  assert.equal(rutaAlmacen(datos, { mover: true }), path.join(datos, "talaia.db"));
+  assert.deepEqual(fs.readdirSync(datos).sort(), ["talaia.db", "talaia.db-wal"]);
+  assert.equal(fs.readFileSync(path.join(datos, "talaia.db-wal"), "utf8"), "diario");
 });

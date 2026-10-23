@@ -1,4 +1,4 @@
-// Motor de Vigía, sin pantalla: nodos, lecturas, alarmas (umbral, cambio rápido, valla, sin señal), peticiones a
+// Motor de Talaia, sin pantalla: nodos, lecturas, alarmas (umbral, cambio rápido, valla, sin señal), peticiones a
 // nodos, traceroute y avisos por la malla. Lo usan la app y el servidor; cada uno pone su pantalla y su almacén.
 //
 //   const motor = crearMotor(S, ganchos);

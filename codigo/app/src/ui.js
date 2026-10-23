@@ -35,6 +35,17 @@ export const LS = {
   del(k) { try { localStorage.removeItem(k); } catch { /* nothing */ } },
 };
 
+/** What this device kept under the names before 2.0 («vigia.cards») goes to the new ones («talaia.cards»), once. */
+export function renameStored(pairs) {
+  try {
+    for (const [old, now] of pairs) {
+      const v = localStorage.getItem(old);
+      if (v != null && localStorage.getItem(now) == null) localStorage.setItem(now, v);
+      localStorage.removeItem(old);
+    }
+  } catch { /* no storage */ }
+}
+
 /** A number typed by hand: comma or point; "" → null; nonsense → NaN. */
 export function parseNum(s) {
   const x = String(s ?? "").trim().replace(",", ".");

@@ -1,6 +1,6 @@
 // Estado del servidor para las pantallas conectadas: una foto al conectar y, después, solo lo que cambia.
 // Las pantallas guardan lo recibido en su S y dibujan igual que si fuera suyo.
-import { seriesKey } from "@vigia/nucleo/motor.js";
+import { seriesKey } from "@talaia/nucleo/motor.js";
 
 const LOG_MAX = 200, DIAG_MAX = 60;
 

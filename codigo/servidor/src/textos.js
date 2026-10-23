@@ -1,7 +1,7 @@
 // The server's own texts, in its language (Settings → System): the log, replies to the screens, alerts and
 // results over the mesh, Home Assistant names, the journal. They join the core's dictionaries (nucleo/src/idioma.js),
 // so tx() finds them too. Spanish is the reference; English, the translation.
-import { addTexts } from "@vigia/nucleo/idioma.js";
+import { addTexts } from "@talaia/nucleo/idioma.js";
 
 addTexts({
   es: {

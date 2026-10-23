@@ -1,5 +1,5 @@
 {
-  "name": "@vigia/servidor",
+  "name": "@talaia/servidor",
   "version": "1.20.0",
   "private": true,
   "description": "Vigía servidor: el motor de Vigía Mesh funcionando 24/7 en Linux, con histórico en SQLite",
@@ -18,7 +18,7 @@
   "dependencies": {
     "@bufbuild/protobuf": "^2.2.3",
     "@meshtastic/core": "^2.6.7",
-    "@vigia/nucleo": "*",
+    "@talaia/nucleo": "*",
     "mqtt": "5.16.0",
     "serialport": "^13.0.0"
   },

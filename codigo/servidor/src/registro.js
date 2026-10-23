@@ -1,5 +1,5 @@
 // Registro del servidor: una línea por suceso en la salida estándar. Con systemd va al diario
-// (journalctl -u vigia-servidor), que ya pone la hora; fuera de systemd se añade aquí.
+// (journalctl -u talaia), que ya pone la hora; fuera de systemd se añade aquí.
 
 const NIVELES = { depurar: 10, info: 20, aviso: 30, error: 40 };
 const ETIQUETA = { depurar: "depurar", info: "info", aviso: "AVISO", error: "ERROR" };

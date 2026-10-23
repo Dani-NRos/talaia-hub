@@ -1,7 +1,7 @@
 // Datos y escalas del mapa: qué nodos se pintan, con qué valor, color y opacidad.
 // Sin Leaflet ni DOM, para poder probarlo con node --test.
-import { metricMeta, sortMetrics, fmtValue } from "@vigia/nucleo/metrics.js";
-import { readingPlace, placeFromPos, precisionM } from "@vigia/nucleo/geo.js";
+import { metricMeta, sortMetrics, fmtValue } from "@talaia/nucleo/metrics.js";
+import { readingPlace, placeFromPos, precisionM } from "@talaia/nucleo/geo.js";
 
 const MIN = 60000, HOUR = 60 * MIN, DAY = 24 * HOUR;
 

@@ -3,7 +3,7 @@
 import { ctx } from "../ctx.js";
 import { t } from "../i18n.js";
 import { $, esc } from "../ui.js";
-import { ago } from "@vigia/nucleo/textos.js";
+import { ago } from "@talaia/nucleo/textos.js";
 
 const PASS_MIN = 10; // the same as the server's (usuarios.js), to say so before sending
 const S = () => ctx.S;

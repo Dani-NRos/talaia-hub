@@ -4,7 +4,7 @@ import test from "node:test";
 import assert from "node:assert/strict";
 import fs from "node:fs";
 import path from "node:path";
-import { _textDicts } from "@vigia/nucleo/idioma.js";
+import { _textDicts } from "@talaia/nucleo/idioma.js";
 import "../src/textos.js";
 
 const raiz = new URL("../../", import.meta.url).pathname;

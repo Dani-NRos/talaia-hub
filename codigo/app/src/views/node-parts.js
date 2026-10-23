@@ -3,10 +3,10 @@
 import { ctx } from "../ctx.js";
 import { t } from "../i18n.js";
 import { $$, esc, parseNum } from "../ui.js";
-import { ASK, ASK_ALL, askKey, RE } from "@vigia/nucleo/motor.js";
-import { metricMeta, fmtNum } from "@vigia/nucleo/metrics.js";
-import { hhmm, ago, stamp, isNum } from "@vigia/nucleo/textos.js";
-import { distM, compass, precisionM, fmtDist, coordText, mapsUrl } from "@vigia/nucleo/geo.js";
+import { ASK, ASK_ALL, askKey, RE } from "@talaia/nucleo/motor.js";
+import { metricMeta, fmtNum } from "@talaia/nucleo/metrics.js";
+import { hhmm, ago, stamp, isNum } from "@talaia/nucleo/textos.js";
+import { distM, compass, precisionM, fmtDist, coordText, mapsUrl } from "@talaia/nucleo/geo.js";
 
 const time = (ms) => hhmm.format(new Date(ms));
 

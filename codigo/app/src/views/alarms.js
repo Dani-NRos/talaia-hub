@@ -3,7 +3,7 @@
 import { ctx } from "../ctx.js";
 import { t } from "../i18n.js";
 import { $, esc, setHTML } from "../ui.js";
-import { stamp } from "@vigia/nucleo/textos.js";
+import { stamp } from "@talaia/nucleo/textos.js";
 
 const PAGE = 30;
 

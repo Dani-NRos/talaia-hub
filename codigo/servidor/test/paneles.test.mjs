@@ -9,14 +9,14 @@ import { Aedes } from "aedes";
 import mqtt from "mqtt";
 import { create, toBinary, fromBinary } from "@bufbuild/protobuf";
 import { Protobuf } from "@meshtastic/core";
-import { crearVigia } from "../src/vigia.js";
+import { crearTalaia } from "../src/talaia.js";
 import { comprobar } from "../src/config.js";
 import { crearRegistro } from "../src/registro.js";
 import { abrirAlmacen } from "../src/almacen.js";
 import { instantanea } from "../src/sincro.js";
 import { telemetriaAmbiente } from "../src/paneles.js";
-import { metricMeta, fmtWithUnit } from "@vigia/nucleo/metrics.js";
-import { conexionKey, estadoKey } from "@vigia/nucleo/motor.js";
+import { metricMeta, fmtWithUnit } from "@talaia/nucleo/metrics.js";
+import { conexionKey, estadoKey } from "@talaia/nucleo/motor.js";
 import { NodoFalso, hasta, ME, CASETA, PORT } from "./nodo-falso.mjs";
 
 const M = Protobuf.Mesh, TEL = Protobuf.Telemetry;
@@ -47,15 +47,15 @@ async function montar(t, puerto, almacen = abrirAlmacen(":memory:")) {
   const nodo = new NodoFalso();
   const puertoNodo = await nodo.escucharTcp();
   const config = comprobar({ receptor: { tipo: "tcp", host: "127.0.0.1", puerto: puertoNodo }, datos: os.tmpdir() });
-  const vigia = await crearVigia(config, crearRegistro({ nivel: "error", salida: [] }), { almacen });
-  vigia.arrancar();
-  await hasta(() => vigia.S.link.state === "ready", 8000, "receptor listo");
-  t.after(async () => { await vigia.detener(); await nodo.cerrar(); });
-  if (!vigia.S.mqtt.brokers.some((b) => b.id === "b1")) {
-    assert.equal((await vigia.mqtt.configurarBroker(null, { nombre: "Home Assistant", url: `127.0.0.1:${puerto}` })).ok, true);
+  const talaia = await crearTalaia(config, crearRegistro({ nivel: "error", salida: [] }), { almacen });
+  talaia.arrancar();
+  await hasta(() => talaia.S.link.state === "ready", 8000, "receptor listo");
+  t.after(async () => { await talaia.detener(); await nodo.cerrar(); });
+  if (!talaia.S.mqtt.brokers.some((b) => b.id === "b1")) {
+    assert.equal((await talaia.mqtt.configurarBroker(null, { nombre: "Home Assistant", url: `127.0.0.1:${puerto}` })).ok, true);
   }
-  await hasta(() => vigia.mqtt.conexion("b1")?.conectada, 5000, "MQTT conectado");
-  return { vigia, nodo, almacen };
+  await hasta(() => talaia.mqtt.conexion("b1")?.conectada, 5000, "MQTT conectado");
+  return { talaia, nodo, almacen };
 }
 
 /** El paquete de telemetría que le ha llegado al nodo, decodificado. */
@@ -83,8 +83,8 @@ test("el paquete de telemetría lleva cada dato en su hueco", () => {
 test("panel sin nodo (un Tasmota): sus datos, al momento; lecturas, alarmas e histórico como un nodo", async (t) => {
   const puerto = await broker(t);
   const dispositivo = await cliente(t, puerto);
-  const { vigia } = await montar(t, puerto);
-  const { S, paneles, acciones } = vigia;
+  const { talaia } = await montar(t, puerto);
+  const { S, paneles, acciones } = talaia;
   assert.match(paneles.crearPanel({ nombre: "", tipo: "tasmota" }).error, /Ponle un nombre/);
   assert.match(paneles.crearPanel({ nombre: "Taller", tipo: "tostadora" }).error, /Elige qué es/);
   const r = paneles.crearPanel({ nombre: "Enchufe del taller", tipo: "tasmota" });
@@ -120,7 +120,7 @@ test("panel sin nodo (un Tasmota): sus datos, al momento; lecturas, alarmas e hi
   assert.equal(acciones.ponerLimite(num, "mq3", "max", 8).ok, true);
   await dispositivo.publicar(T_TASMOTA, { ENERGY: { Power: 1300, Total: 3.6 }, DS18B20: { Temperature: 9.5 } });
   await hasta(() => S.active.has(`${num}|mq3|high`), 3000, "alarma de la nevera");
-  assert.equal(vigia.motor.alarmTitle(S.active.get(`${num}|mq3|high`)), "Enchufe del taller · Nevera por encima de 8,0 °C");
+  assert.equal(talaia.motor.alarmTitle(S.active.get(`${num}|mq3|high`)), "Enchufe del taller · Nevera por encima de 8,0 °C");
   // Ese segundo valor, dentro del minuto: en el panel ya está; en el histórico, más tarde (una lectura por minuto).
   assert.equal(n.metrics.mq1.v, 1300);
   assert.equal((await S.store.series(num, "mq1", 0)).length, 1);
@@ -142,8 +142,8 @@ test("panel sin nodo (un Tasmota): sus datos, al momento; lecturas, alarmas e hi
 test("estados ON/OFF y conexión: un enchufe Tasmota con su LWT y una puerta de Zigbee al revés", async (t) => {
   const puerto = await broker(t);
   const dispositivo = await cliente(t, puerto);
-  const { vigia } = await montar(t, puerto);
-  const { S, paneles, acciones, motor } = vigia;
+  const { talaia } = await montar(t, puerto);
+  const { S, paneles, acciones, motor } = talaia;
   const { num } = paneles.crearPanel({ nombre: "Taller", tipo: "tasmota" });
   await dispositivo.publicar("tele/enchufe/LWT", "Offline");
   await dispositivo.publicar("stat/enchufe/POWER", "ON");
@@ -206,8 +206,8 @@ test("estados ON/OFF y conexión: un enchufe Tasmota con su LWT y una puerta de 
 test("un Shelly por events/rpc: «params.switch:0.output»; los avisos sin ese campo no lo estropean", async (t) => {
   const puerto = await broker(t);
   const dispositivo = await cliente(t, puerto);
-  const { vigia } = await montar(t, puerto);
-  const { S, paneles } = vigia;
+  const { talaia } = await montar(t, puerto);
+  const { S, paneles } = talaia;
   const { num } = paneles.crearPanel({ nombre: "Enchufe", tipo: "shelly" });
   const T = "shellyplug01/events/rpc";
   const aviso = (cambio) => ({ src: "shellyplugmg3-9070696fed78", dst: "shellyplug01/events", method: "NotifyStatus", params: { ts: 1792619486.33, "switch:0": cambio } });
@@ -247,12 +247,12 @@ async function shellyFalso(t, puerto, prefijo = "shellyplug01", { contesta = tru
   return { recibidas, get output() { return output; }, estado };
 }
 
-test("encender y apagar un Shelly desde Vigía: espera a que diga que lo ha hecho; al conectar, se le pide el estado", async (t) => {
+test("encender y apagar un Shelly desde Talaia: espera a que diga que lo ha hecho; al conectar, se le pide el estado", async (t) => {
   const puerto = await broker(t);
   const shelly = await shellyFalso(t, puerto);
   const mudo = await shellyFalso(t, puerto, "shellymudo", { contesta: false });
-  const { vigia } = await montar(t, puerto);
-  const { S, paneles, motor } = vigia;
+  const { talaia } = await montar(t, puerto);
+  const { S, paneles, motor } = talaia;
   const { num } = paneles.crearPanel({ nombre: "Taller", tipo: "shelly" });
   const orden = { tema: "shellyplug01/command/switch:0", on: "on", off: "off" };
   assert.equal(paneles.guardarDatos(num, [
@@ -274,7 +274,7 @@ test("encender y apagar un Shelly desde Vigía: espera a que diga que lo ha hech
   assert.match((await paneles.mandar(num, "mq3", 1)).error, /no se puede encender ni apagar/);
   assert.match((await paneles.mandar(num, "mq9", 1)).error, /ya no está/);
   // A device that answers before the broker acknowledges the order (on the same broker it can): it still counts.
-  const con = vigia.mqtt.conexion("b1");
+  const con = talaia.mqtt.conexion("b1");
   const publicar = con.publicar;
   con.publicar = async (...a) => { const ok = await publicar.apply(con, a); await hasta(() => n.metrics.mq1.v === 0, 3000, "apagado antes del acuse"); return ok; };
   assert.equal((await paneles.mandar(num, "mq1", 0)).ok, true);
@@ -295,7 +295,7 @@ test("encender y apagar un Shelly desde Vigía: espera a que diga que lo ha hech
   // Al volver a conectar con el broker, se le vuelve a pedir el estado.
   const antes = shelly.recibidas.length;
   motor.addLog("info", "—");
-  vigia.mqtt.conexion("b1").emit("conectada");
+  talaia.mqtt.conexion("b1").emit("conectada");
   await hasta(() => shelly.recibidas.length > antes, 3000, "status_update al reconectar");
   assert.deepEqual(shelly.recibidas.at(-1), ["shellyplug01/command/switch:0", "status_update"]);
 });
@@ -303,8 +303,8 @@ test("encender y apagar un Shelly desde Vigía: espera a que diga que lo ha hech
 test("al parar, lo que esperaba su minuto se guarda como lectura", async (t) => {
   const puerto = await broker(t);
   const dispositivo = await cliente(t, puerto);
-  const { vigia } = await montar(t, puerto);
-  const { S, paneles } = vigia;
+  const { talaia } = await montar(t, puerto);
+  const { S, paneles } = talaia;
   const { num } = paneles.crearPanel({ nombre: "Enchufe", tipo: "tasmota" });
   assert.equal(paneles.guardarDatos(num, [{ tipo: "power", broker: "b1", tema: T_TASMOTA, campo: "ENERGY.Power" }]).ok, true);
   await dispositivo.publicar(T_TASMOTA, { ENERGY: { Power: 100 } });
@@ -319,17 +319,17 @@ test("al parar, lo que esperaba su minuto se guarda como lectura", async (t) => 
 test("panel de un nodo: renombrar, datos MQTT junto a los suyos (sin tocar cuándo se le oyó) y nada de eso a HA", async (t) => {
   const puerto = await broker(t);
   const ha = await cliente(t, puerto);
-  const { vigia, nodo } = await montar(t, puerto);
-  const { S, paneles, acciones } = vigia;
-  assert.equal((await vigia.mqtt.configurarHA({ activado: true, broker: "b1" })).ok, true);
+  const { talaia, nodo } = await montar(t, puerto);
+  const { S, paneles, acciones } = talaia;
+  assert.equal((await talaia.mqtt.configurarHA({ activado: true, broker: "b1" })).ok, true);
   acciones.vigilar(CASETA);
   nodo.ambiente(CASETA, { temperature: 24.5, relativeHumidity: 60 });
   await hasta(() => S.nodes.get(CASETA)?.metrics?.temperature?.v === 24.5, 5000, "lectura de la caseta");
   // Datos solo en paneles que se ven.
   assert.match(paneles.guardarDatos(0x5d20b7f1, [{ tipo: "temperature", broker: "b1", tema: "x" }]).error, /ya no está/);
-  // Renombrar: el nombre de Vigía manda en todo; el de Meshtastic se queda como información.
+  // Renombrar: el nombre de Talaia manda en todo; el de Meshtastic se queda como información.
   assert.equal(paneles.renombrar(CASETA, "Huerto").ok, true);
-  assert.equal(vigia.motor.nodeName(CASETA), "Huerto");
+  assert.equal(talaia.motor.nodeName(CASETA), "Huerto");
   assert.equal(S.nodes.get(CASETA).long, "Caseta huerto");
   // Un sensor de la caseta por Zigbee, en su panel. «A la malla» solo en el del receptor.
   await ha.publicar("zigbee2mqtt/Caseta", { temperature: 19.2, humidity: 70, linkquality: 120 });
@@ -340,7 +340,7 @@ test("panel de un nodo: renombrar, datos MQTT junto a los suyos (sin tocar cuán
   await hasta(() => S.nodes.get(CASETA).metrics.mq1?.v === 19.2, 5000, "dato MQTT en la caseta");
   assert.equal(S.nodes.get(CASETA).metrics.temperature.v, 24.5, "la suya sigue");
   assert.equal(S.nodes.get(CASETA).lastHeard, oido, "un dato MQTT no es oír al nodo por radio");
-  // A Home Assistant va lo del nodo, no lo MQTT; y el nombre del dispositivo es el de Vigía.
+  // A Home Assistant va lo del nodo, no lo MQTT; y el nombre del dispositivo es el de Talaia.
   const ID = CASETA.toString(16).padStart(8, "0");
   await hasta(() => ha.visto.get(`homeassistant/sensor/vigia_${ID}/temperature/config`), 5000, "sensor del nodo en HA");
   await hasta(() => JSON.parse(ha.visto.get(`homeassistant/sensor/vigia_${ID}/temperature/config`)).device.name === "Talaia · Huerto", 5000, "nombre en HA");
@@ -362,10 +362,10 @@ test("panel de un nodo: renombrar, datos MQTT junto a los suyos (sin tocar cuán
   assert.equal(S.active.get(`${CASETA}|mq1|high`).acked, false);
   // Volver a su nombre.
   assert.match(paneles.renombrar(CASETA, "").toast, /Vuelve a su nombre: «Caseta huerto»/);
-  assert.equal(vigia.motor.nodeName(CASETA), "Caseta huerto");
+  assert.equal(talaia.motor.nodeName(CASETA), "Caseta huerto");
   // Un broker que usan los datos no se quita.
-  await vigia.mqtt.configurarHA({ activado: false });
-  assert.match((await vigia.mqtt.quitarBroker("b1")).error, /Lo usa: Caseta huerto \(Temperatura dentro\)/);
+  await talaia.mqtt.configurarHA({ activado: false });
+  assert.match((await talaia.mqtt.quitarBroker("b1")).error, /Lo usa: Caseta huerto \(Temperatura dentro\)/);
 });
 
 test("la estación de la 1.16 pasa al panel del receptor, con su histórico, y sigue saliendo a la malla", async (t) => {
@@ -383,8 +383,8 @@ test("la estación de la 1.16 pasa al panel del receptor, con su histórico, y s
   await almacen.lecturas.add([{ node: ME, metric: "temperature", t: hace, v: 18.5 }, { node: ME, metric: "windSpeed", t: hace, v: 3.2 }, { node: ME, metric: "voltage", t: hace, v: 4.1 }]);
   await ha.publicar(T_TEMP, "21.4");
   await ha.publicar(T_VIENTO, "18");
-  const { vigia, nodo } = await montar(t, puerto, almacen);
-  const { S, paneles } = vigia;
+  const { talaia, nodo } = await montar(t, puerto, almacen);
+  const { S, paneles } = talaia;
 
   // Pasa al panel del receptor (que queda en el tablero), del broker de antes, a la malla.
   assert.ok(S.cfg.watched[ME]);
@@ -423,8 +423,8 @@ test("la estación de la 1.16 pasa al panel del receptor, con su histórico, y s
 test("lo que no está al día no sale a la malla; los fallos se cuentan; buscar temas en todos los brokers", async (t) => {
   const puerto = await broker(t);
   const ha = await cliente(t, puerto);
-  const { vigia, nodo } = await montar(t, puerto);
-  const { S, paneles, acciones } = vigia;
+  const { talaia, nodo } = await montar(t, puerto);
+  const { S, paneles, acciones } = talaia;
   acciones.vigilar(ME);
   await ha.publicar(T_TEMP, "unavailable");
   await ha.publicar(T_VIENTO, "huracán");
@@ -457,7 +457,7 @@ test("lo que no está al día no sale a la malla; los fallos se cuentan; buscar 
   await envio2;
   assert.match(S.paneles.malla.ultimo.resultado, /nadie lo repitió/);
 
-  // Buscar temas: en todos los brokers, sin lo de Vigía.
+  // Buscar temas: en todos los brokers, sin lo de Talaia.
   const r = await paneles.buscarTemas();
   assert.equal(r.ok, true);
   const vistos = r.temas.map((x) => `${x.broker}|${x.tema}|${x.campo}`);

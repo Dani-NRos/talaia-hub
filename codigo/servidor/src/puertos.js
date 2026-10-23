@@ -3,8 +3,8 @@
 // tumba el proceso entero.
 import fs from "node:fs";
 import path from "node:path";
-import { USB_VENDORS } from "@vigia/nucleo/tramas.js";
-import { tx } from "@vigia/nucleo/idioma.js";
+import { USB_VENDORS } from "@talaia/nucleo/tramas.js";
+import { tx } from "@talaia/nucleo/idioma.js";
 import "./textos.js";
 
 const hex4 = (n) => n.toString(16).padStart(4, "0");

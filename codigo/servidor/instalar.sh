@@ -1,5 +1,6 @@
 #!/usr/bin/env bash
-# Instala o actualiza Vigía servidor en Linux (Ubuntu, Debian, Raspberry Pi OS).
+# Instala o actualiza Talaia Hub en Linux (Ubuntu, Debian, Raspberry Pi OS). Una instalación de Vigía servidor (hasta
+# la 1.20) pasa a los nombres de Talaia, con los mismos datos y la misma configuración.
 #
 #   wget -qO- https://raw.githubusercontent.com/Dani-NRos/talaia-hub/main/codigo/servidor/instalar.sh | sudo bash
 #   (o con curl -fsSL en vez de wget -qO-)
@@ -7,45 +8,48 @@
 # Opciones (detrás de «bash -s --» si va por tubería):
 #   --tcp HOST[:PUERTO]   el nodo por la red (WiFi/Ethernet o meshtasticd) en vez de por USB
 #   --puerto RUTA|ID      el nodo por USB en ese puerto («/dev/serial/by-id/…» o «239a:8029»); por defecto, el que haya
-#   --reconfigurar        reescribe /etc/vigia/servidor.json con lo anterior (si no, una configuración que ya existe se deja)
+#   --reconfigurar        reescribe /etc/talaia/config.json con lo anterior (si no, una configuración que ya existe se deja)
 #   --rama RAMA           instala desde otra rama del repositorio (por defecto, main)
-#   --desinstalar         quita el servicio y el programa; los datos se quedan en /var/lib/vigia
+#   --desinstalar         quita el servicio y el programa; los datos se quedan en /var/lib/talaia
 #   --borrar-datos        con --desinstalar, borra también los datos y la configuración
 #   --codigo-local DIR    usa una copia local del repositorio en vez de descargarla
 #   --node-local DIR      usa un Node ya descargado (DIR/bin/node) en vez de bajarlo de nodejs.org
 #   --sin-mosquitto       no instala ni configura Mosquitto (el broker MQTT de este equipo)
 #   --sin-systemd         no toca systemd (para probar en un contenedor)
 #
-# Qué hace: pone su propio Node en /opt/vigia/node (no toca el del sistema), el programa en /opt/vigia/versiones/…
-# (con /opt/vigia/actual apuntando a la última), un usuario «vigia» sin privilegios en el grupo dialout, la
-# configuración en /etc/vigia/servidor.json, los datos en /var/lib/vigia y el servicio vigia-servidor. Además,
-# Mosquitto (apt) como broker MQTT de casa, con usuario y contraseña: los usuarios se gestionan desde Vigía y el
-# servicio vigia-mosquitto (path + oneshot, como root) se los pasa a Mosquitto.
+# Qué hace: pone su propio Node en /opt/talaia/node (no toca el del sistema), el programa en /opt/talaia/versiones/…
+# (con /opt/talaia/actual apuntando a la última), un usuario «talaia» sin privilegios en el grupo dialout, la
+# configuración en /etc/talaia/config.json, los datos en /var/lib/talaia, el servicio talaia y la orden «talaia».
+# Además, Mosquitto (apt) como broker MQTT de casa, con usuario y contraseña: los usuarios se gestionan desde Talaia y
+# el servicio talaia-mosquitto (path + oneshot, como root) se los pasa a Mosquitto.
 set -euo pipefail
 
 # Sube cada vez que cambia lo que hace el instalador. Si el programa que se descarga trae uno más nuevo (pasa al
 # instalar otra rama con el instalador de main), se sigue con ese.
-INSTALADOR=3
+INSTALADOR=4
 ARGS=("$@")
 
 REPO="Dani-NRos/talaia-hub"
 RAMA="main"
-BASE="/opt/vigia"
-ETC="/etc/vigia"
-DATOS="/var/lib/vigia"
-SERVICIO="vigia-servidor"
-# Descargas de Node: nodejs.org, o un espejo con la misma estructura (VIGIA_NODE_DIST=https://…/dist).
-NODE_DIST="${VIGIA_NODE_DIST:-https://nodejs.org/dist}"
-MOSQ_CONF="/etc/mosquitto/conf.d/vigia.conf"
-MOSQ_PW="/etc/mosquitto/vigia.passwd"
+BASE="/opt/talaia"
+ETC="/etc/talaia"
+CONFIG="$ETC/config.json"
+DATOS="/var/lib/talaia"
+SERVICIO="talaia"
+USUARIO="talaia"
+ORDEN="/usr/local/bin/talaia"
+# Descargas de Node: nodejs.org, o un espejo con la misma estructura (TALAIA_NODE_DIST=https://…/dist).
+NODE_DIST="${TALAIA_NODE_DIST:-${VIGIA_NODE_DIST:-https://nodejs.org/dist}}"
+MOSQ_CONF="/etc/mosquitto/conf.d/talaia.conf"
+MOSQ_PW="/etc/mosquitto/talaia.passwd"
 TCP="" PUERTO="" RECONFIGURAR=0 DESINSTALAR=0 BORRAR=0 CODIGO_LOCAL="" NODE_LOCAL="" SIN_SYSTEMD=0 SIN_MOSQUITTO=0 PROGRAMA=""
 
 ayuda() {
   cat <<'FIN'
-Instala o actualiza Vigía servidor. Opciones:
+Instala o actualiza Talaia Hub. Opciones:
   --tcp HOST[:PUERTO]   el nodo por la red en vez de por USB
   --puerto RUTA|ID      el nodo por USB en ese puerto (/dev/serial/by-id/… o 239a:8029)
-  --reconfigurar        reescribe /etc/vigia/servidor.json con lo anterior
+  --reconfigurar        reescribe /etc/talaia/config.json con lo anterior
   --rama RAMA           instala desde otra rama (por defecto, main)
   --desinstalar         quita el servicio y el programa (los datos se quedan)
   --borrar-datos        con --desinstalar, borra también datos y configuración
@@ -75,28 +79,86 @@ while [ $# -gt 0 ]; do
 done
 
 [ "$(id -u)" -eq 0 ] || falla "hay que ejecutarlo como administrador: sudo bash instalar.sh"
-[ "$(uname -s)" = "Linux" ] || falla "Vigía servidor funciona en Linux"
+[ "$(uname -s)" = "Linux" ] || falla "Talaia Hub funciona en Linux"
 con_systemd() { [ "$SIN_SYSTEMD" -eq 0 ]; }
+
+# ── de Vigía (hasta la 1.20 y el instalador 3): los mismos datos, con los nombres de Talaia ──
+# Cada paso mira si ya está hecho: si algo se corta a medias, repetir el instalador lo termina.
+desde_vigia() {
+  [ -e /opt/vigia ] || [ -e /etc/vigia ] || [ -e /var/lib/vigia ] || id vigia >/dev/null 2>&1 \
+    || [ -e /etc/systemd/system/vigia-servidor.service ] || [ -e /etc/mosquitto/conf.d/vigia.conf ] || return 0
+  dice "Pasando la instalación de Vigía a los nombres de Talaia (mismos datos y configuración)…"
+  if con_systemd; then
+    systemctl disable --now vigia-servidor.service vigia-mosquitto.path vigia-mosquitto.service >/dev/null 2>&1 || true
+    rm -f /etc/systemd/system/vigia-servidor.service /etc/systemd/system/vigia-mosquitto.path /etc/systemd/system/vigia-mosquitto.service
+    systemctl daemon-reload
+  fi
+  # El usuario cambia de nombre y se queda con su número: sus ficheros siguen siendo suyos. Si no se puede (tiene algo
+  # en marcha), se crea el nuevo y los datos pasan a él más abajo; el viejo se queda sin uso.
+  if id vigia >/dev/null 2>&1 && ! id "$USUARIO" >/dev/null 2>&1; then
+    if usermod -l "$USUARIO" vigia 2>/dev/null; then
+      if getent group vigia >/dev/null; then groupmod -n "$USUARIO" vigia; fi
+      usermod -d "$DATOS" "$USUARIO"
+    else
+      aviso "No se pudo cambiar el nombre del usuario «vigia» (¿tiene algo en marcha?): se crea «$USUARIO» y se queda con los datos."
+      useradd --system --home-dir "$DATOS" --no-create-home --shell /usr/sbin/nologin "$USUARIO"
+    fi
+  fi
+  if [ -d /var/lib/vigia ]; then
+    if [ -e "$DATOS" ]; then
+      aviso "Hay datos en /var/lib/vigia y también en $DATOS: se usan los de $DATOS; los de Vigía se quedan donde están."
+    else
+      mv /var/lib/vigia "$DATOS"
+      if id "$USUARIO" >/dev/null 2>&1; then chown -R "$USUARIO:$USUARIO" "$DATOS"; fi
+    fi
+  fi
+  if [ -f /etc/vigia/servidor.json ] && [ ! -f "$CONFIG" ]; then
+    mkdir -p "$ETC"
+    mv /etc/vigia/servidor.json "$CONFIG"
+  fi
+  rmdir /etc/vigia 2>/dev/null || true
+  # La carpeta de datos de siempre pasa a la nueva (si se había puesto otra a mano, se deja).
+  if [ -f "$CONFIG" ]; then sed -i 's#"/var/lib/vigia"#"/var/lib/talaia"#' "$CONFIG"; fi
+  # Node se queda (sin descargarlo otra vez) y también el programa que se está instalando; las versiones viejas se
+  # van: solo funcionarían con los nombres de antes.
+  if [ -d /opt/vigia ]; then
+    mkdir -p "$BASE/versiones"
+    if [ -d /opt/vigia/node ] && [ ! -e "$BASE/node" ]; then mv /opt/vigia/node "$BASE/node"; fi
+    if [ -n "$PROGRAMA" ] && [ "${PROGRAMA#/opt/vigia/}" != "$PROGRAMA" ] && [ -d "$PROGRAMA" ]; then
+      mv "$PROGRAMA" "$BASE/versiones/"
+      PROGRAMA="$BASE/versiones/$(basename "$PROGRAMA")"
+    fi
+    rm -rf /opt/vigia
+  fi
+  rm -f /usr/local/bin/vigia-servidor /etc/udev/rules.d/60-vigia-meshtastic.rules
+  # Mosquitto: su configuración con el nombre nuevo (más abajo); los usuarios del broker son los mismos.
+  rm -f /etc/mosquitto/conf.d/vigia.conf
+  if [ -f /etc/mosquitto/vigia.passwd ]; then
+    if [ ! -f "$MOSQ_PW" ]; then mv /etc/mosquitto/vigia.passwd "$MOSQ_PW"; else rm -f /etc/mosquitto/vigia.passwd; fi
+  fi
+  dice "Hecho: ahora es el servicio «$SERVICIO» y la orden «talaia» (antes, vigia-servidor)."
+}
+desde_vigia
 
 # ── desinstalar ──
 if [ "$DESINSTALAR" -eq 1 ]; then
   if con_systemd; then
-    systemctl disable --now "$SERVICIO" vigia-mosquitto.path 2>/dev/null || true
-    rm -f "/etc/systemd/system/$SERVICIO.service" /etc/systemd/system/vigia-mosquitto.path /etc/systemd/system/vigia-mosquitto.service
+    systemctl disable --now "$SERVICIO" talaia-mosquitto.path 2>/dev/null || true
+    rm -f "/etc/systemd/system/$SERVICIO.service" /etc/systemd/system/talaia-mosquitto.path /etc/systemd/system/talaia-mosquitto.service
     systemctl daemon-reload
   fi
   if [ -f "$MOSQ_CONF" ]; then
     rm -f "$MOSQ_CONF" "$MOSQ_PW"
     if con_systemd; then systemctl restart mosquitto 2>/dev/null || true; fi
-    aviso "Mosquitto sigue instalado, sin la configuración de Vigía. Si no lo usas para nada más: sudo apt remove mosquitto"
+    aviso "Mosquitto sigue instalado, sin la configuración de Talaia. Si no lo usas para nada más: sudo apt remove mosquitto"
   fi
-  rm -rf "$BASE" /usr/local/bin/vigia-servidor /etc/udev/rules.d/60-vigia-meshtastic.rules
+  rm -rf "$BASE" "$ORDEN" /etc/udev/rules.d/60-talaia-meshtastic.rules
   if [ "$BORRAR" -eq 1 ]; then
     rm -rf "$DATOS" "$ETC"
-    userdel vigia 2>/dev/null || true
-    dice "Vigía servidor desinstalado, con sus datos y su configuración."
+    userdel "$USUARIO" 2>/dev/null || true
+    dice "Talaia Hub desinstalado, con sus datos y su configuración."
   else
-    dice "Vigía servidor desinstalado. Los datos siguen en $DATOS y la configuración en $ETC (bórralos con --desinstalar --borrar-datos)."
+    dice "Talaia Hub desinstalado. Los datos siguen en $DATOS y la configuración en $ETC (bórralos con --desinstalar --borrar-datos)."
   fi
   exit 0
 fi
@@ -129,7 +191,7 @@ else
   falla "hace falta curl o wget para descargar: sudo apt update && sudo apt install curl"
 fi
 
-# ── Node, propio de Vigía ──
+# ── Node, propio de Talaia ──
 mkdir -p "$BASE"
 if [ -n "$NODE_LOCAL" ]; then
   [ -x "$NODE_LOCAL/bin/node" ] || falla "no hay $NODE_LOCAL/bin/node"
@@ -162,7 +224,7 @@ if [ -n "$PROGRAMA" ]; then
   [ -f "$PROGRAMA/servidor/package.json" ] || falla "$PROGRAMA no es una copia del programa"
   DEST="$PROGRAMA"
 elif [ -n "$CODIGO_LOCAL" ]; then
-  [ -f "$CODIGO_LOCAL/codigo/servidor/package.json" ] || falla "$CODIGO_LOCAL no parece el repositorio de Vigía"
+  [ -f "$CODIGO_LOCAL/codigo/servidor/package.json" ] || falla "$CODIGO_LOCAL no parece el repositorio de Talaia"
   ID="local-$(date +%Y%m%d-%H%M%S)"
   DEST="$BASE/versiones/$ID"
   mkdir -p "$DEST"
@@ -173,7 +235,7 @@ else
   REF="${COMMIT:-$RAMA}"
   ID="$(date +%Y%m%d-%H%M%S)-${REF:0:7}"
   DEST="$BASE/versiones/$ID"
-  dice "Descargando Vigía (rama $RAMA${COMMIT:+, ${COMMIT:0:7}})…"
+  dice "Descargando Talaia (rama $RAMA${COMMIT:+, ${COMMIT:0:7}})…"
   TMPC="$(mktemp -d)"
   bajar "https://codeload.github.com/$REPO/tar.gz/$REF" | tar -xz -C "$TMPC" --strip-components=1 || falla "no se pudo descargar el programa de GitHub"
   mkdir -p "$DEST" && cp -a "$TMPC/codigo/." "$DEST/" && rm -rf "$TMPC"
@@ -185,38 +247,38 @@ if [ -z "$PROGRAMA" ] && [ -n "$NUEVO" ] && [ "$NUEVO" -gt "$INSTALADOR" ]; then
   exec bash "$DEST/servidor/instalar.sh" "${ARGS[@]}" --programa "$DEST"
 fi
 dice "Instalando lo que necesita el servidor y compilando la pantalla…"
-(cd "$DEST" && "$BASE/node/bin/npm" ci --omit=dev -w @vigia/servidor -w @vigia/app --no-audit --no-fund --loglevel=error) || falla "npm no pudo instalar las dependencias"
-(cd "$DEST" && "$BASE/node/bin/npm" run build -w @vigia/app --silent >/dev/null) || falla "no se pudo compilar la pantalla"
-VERSION_VIGIA="$("$NODE" "$DEST/servidor/src/main.js" --version)" || falla "el programa instalado no arranca"
+(cd "$DEST" && "$BASE/node/bin/npm" ci --omit=dev -w @talaia/servidor -w @talaia/app --no-audit --no-fund --loglevel=error) || falla "npm no pudo instalar las dependencias"
+(cd "$DEST" && "$BASE/node/bin/npm" run build -w @talaia/app --silent >/dev/null) || falla "no se pudo compilar la pantalla"
+VERSION_TALAIA="$("$NODE" "$DEST/servidor/src/main.js" --version)" || falla "el programa instalado no arranca"
 ln -sfn "$DEST" "$BASE/actual.nuevo" && mv -Tf "$BASE/actual.nuevo" "$BASE/actual"
 # Se guardan las tres últimas versiones, para volver atrás si hace falta.
 find "$BASE/versiones" -mindepth 1 -maxdepth 1 -type d -printf '%T@ %p\n' | sort -rn | tail -n +4 | cut -d' ' -f2- | xargs -r rm -rf
 # Con sudo, como el usuario del servicio: lo que escriba en los datos (usuarios de la pantalla) sigue siendo suyo.
-cat > /usr/local/bin/vigia-servidor <<EOF
+cat > "$ORDEN" <<EOF
 #!/bin/sh
-if [ "\$(id -u)" = 0 ] && id vigia >/dev/null 2>&1 && command -v runuser >/dev/null; then
-  exec runuser -u vigia -- "$NODE" "$BASE/actual/servidor/src/main.js" "\$@"
+if [ "\$(id -u)" = 0 ] && id $USUARIO >/dev/null 2>&1 && command -v runuser >/dev/null; then
+  exec runuser -u $USUARIO -- "$NODE" "$BASE/actual/servidor/src/main.js" --config "$CONFIG" "\$@"
 fi
-exec "$NODE" "$BASE/actual/servidor/src/main.js" "\$@"
+exec "$NODE" "$BASE/actual/servidor/src/main.js" --config "$CONFIG" "\$@"
 EOF
-chmod 755 /usr/local/bin/vigia-servidor
-dice "$VERSION_VIGIA"
+chmod 755 "$ORDEN"
+dice "$VERSION_TALAIA"
 
 # ── usuario, datos y configuración ──
-if ! id vigia >/dev/null 2>&1; then
-  useradd --system --home-dir "$DATOS" --no-create-home --shell /usr/sbin/nologin vigia
+if ! id "$USUARIO" >/dev/null 2>&1; then
+  useradd --system --home-dir "$DATOS" --no-create-home --shell /usr/sbin/nologin "$USUARIO"
 fi
-usermod -aG dialout vigia
-mkdir -p "$DATOS" && chown vigia:vigia "$DATOS" && chmod 750 "$DATOS"
+usermod -aG dialout "$USUARIO"
+mkdir -p "$DATOS" && chown "$USUARIO:$USUARIO" "$DATOS" && chmod 750 "$DATOS"
 mkdir -p "$ETC"
-if [ ! -f "$ETC/servidor.json" ] || [ "$RECONFIGURAR" -eq 1 ]; then
+if [ ! -f "$CONFIG" ] || [ "$RECONFIGURAR" -eq 1 ]; then
   if [ -n "$TCP" ]; then
     H="${TCP%%:*}"; P="4403"; [ "$TCP" != "$H" ] && P="${TCP##*:}"
     RECEPTOR="{ \"tipo\": \"tcp\", \"host\": \"$H\", \"puerto\": $P }"
   else
     RECEPTOR="{ \"tipo\": \"usb\", \"puerto\": \"${PUERTO:-auto}\" }"
   fi
-  cat > "$ETC/servidor.json" <<EOF
+  cat > "$CONFIG" <<EOF
 {
   "receptor": $RECEPTOR,
   "web": { "puerto": 4404 },
@@ -225,14 +287,14 @@ if [ ! -f "$ETC/servidor.json" ] || [ "$RECONFIGURAR" -eq 1 ]; then
   "registro": "info"
 }
 EOF
-  chmod 644 "$ETC/servidor.json"
-  dice "Configuración en $ETC/servidor.json"
+  chmod 644 "$CONFIG"
+  dice "Configuración en $CONFIG"
 else
-  [ -n "$TCP$PUERTO" ] && aviso "Ya había configuración en $ETC/servidor.json y se ha dejado tal cual. Para cambiarla, añade --reconfigurar."
-  dice "Se mantiene la configuración de $ETC/servidor.json"
+  [ -n "$TCP$PUERTO" ] && aviso "Ya había configuración en $CONFIG y se ha dejado tal cual. Para cambiarla, añade --reconfigurar."
+  dice "Se mantiene la configuración de $CONFIG"
 fi
 
-# ── Mosquitto: el broker MQTT de casa, con usuario y contraseña (los usuarios, desde Vigía) ──
+# ── Mosquitto: el broker MQTT de casa, con usuario y contraseña (los usuarios, desde Talaia) ──
 MOSQUITTO_OK=0
 if [ "$SIN_MOSQUITTO" -eq 0 ]; then
   if ! command -v mosquitto >/dev/null 2>&1; then
@@ -241,7 +303,7 @@ if [ "$SIN_MOSQUITTO" -eq 0 ]; then
       export DEBIAN_FRONTEND=noninteractive
       apt-get install -y -q mosquitto mosquitto-clients >/dev/null 2>&1 \
         || { apt-get update -q >/dev/null 2>&1 && apt-get install -y -q mosquitto mosquitto-clients >/dev/null 2>&1; } \
-        || aviso "No se pudo instalar Mosquitto. Vigía funciona sin él; repite el instalador cuando haya internet para tenerlo."
+        || aviso "No se pudo instalar Mosquitto. Talaia funciona sin él; repite el instalador cuando haya internet para tenerlo."
     else
       aviso "No hay apt-get: si quieres el broker MQTT en este equipo, instala Mosquitto y repite el instalador."
     fi
@@ -250,27 +312,27 @@ if [ "$SIN_MOSQUITTO" -eq 0 ]; then
     # Si Mosquitto ya tiene otra configuración que escucha en la red o pide usuarios, no se toca.
     OTRA="$(grep -lsE '^[[:space:]]*(listener|port|password_file)[[:space:]]' /etc/mosquitto/mosquitto.conf /etc/mosquitto/conf.d/*.conf 2>/dev/null | grep -vx "$MOSQ_CONF" || true)"
     if [ -n "$OTRA" ]; then
-      aviso "Mosquitto ya tiene su propia configuración ($(echo $OTRA)): no se toca. Vigía puede usarlo como un broker más (Ajustes → MQTT)."
+      aviso "Mosquitto ya tiene su propia configuración ($(echo $OTRA)): no se toca. Talaia puede usarlo como un broker más (Ajustes → MQTT)."
     else
       MOSQUITTO_OK=1
-      install -m 644 "$BASE/actual/servidor/sistema/mosquitto-vigia.conf" "$MOSQ_CONF"
+      install -m 644 "$BASE/actual/servidor/sistema/mosquitto-talaia.conf" "$MOSQ_CONF"
       [ -f "$MOSQ_PW" ] || install -m 600 -o mosquitto -g mosquitto /dev/null "$MOSQ_PW"
-      mkdir -p "$DATOS/mosquitto" && chown vigia:vigia "$DATOS/mosquitto" && chmod 700 "$DATOS/mosquitto"
-      # Que Vigía sepa que tiene su broker (también en una configuración que ya existía).
+      mkdir -p "$DATOS/mosquitto" && chown "$USUARIO:$USUARIO" "$DATOS/mosquitto" && chmod 700 "$DATOS/mosquitto"
+      # Que Talaia sepa que tiene su broker (también en una configuración que ya existía).
       "$NODE" -e '
         const fs = require("fs"), f = process.argv[1], c = JSON.parse(fs.readFileSync(f, "utf8"));
-        if (!c.mosquitto) { c.mosquitto = { puerto: 1883 }; fs.writeFileSync(f, JSON.stringify(c, null, 2) + "\n"); }' "$ETC/servidor.json"
-      dice "Mosquitto: broker MQTT en el puerto 1883, con usuario y contraseña (se crean en Vigía: Ajustes → MQTT)"
+        if (!c.mosquitto) { c.mosquitto = { puerto: 1883 }; fs.writeFileSync(f, JSON.stringify(c, null, 2) + "\n"); }' "$CONFIG"
+      dice "Mosquitto: broker MQTT en el puerto 1883, con usuario y contraseña (se crean en Talaia: Ajustes → MQTT)"
     fi
   fi
 fi
 
-"$NODE" -e 'import("'"$BASE"'/actual/servidor/src/config.js").then((m) => m.leerConfig(process.argv[1], { obligatoria: true })).catch((e) => { console.error(e.message); process.exit(1); })' "$ETC/servidor.json" \
-  || falla "la configuración de $ETC/servidor.json no es válida"
+"$NODE" -e 'import("'"$BASE"'/actual/servidor/src/config.js").then((m) => m.leerConfig(process.argv[1], { obligatoria: true })).catch((e) => { console.error(e.message); process.exit(1); })' "$CONFIG" \
+  || falla "la configuración de $CONFIG no es válida"
 
 # ── el sistema alrededor ──
 if [ -d /etc/udev ]; then
-  install -D -m 644 "$BASE/actual/servidor/sistema/60-vigia-meshtastic.rules" /etc/udev/rules.d/60-vigia-meshtastic.rules
+  install -D -m 644 "$BASE/actual/servidor/sistema/60-talaia-meshtastic.rules" /etc/udev/rules.d/60-talaia-meshtastic.rules
   if command -v udevadm >/dev/null; then udevadm control --reload-rules 2>/dev/null || true; fi
 fi
 if command -v brltty >/dev/null 2>&1; then
@@ -279,11 +341,11 @@ if command -v brltty >/dev/null 2>&1; then
 fi
 
 if con_systemd && [ "$MOSQUITTO_OK" -eq 1 ]; then
-  install -m 644 "$BASE/actual/servidor/sistema/vigia-mosquitto.path" "$BASE/actual/servidor/sistema/vigia-mosquitto.service" /etc/systemd/system/
+  install -m 644 "$BASE/actual/servidor/sistema/talaia-mosquitto.path" "$BASE/actual/servidor/sistema/talaia-mosquitto.service" /etc/systemd/system/
   systemctl daemon-reload
-  systemctl enable --now vigia-mosquitto.path >/dev/null 2>&1
+  systemctl enable --now talaia-mosquitto.path >/dev/null 2>&1
   # Los usuarios que ya hubiera (de una instalación anterior) pasan a Mosquitto antes de arrancarlo.
-  [ -f "$DATOS/mosquitto/passwd" ] && systemctl start vigia-mosquitto.service 2>/dev/null || true
+  [ -f "$DATOS/mosquitto/passwd" ] && systemctl start talaia-mosquitto.service 2>/dev/null || true
   systemctl enable mosquitto >/dev/null 2>&1
   systemctl restart mosquitto || aviso "Mosquitto no ha arrancado. Mira qué dice: journalctl -u mosquitto -n 30"
 fi
@@ -305,7 +367,7 @@ fi
 
 echo
 IPS="$(hostname -I 2>/dev/null | tr ' ' '\n' | grep -E '^[0-9.]+$' | head -3 || true)"
-PUERTO_WEB="$("$NODE" -e 'import("'"$BASE"'/actual/servidor/src/config.js").then((m) => console.log(m.leerConfig(process.argv[1]).web.puerto))' "$ETC/servidor.json" 2>/dev/null || echo 4404)"
+PUERTO_WEB="$("$NODE" -e 'import("'"$BASE"'/actual/servidor/src/config.js").then((m) => console.log(m.leerConfig(process.argv[1]).web.puerto))' "$CONFIG" 2>/dev/null || echo 4404)"
 if [ -n "$IPS" ]; then
   dice "Pantalla en la red de casa:"
   for ip in $IPS; do echo "    http://$ip:$PUERTO_WEB"; done
@@ -317,7 +379,7 @@ fi
 # Sin usuarios todavía, el servicio escribe un código para crear el primero desde la pantalla: aquí se enseña.
 if con_systemd && systemctl is-active --quiet "$SERVICIO"; then
   for _ in $(seq 1 30); do
-    CODIGO="$(/usr/local/bin/vigia-servidor --codigo 2>/dev/null || true)"
+    CODIGO="$("$ORDEN" --codigo 2>/dev/null || true)"
     case "$CODIGO" in
       *"Código para crear"*)
         echo
@@ -331,7 +393,7 @@ if con_systemd && systemctl is-active --quiet "$SERVICIO"; then
 fi
 echo
 dice "Hecho. Para seguirlo:"
-echo "    journalctl -u $SERVICIO -f          lo que va pasando"
-echo "    vigia-servidor --puertos            los nodos enchufados por USB"
-echo "    sudo vigia-servidor --clave NOMBRE  contraseña nueva para un usuario de la pantalla"
-echo "    sudo systemctl restart $SERVICIO    tras cambiar $ETC/servidor.json"
+echo "    journalctl -u $SERVICIO -f           lo que va pasando"
+echo "    talaia --puertos                     los nodos enchufados por USB"
+echo "    sudo talaia --clave NOMBRE           contraseña nueva para un usuario de la pantalla"
+echo "    sudo systemctl restart $SERVICIO     tras cambiar $CONFIG"

@@ -1,5 +1,5 @@
 // Buscador de «Resto de la malla»: texto, filtros y orden. Sin DOM, para poder probarlo con node --test.
-import { distM } from "@vigia/nucleo/geo.js";
+import { distM } from "@talaia/nucleo/geo.js";
 
 const HOUR = 3600000;
 
@@ -38,7 +38,7 @@ const hex = (num) => (num >>> 0).toString(16).padStart(8, "0");
 export function matchScore(n, words, whole = words.join(" ")) {
   if (!words.length) return 0;
   if (n.alias) {
-    // Renombrado en Vigía (servidor): vale tanto el nombre de Vigía como el de Meshtastic.
+    // Renombrado en Talaia: vale tanto el nombre de Talaia como el de Meshtastic.
     const a = matchScore({ ...n, long: n.alias, alias: null }, words, whole), b = matchScore({ ...n, alias: null }, words, whole);
     return a == null ? b : b == null ? a : Math.min(a, b);
   }

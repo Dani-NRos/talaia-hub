@@ -1,16 +1,17 @@
-// El broker MQTT de este equipo (Mosquitto, lo instala el instalador): Vigía gestiona sus usuarios.
+// El broker MQTT de este equipo (Mosquitto, lo instala el instalador): Talaia gestiona sus usuarios.
 //
-// Mosquitto lee los usuarios de /etc/mosquitto/vigia.passwd, que solo puede tocar root. Vigía escribe el suyo en
+// Mosquitto lee los usuarios de /etc/mosquitto/talaia.passwd, que solo puede tocar root. Talaia escribe el suyo en
 // <datos>/mosquitto/passwd (el mismo formato, con las contraseñas cifradas) y un servicio del sistema
-// (vigia-mosquitto.path, del instalador) lo copia a Mosquitto y lo recarga en cuanto cambia. Así se cambian
+// (talaia-mosquitto.path, del instalador) lo copia a Mosquitto y lo recarga en cuanto cambia. Así se cambian
 // usuarios y contraseñas desde la pantalla sin dar permisos de administrador al servidor.
 //
-// Hay un usuario interno, «vigia-servidor», con una contraseña al azar: el de Vigía para conectarse a su broker.
+// Hay un usuario interno, «vigia-servidor», con una contraseña al azar: el de Talaia para conectarse a su broker (con
+// el nombre de antes de la 2.0, para no tener que cambiarlo en Mosquitto).
 import crypto from "node:crypto";
 import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
-import { tx } from "@vigia/nucleo/idioma.js";
+import { tx } from "@talaia/nucleo/idioma.js";
 import "./textos.js";
 
 export const USUARIO_INTERNO = "vigia-servidor";
@@ -57,7 +58,7 @@ export function crearBrokerLocal({ config, almacen, registro }) {
   const fichero = config.mosquitto.usuarios || path.join(config.datos, "mosquitto", "passwd");
   let guardado = almacen.leer("mosquitto", null);
   if (!guardado?.interno?.clave) {
-    // La primera vez: el usuario de Vigía, con una contraseña larga al azar que nadie tiene que saber.
+    // La primera vez: el usuario de Talaia, con una contraseña larga al azar que nadie tiene que saber.
     const clave = crypto.randomBytes(24).toString("base64url");
     guardado = { interno: { clave, cifrada: cifrarClave(clave) }, usuarios: guardado?.usuarios || [] };
     almacen.guardar("mosquitto", guardado);

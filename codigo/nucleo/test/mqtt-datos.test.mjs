@@ -30,7 +30,7 @@ test("leer el valor: número suelto (Home Assistant) o campo de un JSON (zigbee2
   assert.match(leerValor("hola", "temperature").error, /no llega un JSON/);
 });
 
-test("unidades: se pasa a la de Vigía y se rechaza lo imposible", () => {
+test("unidades: se pasa a la de Talaia y se rechaza lo imposible", () => {
   assert.deepEqual(unidades("temperature"), ["°C", "°F"]);
   assert.deepEqual(unidades("windSpeed"), ["m/s", "km/h", "mph"]);
   assert.deepEqual(unidades("power"), ["W", "kW"]);
@@ -83,7 +83,7 @@ test("qué tipo parece cada tema: Home Assistant (por la entidad) y JSON (por el
 });
 
 test("datos de un panel: se completan, y lo que no vale se explica", () => {
-  const prohibido = (t) => (t.startsWith("vigia/") ? "es de Vigía" : null);
+  const prohibido = (t) => (t.startsWith("vigia/") ? "es de Talaia" : null);
   const c = (datos, receptor = false) => comprobarDatos(datos, { temaProhibido: prohibido, brokers: new Set(["b1", "local"]), receptor });
   const d = { tipo: "temperature", broker: "b1", tema: " ha/sensor/t/state " };
   assert.deepEqual(c([d]).datos, [{ nombre: "", tipo: "temperature", broker: "b1", tema: "ha/sensor/t/state", campo: "", unidad: "°C", caduca: 0, malla: false }]);
@@ -94,7 +94,7 @@ test("datos de un panel: se completan, y lo que no vale se explica", () => {
   assert.equal(c([d, { ...d, nombre: "Temperatura nevera" }]).datos.length, 2);
   assert.match(c([{ ...d, tema: "ha/#" }]).error, /no puede llevar «\+» ni «#»/);
   assert.match(c([{ ...d, tema: "" }]).error, /Falta el tema MQTT de «Temperatura»/);
-  assert.match(c([{ ...d, tema: "vigia/nodo/x/estado" }]).error, /«Temperatura»: es de Vigía/);
+  assert.match(c([{ ...d, tema: "vigia/nodo/x/estado" }]).error, /«Temperatura»: es de Talaia/);
   assert.match(c([{ ...d, tipo: "rpm" }]).error, /qué tipo de dato/);
   assert.match(c([{ ...d, unidad: "K" }]).error, /unidad de «Temperatura» no es válida/);
   assert.match(c([{ ...d, campo: "a..b" }]).error, /campo de «Temperatura» no es válido/);
@@ -192,7 +192,7 @@ test("tema de conexión de un panel: opcional; se comprueba como un tema", () =>
   assert.match(comprobarConexion({ broker: "b1", tema: "tele/+/LWT" }).error, /«\+» ni «#»/);
   assert.match(comprobarConexion({ broker: "", tema: "tele/enchufe/LWT" }).error, /Elige el broker/);
   assert.match(comprobarConexion({ broker: "b9", tema: "x" }, { brokers: new Set(["b1"]) }).error, /ya no está/);
-  assert.match(comprobarConexion({ broker: "b1", tema: "vigia/estado" }, { temaProhibido: () => "es de Vigía." }).error, /es de Vigía/);
+  assert.match(comprobarConexion({ broker: "b1", tema: "vigia/estado" }, { temaProhibido: () => "es de Talaia." }).error, /es de Talaia/);
 });
 
 test("órdenes: el tema y los mensajes que suele usar cada dispositivo, y pedir su estado a los Shelly", () => {
@@ -219,5 +219,5 @@ test("órdenes: el tema y los mensajes que suele usar cada dispositivo, y pedir 
   assert.match(comprobarDatos([{ ...base, orden: { ...sh, tema: "a/#" } }]).error, /no puede llevar/);
   assert.match(comprobarDatos([{ ...base, orden: { ...sh, off: "on" } }]).error, /no pueden ser iguales/);
   assert.match(comprobarDatos([{ ...base, orden: { ...sh, on: " " } }]).error, /Faltan los mensajes/);
-  assert.match(comprobarDatos([{ ...base, orden: { ...sh, tema: "vigia/x" } }], { temaProhibido: (x) => (x.startsWith("vigia/") ? "es de Vigía." : null) }).error, /Órdenes de «Enchufe»: es de Vigía/);
+  assert.match(comprobarDatos([{ ...base, orden: { ...sh, tema: "vigia/x" } }], { temaProhibido: (x) => (x.startsWith("vigia/") ? "es de Talaia." : null) }).error, /Órdenes de «Enchufe»: es de Talaia/);
 });

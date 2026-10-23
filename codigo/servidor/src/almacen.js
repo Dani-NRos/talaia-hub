@@ -7,6 +7,18 @@ import { DatabaseSync } from "node:sqlite";
 
 const VERSION = 1;
 
+/**
+ * The database file in a data folder: talaia.db. Up to 2.0 it was vigia.db; mover: rename it now (only the service
+ * does, when starting, before opening it), or just use whichever is there (the terminal, with the service running).
+ */
+export function rutaAlmacen(datos, { mover = false } = {}) {
+  const nueva = path.join(datos, "talaia.db"), vieja = path.join(datos, "vigia.db");
+  if (fs.existsSync(nueva) || !fs.existsSync(vieja)) return nueva;
+  if (!mover) return vieja;
+  for (const fin of ["", "-wal", "-shm"]) if (fs.existsSync(vieja + fin)) fs.renameSync(vieja + fin, nueva + fin);
+  return nueva;
+}
+
 /** ruta: fichero de la base de datos, o ":memory:" para pruebas. */
 export function abrirAlmacen(ruta) {
   if (ruta !== ":memory:") fs.mkdirSync(path.dirname(ruta), { recursive: true });

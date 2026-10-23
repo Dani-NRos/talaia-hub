@@ -5,7 +5,7 @@
 import { EventEmitter } from "node:events";
 import mqtt from "mqtt";
 import { direccionesLocales } from "./mosquitto.js";
-import { tx } from "@vigia/nucleo/idioma.js";
+import { tx } from "@talaia/nucleo/idioma.js";
 import "./textos.js";
 
 /** El broker de este equipo: no se guarda en la lista, sale de la configuración del servidor. */
@@ -149,7 +149,7 @@ export class ConexionMqtt extends EventEmitter {
     const c = mqtt.connect(url, {
       username: this.opts.usuario || undefined,
       password: this.opts.clave || undefined,
-      clientId: this.opts.clienteId || `vigia-${Math.random().toString(16).slice(2, 10)}`,
+      clientId: this.opts.clienteId || `talaia-${Math.random().toString(16).slice(2, 10)}`,
       clean: true,
       keepalive: 30,
       connectTimeout: 10000,
@@ -227,11 +227,11 @@ export class ConexionMqtt extends EventEmitter {
  * MQTT del servidor: guarda la configuración (SQLite, «mqtt»), mantiene una conexión por broker y engancha lo que la
  * usa: la salida a Home Assistant (en su broker) y los enganches (f(idBroker, conexion) → cómo soltarla), como la
  * estación. Deja en S.mqtt lo que ven las pantallas (sin contraseñas) y avisa con la parte «mqtt».
- * vigia: { S, motor, eventos, almacen, registro }. local: el broker de este equipo (mosquitto.js) o null.
+ * talaia: { S, motor, eventos, almacen, registro }. local: el broker de este equipo (mosquitto.js) o null.
  * usos(id): quién más usa un broker (para no quitar uno que se está usando).
  */
-export async function crearServicioMqtt(vigia, { crearSalidaHA, clienteId = "vigia", enganches = [], local = null, usos = () => [] } = {}) {
-  const { S, eventos, almacen, registro } = vigia;
+export async function crearServicioMqtt(talaia, { crearSalidaHA, clienteId = "talaia", enganches = [], local = null, usos = () => [] } = {}) {
+  const { S, eventos, almacen, registro } = talaia;
   migrar(almacen);
   const leido = almacen.leer("mqtt", null) || MQTT_DEFECTO;
   let cfg = { brokers: Array.isArray(leido.brokers) ? leido.brokers : [], ha: comprobarHA(leido.ha || {}).ha || { ...MQTT_DEFECTO.ha } };
@@ -260,7 +260,7 @@ export async function crearServicioMqtt(vigia, { crearSalidaHA, clienteId = "vig
     const a = { conexion, soltar: [], ha: null, testamento };
     activas.set(b.id, a);
     conexion.on("estado", contar);
-    if (esHA(b.id) && crearSalidaHA) a.ha = crearSalidaHA(vigia, conexion, { base: cfg.ha.base, prefijo: cfg.ha.prefijo });
+    if (esHA(b.id) && crearSalidaHA) a.ha = crearSalidaHA(talaia, conexion, { base: cfg.ha.base, prefijo: cfg.ha.prefijo });
     a.soltar = enganches.map((f) => f(b.id, conexion));
     conexion.arrancar();
   }

@@ -1,11 +1,12 @@
-# Vigía servidor
+# Talaia Hub, el servidor
 
-Vigía Mesh funcionando 24/7 en Linux: las mismas alarmas que la app (umbral, cambio rápido, valla antirrobo, sin
-señal) y el histórico de lecturas en SQLite, aunque no haya ningún móvil ni ordenador mirando.
+Talaia vigila 24/7 en Linux una malla Meshtastic y dispositivos MQTT: alarmas (umbral, cambio rápido, valla
+antirrobo, sin señal, estados ON/OFF), un año de histórico en SQLite y una pantalla para el navegador, aunque no
+haya ningún móvil ni ordenador mirando.
 
-> **En pruebas.** Vigila, guarda el histórico y lo cuenta en el diario del sistema; tiene la misma pantalla que la app
-> (ábrela desde el navegador en la red de casa), manda los avisos por la malla si los activas y publica en Home
-> Assistant por MQTT. El acceso desde fuera con https (Tailscale) llega en el siguiente paso.
+> **Hasta la 1.20 se llamaba Vigía servidor.** Al actualizar con el instalador, una instalación de Vigía pasa sola a
+> los nombres nuevos (servicio `talaia`, orden `talaia`, `/etc/talaia/config.json`, `/var/lib/talaia`) con sus datos
+> y su configuración. En Home Assistant no cambia nada: sus dispositivos y temas siguen siendo los mismos.
 
 ## Qué hace falta
 
@@ -35,14 +36,14 @@ wget -qO- https://raw.githubusercontent.com/Dani-NRos/talaia-hub/main/codigo/ser
 
 El instalador:
 
-- pone su propio Node en `/opt/vigia/node`, sin tocar el del sistema;
-- deja el programa en `/opt/vigia/actual` y guarda las dos versiones anteriores;
-- crea un usuario `vigia` sin privilegios, con permiso para el puerto serie (grupo `dialout`);
-- escribe la configuración en `/etc/vigia/servidor.json` y guarda los datos en `/var/lib/vigia`;
+- pone su propio Node en `/opt/talaia/node`, sin tocar el del sistema;
+- deja el programa en `/opt/talaia/actual` y guarda las dos versiones anteriores;
+- crea un usuario `talaia` sin privilegios, con permiso para el puerto serie (grupo `dialout`);
+- escribe la configuración en `/etc/talaia/config.json` y guarda los datos en `/var/lib/talaia`;
 - instala **Mosquitto** (el broker MQTT de casa) en el puerto 1883, **con usuario y contraseña**; los usuarios se
   crean desde la pantalla (ver *MQTT* más abajo). Si Mosquitto ya tenía su propia configuración, no la toca. Para no
   instalarlo: `--sin-mosquitto`;
-- deja el servicio `vigia-servidor` en marcha, y arranca solo al encender;
+- deja el servicio `talaia` en marcha, y arranca solo al encender;
 - si aún no hay usuarios de la pantalla, termina diciendo el **código para crear el primero** (ver *La pantalla*).
 
 Para **actualizar**, vuelve a ejecutar la misma orden: se queda con tu configuración y tus datos.
@@ -50,12 +51,12 @@ Para **actualizar**, vuelve a ejecutar la misma orden: se queda con tu configura
 ## Seguirlo
 
 ```
-journalctl -u vigia-servidor -f       lo que va pasando
-vigia-servidor --puertos              qué nodos hay enchufados por USB
-systemctl status vigia-servidor       si está en marcha
-sudo vigia-servidor --usuarios        los usuarios de la pantalla
-sudo vigia-servidor --clave NOMBRE    contraseña nueva para ese usuario (lo crea si no está)
-sudo vigia-servidor --codigo          el código para crear el primer usuario
+journalctl -u talaia -f       lo que va pasando
+talaia --puertos              qué nodos hay enchufados por USB
+systemctl status talaia       si está en marcha
+sudo talaia --usuarios        los usuarios de la pantalla
+sudo talaia --clave NOMBRE    contraseña nueva para ese usuario (lo crea si no está)
+sudo talaia --codigo          el código para crear el primer usuario
 ```
 
 En el diario salen la conexión con el receptor, las alarmas, las resueltas, los fallos (con qué hacer) y un resumen
@@ -63,20 +64,20 @@ cada hora.
 
 ## Configuración
 
-`/etc/vigia/servidor.json`; tras cambiarla, `sudo systemctl restart vigia-servidor`.
+`/etc/talaia/config.json`; tras cambiarla, `sudo systemctl restart talaia`.
 
 ```json
 {
   "receptor": { "tipo": "usb", "puerto": "auto" },
   "web": { "puerto": 4404 },
-  "datos": "/var/lib/vigia",
+  "datos": "/var/lib/talaia",
   "retencionDias": 365,
   "registro": "info"
 }
 ```
 
 - `receptor.puerto` por USB: `"auto"` (el nodo que haya enchufado), un id USB como `"239a:8029"` (sigue valiendo si
-  el puerto cambia de nombre) o una ruta fija, mejor de `/dev/serial/by-id/` (el nombre de `vigia-servidor --puertos`).
+  el puerto cambia de nombre) o una ruta fija, mejor de `/dev/serial/by-id/` (el nombre de `talaia --puertos`).
 - Por la red: `{ "tipo": "tcp", "host": "192.168.1.60", "puerto": 4403 }`.
 - `retencionDias`: cuánto histórico se guarda (por defecto, un año). Guarda la telemetría de **todos** los nodos que
   oye el receptor, y cada lectura ocupa unos 80 bytes: 50 nodos con 4 sensores cada media hora son unos 22 MB al mes
@@ -101,24 +102,24 @@ El diario dice qué pasa y qué hacer. Lo más habitual:
 wget -qO- https://raw.githubusercontent.com/Dani-NRos/talaia-hub/main/codigo/servidor/instalar.sh | sudo bash -s -- --desinstalar
 ```
 
-Los datos se quedan en `/var/lib/vigia`; con `--desinstalar --borrar-datos` se borran también. Mosquitto se queda
-instalado, sin la configuración de Vigía (si no lo usas para nada más: `sudo apt remove mosquitto`).
+Los datos se quedan en `/var/lib/talaia`; con `--desinstalar --borrar-datos` se borran también. Mosquitto se queda
+instalado, sin la configuración de Talaia (si no lo usas para nada más: `sudo apt remove mosquitto`).
 
 ## La pantalla
 
 Al terminar, el instalador dice en qué direcciones abrirla, como `http://192.168.1.50:4404`. Es la misma app de
-Vigía, pero los datos y el receptor son los del servidor: todos tus aparatos ven lo mismo, y si das «Enterado» en uno,
+Talaia, pero los datos y el receptor son los del servidor: todos tus aparatos ven lo mismo, y si das «Enterado» en uno,
 queda visto en todos. El sonido y la pantalla encendida son de cada aparato.
 
 - **Con usuario y contraseña**, también en casa: sin entrar no se ve nada (ni nodos, ni posiciones, ni el
   histórico) ni se puede mandar nada. La primera vez, la pantalla pide crear el primer usuario con un **código** que
-  dice el instalador al terminar (también está en el diario y con `sudo vigia-servidor --codigo`); así nadie de tu red
+  dice el instalador al terminar (también está en el diario y con `sudo talaia --codigo`); así nadie de tu red
   se adelanta. Después, cada aparato entra una vez y se recuerda **30 días desde la última vez que se usa** (una
   pantalla que no se apaga no se cierra nunca).
 - **Usuarios** (*Ajustes → Usuarios*): todos pueden hacerlo todo, también añadir y quitar usuarios o ponerles una
   contraseña nueva. Ahí se ve en qué aparatos está abierta cada sesión y se pueden cerrar. Nadie se puede quitar a sí
   mismo, así que siempre queda alguien. El registro dice quién hizo cada cosa (*Vigilando Garaje · Ana*). Si olvidas
-  tu contraseña y no hay nadie más: `sudo vigia-servidor --clave TU_NOMBRE` en el equipo.
+  tu contraseña y no hay nadie más: `sudo talaia --clave TU_NOMBRE` en el equipo.
 - **Las contraseñas** van cifradas (scrypt) y nunca salen del servidor; al menos 10 caracteres, sin más reglas (una
   frase sirve). Tras cinco intentos fallidos con un nombre, cada intento más espera el doble (hasta 15 min).
 - **Por http, el navegador no deja** instalarla como app ni mostrar notificaciones con la página cerrada. Eso llega
@@ -163,7 +164,7 @@ privado, a un nodo o a ambos. Como mucho 20 por hora; los canales públicos est�
 
 ## MQTT
 
-Vigía se conecta a la vez a varios brokers MQTT, que se apuntan en Ajustes → *MQTT*:
+Talaia se conecta a la vez a varios brokers MQTT, que se apuntan en Ajustes → *MQTT*:
 
 - **Este servidor**: el Mosquitto de este equipo, el que pone el instalador. Ahí pueden publicar los dispositivos de
   casa (Shelly, Tasmota, zigbee2mqtt, ESPHome…). Solo deja entrar con usuario y contraseña: en *Usuarios de este
@@ -173,24 +174,24 @@ Vigía se conecta a la vez a varios brokers MQTT, que se apuntan en Ajustes → 
 - **Otros brokers** con *Añadir broker*, como el Mosquitto de Home Assistant: nombre, dirección, usuario y
   contraseña. Debajo de cada uno dice si está conectado o qué falla.
 
-Por dentro, Vigía escribe los usuarios en `/var/lib/vigia/mosquitto/passwd` y el servicio `vigia-mosquitto.path` los
+Por dentro, Talaia escribe los usuarios en `/var/lib/talaia/mosquitto/passwd` y el servicio `talaia-mosquitto.path` los
 pasa a Mosquitto y lo recarga, sin cortar a quien ya está conectado. Si usas un cortafuegos (`ufw`), abre el 1883 para
 la red de casa.
 
-Home Assistant solo se conecta a un broker. Si quieres en Home Assistant algo que se publica en el de Vigía, lo normal
+Home Assistant solo se conecta a un broker. Si quieres en Home Assistant algo que se publica en el de Talaia, lo normal
 es un «puente» entre los dos Mosquitto (unas líneas de configuración en uno de ellos).
 
 ## Home Assistant
 
-Home Assistant crea solos los dispositivos de Vigía. En Ajustes → *MQTT* → *Home Assistant*: activa *Publicar los
+Home Assistant crea solos los dispositivos de Talaia. En Ajustes → *MQTT* → *Home Assistant*: activa *Publicar los
 nodos vigilados*, elige el broker de Home Assistant y pulsa *Guardar* (viene apagado).
 
 **Con el complemento Mosquitto de Home Assistant:**
 
-1. En Home Assistant, crea un usuario para Vigía: Ajustes → Personas → *Añadir persona* (por ejemplo `vigia`), con
+1. En Home Assistant, crea un usuario para Talaia: Ajustes → Personas → *Añadir persona* (por ejemplo `talaia`), con
    permiso para iniciar sesión, y ponle contraseña. Mosquitto deja entrar con los usuarios de Home Assistant (los
    nombres `homeassistant` y `addons` están reservados).
-2. En la pantalla de Vigía servidor, Ajustes → *MQTT* → *Añadir broker*: nombre (Home Assistant), la dirección de
+2. En la pantalla de Talaia, Ajustes → *MQTT* → *Añadir broker*: nombre (Home Assistant), la dirección de
    Home Assistant (como `192.168.1.20`; si no pones puerto, usa el 1883), ese usuario y su contraseña. Luego, en
    *Home Assistant*, actívalo y elige ese broker.
 3. En Home Assistant aparecen solos, en Ajustes → Dispositivos y servicios → MQTT:
@@ -200,20 +201,20 @@ nodos vigilados*, elige el broker de Home Assistant y pulsa *Guardar* (viene apa
      oyó por última vez, saltos y SNR; y por cada alarma que le tengas puesta, un sensor (encendido mientras salta,
      con el detalle en sus atributos) y su botón *Enterado*. La posición no se manda.
 
-Las alarmas y los límites se siguen poniendo en Vigía: Home Assistant los ve y puede dar «Enterado», pero no los
+Las alarmas y los límites se siguen poniendo en Talaia: Home Assistant los ve y puede dar «Enterado», pero no los
 cambia. Va solo lo de los nodos Meshtastic: los datos MQTT de los paneles y sus alarmas, no (ni cuentan en las
-alarmas activas, ni *Enterado todas* las da por vistas). Si renombras un nodo en Vigía, su dispositivo cambia de
+alarmas activas, ni *Enterado todas* las da por vistas). Si renombras un nodo en Talaia, su dispositivo cambia de
 nombre. Si dejas de vigilar un nodo, su dispositivo desaparece de Home Assistant. Si el servidor se apaga o se cae,
-Home Assistant marca sus entidades como no disponibles. Vigía sigue sonando y avisando como siempre: Home Assistant es
+Home Assistant marca sus entidades como no disponibles. Talaia sigue sonando y avisando como siempre: Home Assistant es
 una salida más.
 
 **Avisar al móvil con la app de Home Assistant.** Cada alarma que salta, se resuelve o se da por vista llega como
 evento (`event.vigia_servidor_alarmas`, con `event_type` *alarma*, *resuelta* o *vista*, y en sus atributos `texto`,
 `detalle`, `nodo` e `id`). Una automatización (en YAML; cambia `mobile_app_mi_movil` por tu móvil, y comprueba el
-nombre de la entidad *Alarmas* en el dispositivo *Vigía servidor*):
+nombre de la entidad *Alarmas* en el dispositivo *Talaia*):
 
 ```yaml
-alias: Vigía → móvil
+alias: Talaia → móvil
 triggers:
   - trigger: state
     entity_id: event.vigia_servidor_alarmas
@@ -224,7 +225,7 @@ conditions:
 actions:
   - action: notify.mobile_app_mi_movil
     data:
-      title: Vigía
+      title: Talaia
       message: "{{ trigger.to_state.attributes.texto }}. {{ trigger.to_state.attributes.detalle or '' }}"
 ```
 
@@ -255,13 +256,13 @@ alarmas (también avisos por la malla) e histórico, como un nodo. Solo en el se
 - **Datos por MQTT**: en la ficha de cada panel (también en la de un nodo, para tener junto a él otro dato, como la
   temperatura de dentro de la caseta). Cada dato lleva su nombre (puede haber varias temperaturas), qué es, de qué
   broker viene, el tema y, si llega un JSON, el campo (`temperature`, o `ENERGY.Power` si va dentro de otro). Si el
-  viento llega en km/h o la temperatura en °F, se elige la unidad y Vigía la pasa a la suya. Debajo de cada dato se
+  viento llega en km/h o la temperatura en °F, se elige la unidad y Talaia la pasa a la suya. Debajo de cada dato se
   ve el último valor que ha llegado. *Otro número* sirve para lo que no está en la lista (con la unidad que pongas).
 - **Buscar temas** escucha los brokers unos segundos y enseña los temas con números (se pueden filtrar). **Usar**
   pone uno en la lista: adivina qué es por el nombre (temperature, humidity, Power…) y, si Home Assistant publica la
   unidad, la elige; si no, el viento queda en km/h, lo normal en Home Assistant. Compruébalo.
 - **Lecturas**: el valor se ve y salta la alarma al momento; en el histórico se guarda uno por minuto como mucho.
-- **Estados ON/OFF** (*Estado ON/OFF* en el tipo): un enchufe, un relé, una puerta, un detector de agua… Vigía
+- **Estados ON/OFF** (*Estado ON/OFF* en el tipo): un enchufe, un relé, una puerta, un detector de agua… Talaia
   entiende `ON`/`OFF`, `on`/`off`, `true`/`false`, `1`/`0`, `open`/`closed`, `online`/`offline` y un JSON con
   cualquiera de ellos (`{"POWER":"ON"}` de Tasmota, `{"output":true}` de Shelly, `{"contact":false}` de
   zigbee2mqtt). Se eligen sus nombres (*Encendido / Apagado*, *Abierta / Cerrada*, *Hay agua / Seco*…) y, si el
@@ -275,22 +276,22 @@ alarmas (también avisos por la malla) e histórico, como un nodo. Solo en el se
   pulsas el enchufe mientras busca) y a veces sin ese campo (solo la potencia): esos mensajes no cuentan para el dato.
 - **Alarma de un estado**, en la ficha: *Avisar cuando: Abierta* (o *Cerrada*), al momento o solo si sigue así más de
   unos minutos (una puerta abierta más de 10 min, una bomba encendida más de 1 h). Se resuelve al cambiar.
-- **Encender y apagar desde Vigía**: en un estado, *Encender y apagar desde Vigía* y el tema al que se mandan las
-  órdenes, con el mensaje para cada estado. Vigía lo propone a partir del tema de estado (Shelly Plus/Pro/Gen3:
+- **Encender y apagar desde Talaia**: en un estado, *Encender y apagar desde Talaia* y el tema al que se mandan las
+  órdenes, con el mensaje para cada estado. Talaia lo propone a partir del tema de estado (Shelly Plus/Pro/Gen3:
   `…/command/switch:0` con `on` y `off`, con *Enable MQTT Control* activado en el Shelly; Tasmota: `cmnd/…/POWER` con
   `ON` y `OFF`; zigbee2mqtt: `zigbee2mqtt/…/set` con `{"state":"ON"}`; ESPHome: `…/switch/…/command`); se puede
   cambiar. En la tarjeta, la ficha y la pantalla completa sale un interruptor: se pulsa y se manda, **sin
   confirmación** (cualquier usuario de la pantalla puede usarlo). Dice *Enviando…* hasta que el
   dispositivo cuenta por su tema de estado que lo ha hecho; si en 10 s no lo cuenta, *No ha contestado*. Cada orden
   queda en el registro. Home Assistant no recibe órdenes por `mqtt_statestream`.
-- **Los Shelly no guardan su estado en el broker**: al conectar con él (y al guardar los datos), Vigía les pide que lo
+- **Los Shelly no guardan su estado en el broker**: al conectar con él (y al guardar los datos), Talaia les pide que lo
   digan (`status_update` en `…/command/switch:0`; en los de primera generación, `update`). Solo es una petición de
   información, no cambia nada. Por `…/events/rpc` no se puede pedir: mejor `…/status/switch:0`.
 - **Conexión del dispositivo** (paneles sin nodo, opcional): el tema donde dice si está conectado. Tasmota:
   `tele/…/LWT` (`Online`/`Offline`); Shelly: `…/online` (`true`/`false`); zigbee2mqtt: `zigbee2mqtt/…/availability`
   (campo `state`). Con él, el panel dice *Sin conexión* al momento y, con *Avisar si se desconecta*, salta su alarma
   (y su aviso por la malla, si están activados). *Buscar temas* lo reconoce y ofrece *Usar como conexión*.
-- **Nombre**: todos los paneles se pueden renombrar. El de un nodo es solo para Vigía (tablero, alarmas, avisos por
+- **Nombre**: todos los paneles se pueden renombrar. El de un nodo es solo para Talaia (tablero, alarmas, avisos por
   la malla y Home Assistant): su nombre de Meshtastic se queda como información y, con el nombre vacío, vuelve a él.
 - **Sin datos**: en un panel sin nodo, la alarma «no llega ningún dato en más de…» viene apagada, porque hay
   dispositivos que solo publican cuando algo cambia.
@@ -303,7 +304,7 @@ la malla* sí enseña el texto del último mensaje que salió por la malla, sea 
 ## A la malla (el panel del receptor)
 
 Los datos MQTT del panel del receptor pueden salir a la malla cada cierto tiempo como **su telemetría de ambiente**,
-como si tuviera esos sensores: la app de Meshtastic y Vigía los ven en sus gráficas. Es lo de una estación del barrio
+como si tuviera esos sensores: la app de Meshtastic y Talaia los ven en sus gráficas. Es lo de una estación del barrio
 en la misma ubicación que el nodo.
 
 - En cada dato del receptor, la casilla **A la malla**, y debajo de *Datos por MQTT*, **Mandar a la malla**: **cada**
@@ -346,6 +347,6 @@ mqtt_statestream:
       - sensor.estacion_viento
 ```
 
-Con `publish_attributes: true` sale también la unidad de cada uno y Vigía la elige sola. Cada uno sale en
-`ha_estados/sensor/estacion_temperatura/state` (retenido: Vigía lo tiene nada más conectar). No incluyas los sensores
-«Talaia · …»: Vigía rechaza sus propios temas para no volver a recibir lo que ya publica él.
+Con `publish_attributes: true` sale también la unidad de cada uno y Talaia la elige sola. Cada uno sale en
+`ha_estados/sensor/estacion_temperatura/state` (retenido: Talaia lo tiene nada más conectar). No incluyas los sensores
+«Talaia · …»: Talaia rechaza sus propios temas para no volver a recibir lo que ya publica él.

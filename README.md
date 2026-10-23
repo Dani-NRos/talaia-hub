@@ -5,9 +5,9 @@ zigbee2mqtt…) on a small Linux computer at home: a mini PC, a Raspberry Pi 4/5
 a year of history in SQLite, switches you can control, Home Assistant over MQTT and access from outside your home with
 Tailscale. Everything stays on your own machine.
 
-**Under development towards version 2.0.** Up to version 1.20 it was called *Vigía servidor* and it still shows that
-name. The redesign, the English interface, user accounts and Docker are on the way. Today the interface and the
-documentation are only in Spanish.
+**Under development towards version 2.0.** Up to version 1.20 it was called *Vigía servidor*. The interface is in
+English and Spanish and has user accounts; Docker and the English documentation are on the way (today the
+documentation is only in Spanish).
 
 - **Install the development version** (Ubuntu, Debian, Raspberry Pi OS):
   `wget -qO- https://raw.githubusercontent.com/Dani-NRos/talaia-hub/main/codigo/servidor/instalar.sh | sudo bash`
@@ -25,11 +25,12 @@ zigbee2mqtt…) desde un ordenador pequeño con Linux en casa: un mini PC, una R
 Paneles, alarmas, un año de histórico en SQLite, interruptores que se manejan desde la pantalla, Home Assistant por
 MQTT y acceso desde fuera de casa con Tailscale. Todo se queda en tu equipo.
 
-**En desarrollo hacia la versión 2.0.** Hasta la 1.20 se llamaba *Vigía servidor*, y la pantalla aún dice ese nombre.
-Llegarán el rediseño, la versión en inglés, los usuarios con contraseña y Docker.
+**En desarrollo hacia la versión 2.0.** Hasta la 1.20 se llamaba *Vigía servidor*. La pantalla ya está en español e
+inglés y tiene usuarios con contraseña; llegarán Docker y la documentación en inglés.
 
 - **Instalar la versión en desarrollo** (Ubuntu, Debian, Raspberry Pi OS): el mismo comando de arriba. Si ya tienes
-  Vigía servidor, se instala encima y conserva los datos y la configuración.
+  Vigía servidor, se instala encima, pasa a los nombres de Talaia (servicio `talaia`, `/var/lib/talaia`…) y conserva
+  los datos y la configuración.
 - **Cómo configurarlo y usarlo**: [`codigo/servidor`](codigo/servidor/README.md).
 - **Versión estable (1.20)**: Vigía servidor, que se instala desde [vigia-mesh](https://github.com/Dani-NRos/vigia-mesh).
 - **La app ligera** (Bluetooth o cable USB, sin instalar nada), congelada en la 1.20:

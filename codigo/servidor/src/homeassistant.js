@@ -1,9 +1,9 @@
 // Salida a Home Assistant por MQTT, con autodescubrimiento: HA crea solo los dispositivos y sus entidades.
 //
-//  «Vigía servidor»                 receptor conectado, alarmas sin atender y activas, nodos oídos en la última hora,
+//  «Talaia»                 receptor conectado, alarmas sin atender y activas, nodos oídos en la última hora,
 //                                   último aviso por la malla, un evento por alarma (para notificar) y «Enterado todas».
 //                                   Solo lo de los nodos Meshtastic: los datos MQTT de los paneles (y sus alarmas), no.
-//  «Vigía · Caseta huerto» (uno por nodo vigilado)
+//  «Talaia · Caseta huerto» (uno por nodo vigilado)
 //                                   un sensor por métrica, último oído, saltos y SNR; un sensor binario por cada alarma
 //                                   que tenga puesta (límite, cambio rápido, sin señal, valla) y su botón «Enterado».
 //
@@ -17,11 +17,11 @@
 //   vigia/nodo/<id>/enterado        ← botones de HA (la carga dice qué alarma)
 //   homeassistant/<tipo>/vigia_<id>/<entidad>/config   autodescubrimiento (retenido)
 import fs from "node:fs";
-import { metricMeta } from "@vigia/nucleo/metrics.js";
-import { hexId, trendKey, esAlarmaMqtt } from "@vigia/nucleo/motor.js";
-import { HOUR, isNum } from "@vigia/nucleo/textos.js";
-import { esClaveMqtt } from "@vigia/nucleo/mqtt-datos.js";
-import { tx } from "@vigia/nucleo/idioma.js";
+import { metricMeta } from "@talaia/nucleo/metrics.js";
+import { hexId, trendKey, esAlarmaMqtt } from "@talaia/nucleo/motor.js";
+import { HOUR, isNum } from "@talaia/nucleo/textos.js";
+import { esClaveMqtt } from "@talaia/nucleo/mqtt-datos.js";
+import { tx } from "@talaia/nucleo/idioma.js";
 import "./textos.js";
 
 const VERSION = JSON.parse(fs.readFileSync(new URL("../package.json", import.meta.url), "utf8")).version;
@@ -65,7 +65,7 @@ export function alarmasPosibles(num, w, S) {
 }
 
 /**
- * vigia: { S, motor, eventos, registro }. conexion: una ConexionMqtt. opts: { base, prefijo }.
+ * talaia: { S, motor, eventos, registro }. conexion: una ConexionMqtt. opts: { base, prefijo }.
  * Devuelve { publicarTodo(), retirar(), parar() }.
  */
 export function crearSalidaHA({ S, motor, eventos, registro }, conexion, { base = "vigia", prefijo = "homeassistant" } = {}) {
@@ -217,7 +217,7 @@ export function crearSalidaHA({ S, motor, eventos, registro }, conexion, { base 
   const marcarServidor = () => { servidorSucio = true; programar(); };
   const marcarConfig = () => { configSucia = true; programar(); };
 
-  /** Lo nuevo del registro de Vigía (alarmas, resueltas, vistas) sale como evento: con él se notifica en HA. */
+  /** Lo nuevo del registro de Talaia (alarmas, resueltas, vistas) sale como evento: con él se notifica en HA. */
   function eventosNuevos() {
     const nuevas = [];
     for (const e of S.log) { if (e === ultimoLog) break; nuevas.push(e); }
@@ -244,7 +244,7 @@ export function crearSalidaHA({ S, motor, eventos, registro }, conexion, { base 
     marcarServidor();
   }
 
-  /* ── lo que llega de Vigía ── */
+  /* ── lo que llega de Talaia ── */
   const escuchas = {
     lectura: (num) => marcarNodo(num),
     posicion: (num) => marcarNodo(num),
@@ -304,7 +304,7 @@ export function crearSalidaHA({ S, motor, eventos, registro }, conexion, { base 
 
   return {
     publicarTodo,
-    /** Quita de HA todo lo de Vigía (al apagar la salida a HA o cambiar de prefijo). */
+    /** Quita de HA todo lo de Talaia (al apagar la salida a HA o cambiar de prefijo). */
     async retirar() {
       detener(); // primero, que nada vuelva a publicar mientras se borra
       for (const tema of [...publicados.keys()]) { await conexion.publicar(tema, "", { retener: true, qos: 1 }); publicados.delete(tema); }

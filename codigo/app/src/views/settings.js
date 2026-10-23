@@ -11,11 +11,11 @@ import { displayName } from "./dashboard.js";
 import { brokerLabel } from "./panel-config.js";
 import { usersTab, usersClick } from "./users.js";
 import { unlockAudio, beep, applyWake, notificationState } from "../alerts.js";
-import { channelWhy } from "@vigia/nucleo/canales.js";
-import { hexId, MESH_HOURLY } from "@vigia/nucleo/motor.js";
-import { PRESET_NAME } from "@vigia/nucleo/route.js";
-import { fmtNum } from "@vigia/nucleo/metrics.js";
-import { hhmm, stamp } from "@vigia/nucleo/textos.js";
+import { channelWhy } from "@talaia/nucleo/canales.js";
+import { hexId, MESH_HOURLY } from "@talaia/nucleo/motor.js";
+import { PRESET_NAME } from "@talaia/nucleo/route.js";
+import { fmtNum } from "@talaia/nucleo/metrics.js";
+import { hhmm, stamp } from "@talaia/nucleo/textos.js";
 
 export const APP_VERSION = "1.20.0";
 const REPO_URL = "https://github.com/Dani-NRos/talaia-hub";

@@ -8,7 +8,7 @@ import path from "node:path";
 import http from "node:http";
 import { abrirAlmacen } from "../src/almacen.js";
 import { crearUsuarios, cifrar, comprobarClave, aparatoDe, SESION_MS } from "../src/usuarios.js";
-import { crearVigia } from "../src/vigia.js";
+import { crearTalaia } from "../src/talaia.js";
 import { crearWeb } from "../src/web.js";
 import { comprobar } from "../src/config.js";
 import { crearRegistro } from "../src/registro.js";
@@ -218,13 +218,13 @@ async function servidor(t) {
   fs.writeFileSync(path.join(appDir, "index.html"), "<!doctype html><html><head><title>Talaia</title></head><body>app</body></html>");
   const config = comprobar({ receptor: { tipo: "tcp", host: "127.0.0.1", puerto: puertoNodo }, web: { escuchar: "127.0.0.1" }, datos: os.tmpdir() });
   config.web.puerto = 0;
-  const vigia = await crearVigia(config, crearRegistro({ nivel: "error", salida: [] }), { almacen: abrirAlmacen(":memory:") });
-  const web = crearWeb(vigia, config, crearRegistro({ nivel: "error", salida: [] }), { appDir });
+  const talaia = await crearTalaia(config, crearRegistro({ nivel: "error", salida: [] }), { almacen: abrirAlmacen(":memory:") });
+  const web = crearWeb(talaia, config, crearRegistro({ nivel: "error", salida: [] }), { appDir });
   const puerto = await web.escuchar();
-  vigia.arrancar();
-  await hasta(() => vigia.S.link.state === "ready", 8000, "receptor listo");
-  t.after(async () => { await web.cerrar(); await vigia.detener(); await nodo.cerrar(); });
-  return { vigia, nodo, base: `http://127.0.0.1:${puerto}`, puerto };
+  talaia.arrancar();
+  await hasta(() => talaia.S.link.state === "ready", 8000, "receptor listo");
+  t.after(async () => { await web.cerrar(); await talaia.detener(); await nodo.cerrar(); });
+  return { talaia, nodo, base: `http://127.0.0.1:${puerto}`, puerto };
 }
 function pedir(base, ruta, { metodo = "GET", cabeceras = {}, datos = null } = {}) {
   return new Promise((resolve, reject) => {
@@ -244,7 +244,7 @@ function pedir(base, ruta, { metodo = "GET", cabeceras = {}, datos = null } = {}
 const galletaDe = (r) => String(r.headers["set-cookie"] || "").split(";")[0];
 
 test("web: without a session, only the app, «alive» and signing in", async (t) => {
-  const { base, vigia } = await servidor(t);
+  const { base, talaia } = await servidor(t);
   assert.equal((await pedir(base, "/")).status, 200);
   const salud = await pedir(base, "/api/salud");
   assert.deepEqual(Object.keys(salud.json).sort(), ["ok", "receptor"]);
@@ -261,14 +261,14 @@ test("web: without a session, only the app, «alive» and signing in", async (t)
   const s = await pedir(base, "/api/sesion");
   assert.equal(s.status, 401);
   assert.equal(s.json.primero, true);
-  assert.equal(vigia.usuarios.hay(), false);
+  assert.equal(talaia.usuarios.hay(), false);
 });
 
 test("web: the first user with the code, signed in at once; the cookie is HttpOnly", async (t) => {
-  const { base, vigia } = await servidor(t);
+  const { base, talaia } = await servidor(t);
   let r = await pedir(base, "/api/primero", { metodo: "POST", datos: { codigo: "NOPE-NOPE", nombre: "Dani", clave: "clave-de-dani-1" } });
   assert.equal(r.status, 401);
-  r = await pedir(base, "/api/primero", { metodo: "POST", datos: { codigo: vigia.usuarios.codigo, nombre: "Dani", clave: "clave-de-dani-1" } });
+  r = await pedir(base, "/api/primero", { metodo: "POST", datos: { codigo: talaia.usuarios.codigo, nombre: "Dani", clave: "clave-de-dani-1" } });
   assert.equal(r.status, 200);
   const cookie = String(r.headers["set-cookie"]);
   assert.match(cookie, /^talaia_sesion=[\w-]{40,}; Path=\/; HttpOnly; SameSite=Lax; Max-Age=2592000$/);
@@ -287,8 +287,8 @@ test("web: the first user with the code, signed in at once; the cookie is HttpOn
 });
 
 test("web: signing in from another page, wrong, too many times, and over https", async (t) => {
-  const { base, vigia, puerto } = await servidor(t);
-  await vigia.usuarios.crear("Dani", "clave-de-dani-1");
+  const { base, talaia, puerto } = await servidor(t);
+  await talaia.usuarios.crear("Dani", "clave-de-dani-1");
   let r = await pedir(base, "/api/entrar", { metodo: "POST", datos: { nombre: "Dani", clave: "clave-de-dani-1" }, cabeceras: { origin: "https://malvada.example" } });
   assert.equal(r.status, 403);
   assert.equal(r.headers["set-cookie"], undefined);
@@ -308,9 +308,9 @@ test("web: signing in from another page, wrong, too many times, and over https",
 });
 
 test("web: signing out, and a screen whose session ends stops getting anything", async (t) => {
-  const { base, vigia } = await servidor(t);
-  await vigia.usuarios.crear("Dani", "clave-de-dani-1");
-  await vigia.usuarios.crear("Ana", "clave-de-ana-12");
+  const { base, talaia } = await servidor(t);
+  await talaia.usuarios.crear("Dani", "clave-de-dani-1");
+  await talaia.usuarios.crear("Ana", "clave-de-ana-12");
   const dani = galletaDe(await pedir(base, "/api/entrar", { metodo: "POST", datos: { nombre: "Dani", clave: "clave-de-dani-1" } }));
   const ana = galletaDe(await pedir(base, "/api/entrar", { metodo: "POST", datos: { nombre: "Ana", clave: "clave-de-ana-12" } }));
   // Ana's screen, open.
@@ -331,13 +331,13 @@ test("web: signing out, and a screen whose session ends stops getting anything",
 });
 
 test("web: users from the screen, and who did each thing in the log", async (t) => {
-  const { base, vigia, nodo } = await servidor(t);
-  await vigia.usuarios.crear("Dani", "clave-de-dani-1");
+  const { base, talaia, nodo } = await servidor(t);
+  await talaia.usuarios.crear("Dani", "clave-de-dani-1");
   const dani = galletaDe(await pedir(base, "/api/entrar", { metodo: "POST", datos: { nombre: "Dani", clave: "clave-de-dani-1" } }));
   const orden = (datos, g = dani) => pedir(base, "/api/orden", { metodo: "POST", datos, cabeceras: { cookie: g } });
   let r = await orden({ orden: "crearUsuario", nombre: "Ana", clave: "clave-de-ana-12" });
   assert.deepEqual(r.json, { ok: true, toast: "Usuario «Ana» creado." });
-  assert.deepEqual({ text: vigia.S.log[0].text, by: vigia.S.log[0].by }, { text: "Usuario nuevo: Ana", by: "Dani" });
+  assert.deepEqual({ text: talaia.S.log[0].text, by: talaia.S.log[0].by }, { text: "Usuario nuevo: Ana", by: "Dani" });
   r = await orden({ orden: "crearUsuario", nombre: "Ana", clave: 3 });
   assert.equal(r.status, 400);
   r = await orden({ orden: "quitarUsuario", nombre: "Dani" });
@@ -350,13 +350,13 @@ test("web: users from the screen, and who did each thing in the log", async (t) 
   // What a user does carries their name; alarms coming and going don't.
   r = await orden({ orden: "vigilar", num: CASETA });
   assert.equal(r.json.ok, true);
-  assert.equal(vigia.S.log[0].by, "Dani");
+  assert.equal(talaia.S.log[0].by, "Dani");
   r = await orden({ orden: "limite", num: CASETA, metrica: "temperature", lado: "max", valor: 10 });
   assert.equal(r.json.ok, true);
   nodo.ambiente(CASETA, { temperature: 22 });
-  await hasta(() => vigia.S.log.some((e) => e.type === "raise"), 3000, "the alarm");
-  assert.equal(vigia.S.log.find((e) => e.type === "raise").by, undefined);
-  assert.equal(vigia.S.log.find((e) => e.type === "info" && /Vigilando/.test(e.text)).by, "Dani");
+  await hasta(() => talaia.S.log.some((e) => e.type === "raise"), 3000, "the alarm");
+  assert.equal(talaia.S.log.find((e) => e.type === "raise").by, undefined);
+  assert.equal(talaia.S.log.find((e) => e.type === "info" && /Vigilando/.test(e.text)).by, "Dani");
   // Names of orders that are not orders.
   for (const o of ["constructor", "__proto__", "toString", "hasOwnProperty"]) {
     r = await orden({ orden: o });

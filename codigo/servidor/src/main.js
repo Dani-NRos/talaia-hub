@@ -1,12 +1,12 @@
 #!/usr/bin/env node
-// Vigía servidor: arranque desde la línea de órdenes o desde systemd.
+// Talaia Hub: start from the command line or from systemd.
 //
-//   vigia-servidor [--config /etc/vigia/servidor.json]
-//   vigia-servidor --puertos        lista los nodos enchufados por USB
-//   vigia-servidor --version
-//   sudo vigia-servidor --clave NOMBRE   contraseña nueva para ese usuario (lo crea si no está); cierra sus sesiones
-//   sudo vigia-servidor --usuarios       los usuarios de la pantalla
-//   sudo vigia-servidor --codigo         el código para crear el primer usuario
+//   talaia [--config /etc/talaia/config.json]
+//   talaia --puertos        lista los nodos enchufados por USB
+//   talaia --version
+//   sudo talaia --clave NOMBRE   contraseña nueva para ese usuario (lo crea si no está); cierra sus sesiones
+//   sudo talaia --usuarios       los usuarios de la pantalla
+//   sudo talaia --codigo         el código para crear el primer usuario
 import fs from "node:fs";
 import path from "node:path";
 import { leerConfig, RUTA_CONFIG, ErrorConfig } from "./config.js";
@@ -32,14 +32,14 @@ if (args.includes("--puertos")) {
 // node:sqlite llega en Node 22.13 (sin opciones) y en 23.4.
 const [maj, min] = process.versions.node.split(".").map(Number);
 if (maj < 22 || (maj === 22 && min < 13)) {
-  console.error(`Talaia Hub necesita Node 22.13 o más reciente (tienes ${process.versions.node}). El instalador pone uno en /opt/vigia/node.`);
+  console.error(`Talaia Hub necesita Node 22.13 o más reciente (tienes ${process.versions.node}). El instalador pone uno en /opt/talaia/node.`);
   process.exit(1);
 }
 // Aviso de «SQLite es experimental» en cada arranque: no aporta nada en el diario.
 process.removeAllListeners("warning");
 process.on("warning", (w) => { if (w.name !== "ExperimentalWarning") console.warn(`${w.name}: ${w.message}`); });
 
-const rutaConfig = opcion("--config") || process.env.VIGIA_CONFIG || RUTA_CONFIG;
+const rutaConfig = opcion("--config") || process.env.TALAIA_CONFIG || process.env.VIGIA_CONFIG || RUTA_CONFIG;
 let config;
 try {
   config = leerConfig(rutaConfig);
@@ -55,19 +55,19 @@ process.on("unhandledRejection", (e) => registro.error(`Error sin atender: ${e?.
 process.on("uncaughtException", (e) => { registro.error(`Excepción sin atender, se reinicia: ${e?.stack || e}`); process.exit(70); });
 
 registro.info(`Talaia Hub ${VERSION} · Node ${process.versions.node} · configuración: ${fs.existsSync(rutaConfig) ? rutaConfig : "por defecto"} · datos: ${config.datos}`);
-const { crearVigia } = await import("./vigia.js");
-let vigia;
+const { crearTalaia } = await import("./talaia.js");
+let talaia;
 try {
-  vigia = await crearVigia(config, registro);
+  talaia = await crearTalaia(config, registro);
 } catch (e) {
   registro.error(`No se pudo arrancar: ${e.message}`);
   if (e.code === "EACCES") registro.error(`El usuario del servicio no puede escribir en ${config.datos}.`);
   process.exit(1);
 }
-vigia.arrancar();
+talaia.arrancar();
 const { crearWeb, direcciones } = await import("./web.js");
-const { tx } = await import("@vigia/nucleo/idioma.js"); // from here on, in the server's language (read by crearVigia)
-const web = crearWeb(vigia, config, registro);
+const { tx } = await import("@talaia/nucleo/idioma.js"); // from here on, in the server's language (read by crearTalaia)
+const web = crearWeb(talaia, config, registro);
 try {
   const puerto = await web.escuchar();
   const dirs = direcciones(puerto);
@@ -82,7 +82,7 @@ async function parar(senal) {
   parando = true;
   registro.info(tx("s.j.stopping", { signal: senal }));
   const t = setTimeout(() => process.exit(0), 5000);
-  try { await web.cerrar(); await vigia.detener(); } catch (e) { registro.error(tx("s.j.stopFail", { e: e.message })); }
+  try { await web.cerrar(); await talaia.detener(); } catch (e) { registro.error(tx("s.j.stopFail", { e: e.message })); }
   clearTimeout(t);
   process.exit(0);
 }
@@ -114,13 +114,14 @@ function leerOculto(pregunta, lineas) {
 }
 
 async function usuariosTerminal() {
-  const ruta = path.join(config.datos, "vigia.db");
+  const { abrirAlmacen, rutaAlmacen } = await import("./almacen.js");
+  const ruta = rutaAlmacen(config.datos); // the one there is: the service renames it when it starts
   let almacen;
   try {
     fs.accessSync(config.datos, fs.constants.R_OK | fs.constants.W_OK);
-    almacen = (await import("./almacen.js")).abrirAlmacen(ruta);
+    almacen = abrirAlmacen(ruta);
   } catch (e) {
-    console.error(`No se puede abrir ${ruta} (${e.code || e.message}). Prueba con sudo: sudo vigia-servidor ${args.join(" ")}`);
+    console.error(`No se puede abrir ${ruta} (${e.code || e.message}). Prueba con sudo: sudo talaia ${args.join(" ")}`);
     return 1;
   }
   const { crearUsuarios } = await import("./usuarios.js");
@@ -128,20 +129,20 @@ async function usuariosTerminal() {
   try {
     if (args.includes("--usuarios")) {
       const lista = usuarios.lista();
-      if (!lista.length) console.log("No hay usuarios todavía. Crea el primero desde la pantalla (sudo vigia-servidor --codigo) o aquí: sudo vigia-servidor --clave NOMBRE");
+      if (!lista.length) console.log("No hay usuarios todavía. Crea el primero desde la pantalla (sudo talaia --codigo) o aquí: sudo talaia --clave NOMBRE");
       const fecha = (t) => (t ? new Date(t).toLocaleString("es-ES") : "nunca");
       for (const u of lista) console.log(`${u.nombre} · ${u.sesiones.length} sesiones abiertas · último uso: ${fecha(u.usado)}`);
       return 0;
     }
     if (args.includes("--codigo")) {
-      if (usuarios.hay()) { console.log("Ya hay usuarios: no hace falta código. Para cambiar una contraseña: sudo vigia-servidor --clave NOMBRE"); return 0; }
+      if (usuarios.hay()) { console.log("Ya hay usuarios: no hace falta código. Para cambiar una contraseña: sudo talaia --clave NOMBRE"); return 0; }
       let cod = null;
       try { cod = fs.readFileSync(path.join(config.datos, "primer-usuario.txt"), "utf8").trim(); } catch { /* not made yet */ }
-      console.log(cod ? `Código para crear el primer usuario: ${cod}` : "Aún no hay código: arranca el servicio (sudo systemctl restart vigia-servidor) y vuelve a mirarlo.");
+      console.log(cod ? `Código para crear el primer usuario: ${cod}` : "Aún no hay código: arranca el servicio (sudo systemctl restart talaia) y vuelve a mirarlo.");
       return 0;
     }
     const nombre = opcion("--clave");
-    if (!nombre || nombre.startsWith("--")) { console.error("Falta el nombre: sudo vigia-servidor --clave NOMBRE"); return 2; }
+    if (!nombre || nombre.startsWith("--")) { console.error("Falta el nombre: sudo talaia --clave NOMBRE"); return 2; }
     const { createInterface } = await import("node:readline");
     const lineas = process.stdin.isTTY ? null : createInterface({ input: process.stdin })[Symbol.asyncIterator]();
     const clave = await leerOculto(`Contraseña nueva para ${nombre}: `, lineas);

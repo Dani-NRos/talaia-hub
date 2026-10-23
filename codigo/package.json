@@ -11,7 +11,7 @@
     "servidor"
   ],
   "scripts": {
-    "build": "npm run build -w @vigia/app",
+    "build": "npm run build -w @talaia/app",
     "test": "npm test --workspaces --if-present"
   }
 }

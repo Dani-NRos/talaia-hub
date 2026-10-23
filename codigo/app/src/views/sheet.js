@@ -8,12 +8,12 @@ import { chartSVG, stateSpans, stateSummary, stateSVG } from "../charts.js";
 import { requestBlock, requestStatus, positionBlock, switchHTML } from "./node-parts.js";
 import { metaLine, displayName, saveCardUi } from "./dashboard.js";
 import { panelSections, forgetDraftsExcept, hasDrafts } from "./panel-config.js";
-import { metricMeta, sortMetrics, fmtValue, fmtWithUnit, fmtNum, fmtLimit } from "@vigia/nucleo/metrics.js";
-import { askKey, hexId, trendKey, estadoKey } from "@vigia/nucleo/motor.js";
-import { relays, snrQuality, loraSf, weakest, UNKNOWN_NODE, PRESET_NAME } from "@vigia/nucleo/route.js";
-import { trendDefault, parseTrendRule } from "@vigia/nucleo/trend.js";
-import { HOUR, DAY, isNum, ago, stamp, trendDec, fmtTrend, trendVerb, hoursText, lastWindow } from "@vigia/nucleo/textos.js";
-import { TIPOS_PANEL } from "@vigia/nucleo/mqtt-datos.js";
+import { metricMeta, sortMetrics, fmtValue, fmtWithUnit, fmtNum, fmtLimit } from "@talaia/nucleo/metrics.js";
+import { askKey, hexId, trendKey, estadoKey } from "@talaia/nucleo/motor.js";
+import { relays, snrQuality, loraSf, weakest, UNKNOWN_NODE, PRESET_NAME } from "@talaia/nucleo/route.js";
+import { trendDefault, parseTrendRule } from "@talaia/nucleo/trend.js";
+import { HOUR, DAY, isNum, ago, stamp, trendDec, fmtTrend, trendVerb, hoursText, lastWindow } from "@talaia/nucleo/textos.js";
+import { TIPOS_PANEL } from "@talaia/nucleo/mqtt-datos.js";
 
 const sheet = () => $("#detail");
 export const isSheetOpen = () => sheet().open;

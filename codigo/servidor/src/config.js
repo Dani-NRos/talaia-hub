@@ -1,27 +1,27 @@
-// Configuración del servidor: un JSON pequeño (por defecto /etc/vigia/servidor.json). Lo que no se ponga, por defecto.
+// Configuración del servidor: un JSON pequeño (por defecto /etc/talaia/config.json). Lo que no se ponga, por defecto.
 //
 // {
 //   "receptor": { "tipo": "usb", "puerto": "auto" },        // o "/dev/serial/by-id/…", o "239a:8029"
 //   "receptor": { "tipo": "tcp", "host": "192.168.1.60", "puerto": 4403 },
 //   "web": { "puerto": 4404 },
-//   "datos": "/var/lib/vigia",
+//   "datos": "/var/lib/talaia",
 //   "retencionDias": 365,
 //   "registro": "info",                                      // o "depurar"
-//   "mosquitto": { "puerto": 1883 }                          // el broker MQTT de este equipo, que gestiona Vigía
+//   "mosquitto": { "puerto": 1883 }                          // el broker MQTT de este equipo, que gestiona Talaia
 // }
 //
-// «mosquitto» lo pone el instalador cuando instala Mosquitto: Vigía escribe sus usuarios en
-// <datos>/mosquitto/passwd y un servicio del sistema (vigia-mosquitto.path) lo pasa a Mosquitto y lo recarga.
+// «mosquitto» lo pone el instalador cuando instala Mosquitto: Talaia escribe sus usuarios en
+// <datos>/mosquitto/passwd y un servicio del sistema (talaia-mosquitto.path) lo pasa a Mosquitto y lo recarga.
 import fs from "node:fs";
-import { tx } from "@vigia/nucleo/idioma.js";
+import { tx } from "@talaia/nucleo/idioma.js";
 import "./textos.js";
 
-export const RUTA_CONFIG = "/etc/vigia/servidor.json";
+export const RUTA_CONFIG = "/etc/talaia/config.json";
 
 export const DEFECTO = {
   receptor: { tipo: "usb", puerto: "auto" },
   web: { puerto: 4404, escuchar: "0.0.0.0" },
-  datos: "/var/lib/vigia",
+  datos: "/var/lib/talaia",
   retencionDias: 365,
   registro: "info",
   mosquitto: null,

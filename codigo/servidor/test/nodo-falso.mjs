@@ -4,7 +4,7 @@
 import net from "node:net";
 import { create, toBinary, fromBinary } from "@bufbuild/protobuf";
 import { Protobuf } from "@meshtastic/core";
-import { createFramer, frame } from "@vigia/nucleo/tramas.js";
+import { createFramer, frame } from "@talaia/nucleo/tramas.js";
 
 const M = Protobuf.Mesh, PORT = Protobuf.Portnums.PortNum, TEL = Protobuf.Telemetry, CH = Protobuf.Channel, CFG = Protobuf.Config;
 export { PORT };

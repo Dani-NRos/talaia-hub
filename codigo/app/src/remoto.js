@@ -1,4 +1,4 @@
-// Modo «Servidor»: la app abierta desde Vigía servidor. El estado (nodos, alarmas, registro, peticiones) es el del
+// Modo «Servidor»: la app abierta desde Talaia. El estado (nodos, alarmas, registro, peticiones) es el del
 // servidor, que lo manda al conectar y después solo lo que cambia; lo que se pulsa va al servidor como una orden.
 // Las rutas son relativas («api/…») para que funcione también detrás de un proxy con prefijo.
 import { t } from "./i18n.js";

@@ -5,21 +5,21 @@ import assert from "node:assert/strict";
 import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
-import { crearVigia } from "../src/vigia.js";
+import { crearTalaia } from "../src/talaia.js";
 import { comprobar } from "../src/config.js";
 import { crearRegistro } from "../src/registro.js";
 import { abrirAlmacen } from "../src/almacen.js";
 import { NodoFalso, hasta, PORT, ME, CASETA } from "./nodo-falso.mjs";
-import { getLanguage, setLanguage } from "@vigia/nucleo/idioma.js";
+import { getLanguage, setLanguage } from "@talaia/nucleo/idioma.js";
 
 async function montar(t, { almacen, datos } = {}) {
   const nodo = new NodoFalso();
   const puerto = await nodo.escucharTcp();
-  datos ||= fs.mkdtempSync(path.join(os.tmpdir(), "vigia-"));
+  datos ||= fs.mkdtempSync(path.join(os.tmpdir(), "talaia-"));
   const config = comprobar({ receptor: { tipo: "tcp", host: "127.0.0.1", puerto }, datos });
   const salida = [];
   const registro = crearRegistro({ nivel: "depurar", salida });
-  const v = await crearVigia(config, registro, { almacen });
+  const v = await crearTalaia(config, registro, { almacen });
   t.after(async () => { await v.detener().catch(() => {}); await nodo.cerrar(); });
   return { v, nodo, salida, datos, config };
 }
@@ -76,9 +76,9 @@ test("si se corta la conexión, salta «Receptor desconectado», reconecta solo 
   assert.equal(nodo.conexiones, 2);
 });
 
-test("al reiniciar recuerda nodos, alarmas activas y registro", async (t) => {
-  const datos = fs.mkdtempSync(path.join(os.tmpdir(), "vigia-"));
-  const a1 = abrirAlmacen(path.join(datos, "vigia.db"));
+test("al reiniciar recuerda nodos, alarmas activas y registro (y la base de antes de la 2.0 pasa a talaia.db)", async (t) => {
+  const datos = fs.mkdtempSync(path.join(os.tmpdir(), "talaia-"));
+  const a1 = abrirAlmacen(path.join(datos, "vigia.db")); // the name up to 2.0
   a1.guardar("cfg", { watched: { [CASETA]: { offlineMin: 60, rules: { temperature: { max: 30 } } } } });
   a1.cerrar();
   {
@@ -91,6 +91,7 @@ test("al reiniciar recuerda nodos, alarmas activas y registro", async (t) => {
     await v.detener();
   }
   const { v } = await montar(t, { datos });
+  assert.ok(fs.existsSync(path.join(datos, "talaia.db")) && !fs.existsSync(path.join(datos, "vigia.db")));
   assert.equal(v.S.nodes.get(CASETA).long, "Caseta huerto");
   assert.equal(v.S.nodes.get(CASETA).metrics.temperature.v, 33);
   assert.equal(v.S.active.get(`${CASETA}|temperature|high`).acked, true);
@@ -101,8 +102,8 @@ test("al reiniciar recuerda nodos, alarmas activas y registro", async (t) => {
 
 test("server language: the journal and the replies in English, and it stays after a restart", async (t) => {
   t.after(() => setLanguage("es"));
-  const datos = fs.mkdtempSync(path.join(os.tmpdir(), "vigia-"));
-  const a1 = abrirAlmacen(path.join(datos, "vigia.db"));
+  const datos = fs.mkdtempSync(path.join(os.tmpdir(), "talaia-"));
+  const a1 = abrirAlmacen(path.join(datos, "talaia.db"));
   a1.guardar("cfg", { watched: { [CASETA]: { offlineMin: 60, rules: { temperature: { max: 30 } } } } });
   a1.cerrar();
   {

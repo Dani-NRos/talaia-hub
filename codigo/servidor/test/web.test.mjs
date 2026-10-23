@@ -6,35 +6,35 @@ import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
 import http from "node:http";
-import { crearVigia } from "../src/vigia.js";
+import { crearTalaia } from "../src/talaia.js";
 import { crearWeb } from "../src/web.js";
 import { comprobar } from "../src/config.js";
 import { crearRegistro } from "../src/registro.js";
 import { abrirAlmacen } from "../src/almacen.js";
 import { NodoFalso, hasta, PORT, CASETA, AVISADO } from "./nodo-falso.mjs";
-import { setLanguage } from "@vigia/nucleo/idioma.js";
+import { setLanguage } from "@talaia/nucleo/idioma.js";
 
 async function montar(t) {
   const nodo = new NodoFalso();
   const puertoNodo = await nodo.escucharTcp();
   const appDir = fs.mkdtempSync(path.join(os.tmpdir(), "app-"));
-  fs.writeFileSync(path.join(appDir, "index.html"), "<!doctype html><html><head><title>Vigía</title></head><body>app</body></html>");
+  fs.writeFileSync(path.join(appDir, "index.html"), "<!doctype html><html><head><title>Talaia</title></head><body>app</body></html>");
   fs.writeFileSync(path.join(appDir, "sw.js"), "// sw");
   const config = comprobar({ receptor: { tipo: "tcp", host: "127.0.0.1", puerto: puertoNodo }, web: { escuchar: "127.0.0.1" }, datos: os.tmpdir() });
   config.web.puerto = 0; // uno libre, para las pruebas
   const registro = crearRegistro({ nivel: "error", salida: [] });
   const almacen = abrirAlmacen(":memory:");
-  const vigia = await crearVigia(config, registro, { almacen });
-  const web = crearWeb(vigia, config, registro, { appDir });
+  const talaia = await crearTalaia(config, registro, { almacen });
+  const web = crearWeb(talaia, config, registro, { appDir });
   const puerto = await web.escuchar();
-  vigia.arrancar();
-  await hasta(() => vigia.S.link.state === "ready", 8000, "receptor listo");
-  t.after(async () => { await web.cerrar(); await vigia.detener(); await nodo.cerrar(); });
+  talaia.arrancar();
+  await hasta(() => talaia.S.link.state === "ready", 8000, "receptor listo");
+  t.after(async () => { await web.cerrar(); await talaia.detener(); await nodo.cerrar(); });
   const base = `http://127.0.0.1:${puerto}`;
   // Everything needs a session: a user, signed in; its cookie goes with every request of these tests.
-  await vigia.usuarios.crear("Prueba", "clave-de-prueba");
+  await talaia.usuarios.crear("Prueba", "clave-de-prueba");
   galletas.set(base, await entrarComo(base, "Prueba", "clave-de-prueba"));
-  return { vigia, web, nodo, base, puerto };
+  return { talaia, web, nodo, base, puerto };
 }
 
 const galletas = new Map(); // base → the cookie of its session
@@ -110,7 +110,7 @@ test("eventos: el estado al conectar y después solo lo que cambia", async (t) =
 });
 
 test("órdenes: vigilar y poner un límite; la alarma y el «Enterado» llegan a todas las pantallas", async (t) => {
-  const { base, vigia, nodo } = await montar(t);
+  const { base, talaia, nodo } = await montar(t);
   const a = escuchar(base), b = escuchar(base);
   t.after(() => { a.cerrar(); b.cerrar(); });
   await hasta(() => a.ev.length && b.ev.length, 3000, "dos pantallas");
@@ -126,7 +126,7 @@ test("órdenes: vigilar y poner un límite; la alarma y el «Enterado» llegan a
   const key = `${CASETA}|temperature|high`;
   await orden(base, { orden: "ack", key });
   await hasta(() => b.ev.some((x) => x.tipo === "cambio" && x.datos.active?.some((al) => al.key === key && al.acked)), 3000, "visto en la otra pantalla");
-  assert.equal(vigia.S.active.get(key).acked, true);
+  assert.equal(talaia.S.active.get(key).acked, true);
 });
 
 test("órdenes: los avisos del motor vuelven a quien pulsó; datos no válidos se rechazan", async (t) => {
@@ -146,7 +146,7 @@ test("órdenes: los avisos del motor vuelven a quien pulsó; datos no válidos s
 });
 
 test("órdenes de los paneles: crear uno sin nodo (con su número), renombrar, límite y quitarlo", async (t) => {
-  const { base, vigia } = await montar(t);
+  const { base, talaia } = await montar(t);
   let r = await orden(base, { orden: "crearPanel", nombre: "Enchufe del taller", tipo: "tasmota" });
   assert.equal(r.json.ok, true);
   assert.equal(r.json.num, -1); // la pantalla lo necesita para abrir su ficha
@@ -154,9 +154,9 @@ test("órdenes de los paneles: crear uno sin nodo (con su número), renombrar, l
   assert.equal(r.status, 400);
   r = await orden(base, { orden: "renombrar", num: -1, nombre: "Taller" });
   assert.equal(r.json.ok, true);
-  assert.equal(vigia.S.nodes.get(-1).long, "Taller");
+  assert.equal(talaia.S.nodes.get(-1).long, "Taller");
   r = await orden(base, { orden: "renombrar", num: CASETA, nombre: "Huerto" });
-  assert.equal(vigia.S.nodes.get(CASETA).alias, "Huerto");
+  assert.equal(talaia.S.nodes.get(CASETA).alias, "Huerto");
   r = await orden(base, { orden: "datosPanel", num: -1, datos: [{ tipo: "power", broker: "nadie", tema: "tele/enchufe/SENSOR", campo: "ENERGY.Power" }] });
   assert.match(r.json.error, /broker/);
   r = await orden(base, { orden: "limite", num: -1, metrica: "mq1", lado: "max", valor: 40 });
@@ -181,7 +181,7 @@ test("órdenes de los paneles: crear uno sin nodo (con su número), renombrar, l
   assert.equal(r.json.ok, false); // no es un dato ON/OFF
   r = await orden(base, { orden: "quitarPanel", num: -1 });
   assert.equal(r.json.ok, true);
-  assert.equal(vigia.S.nodes.has(-1), false);
+  assert.equal(talaia.S.nodes.has(-1), false);
   r = await orden(base, { orden: "quitarPanel", num: CASETA });
   assert.match(r.json.error, /no se puede quitar/);
 });
@@ -219,11 +219,11 @@ test("una web ajena no puede mandar órdenes ni entrar con un nombre público", 
   }
 });
 
-test("sirve la app marcada para arrancar en modo «Servidor», sin salirse de su carpeta", async (t) => {
+test("sirve la app, sin salirse de su carpeta", async (t) => {
   const { base } = await montar(t);
   let r = await pedir(base, "/");
   assert.equal(r.status, 200);
-  assert.match(r.cuerpo, /<head>\n<script>window\.__VIGIA_SERVIDOR = true;<\/script>/);
+  assert.match(r.cuerpo, /<title>Talaia<\/title>/);
   r = await pedir(base, "/sw.js");
   assert.equal(r.cuerpo, "// sw");
   r = await pedir(base, "/../../../etc/passwd");
@@ -250,16 +250,16 @@ test("series y CSV del histórico", async (t) => {
 
 test("server language in English: replies to the screens and the CSV for an English spreadsheet", async (t) => {
   t.after(() => setLanguage("es"));
-  const { base, nodo, vigia } = await montar(t);
+  const { base, nodo, talaia } = await montar(t);
   let r = await orden(base, { orden: "idioma", idioma: "en" });
   assert.deepEqual(r.json, { ok: true, toast: "Saved. What the server writes from now on, in English." });
-  assert.equal(vigia.S.settings.language, "en");
+  assert.equal(talaia.S.settings.language, "en");
   r = await orden(base, { orden: "idioma", idioma: 3 });
   assert.equal(r.status, 400);
   r = await orden(base, { orden: "vigilar", num: CASETA });
   assert.equal(r.json.toast, "Caseta huerto is now on the dashboard. Set its limits in its sheet.");
   nodo.ambiente(CASETA, { temperature: 18.25 });
-  await hasta(() => vigia.S.nodes.get(CASETA).metrics.temperature?.v === 18.25, 3000, "lectura");
+  await hasta(() => talaia.S.nodes.get(CASETA).metrics.temperature?.v === 18.25, 3000, "lectura");
   await new Promise((res) => setTimeout(res, 300));
   r = await pedir(base, "/api/lecturas.csv");
   const lineas = r.cuerpo.replace(/^\ufeff/, "").trim().split("\n");
@@ -268,11 +268,11 @@ test("server language in English: replies to the screens and the CSV for an Engl
 });
 
 test("CSV de un histórico grande: por bloques, sin perder ni repetir filas, y sin parar el servidor", async (t) => {
-  const { base, vigia } = await montar(t);
+  const { base, talaia } = await montar(t);
   // 12.000 lecturas, muchas con la misma hora (varios nodos y sensores a la vez): lo difícil al seguir entre bloques.
   const filas = [];
   for (let i = 0; i < 12000; i++) filas.push({ node: 1000 + (i % 7), metric: ["temperature", "voltage", "batteryLevel"][i % 3], t: 1.7e12 + Math.floor(i / 21) * 60000, v: i });
-  await vigia.S.store.add(filas);
+  await talaia.S.store.add(filas);
   let vueltas = 0;
   const reloj = setInterval(() => vueltas++, 1); // si el servidor se parase durante la exportación, no contaría
   const r = await pedir(base, "/api/lecturas.csv");
