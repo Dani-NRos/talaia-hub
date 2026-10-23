@@ -102,10 +102,11 @@ codigo/                 raíz de npm workspaces: npm install, npm test, npm run 
     test/mqtt.test.mjs paneles.test.mjs  con un broker en memoria (aedes) y un «Home Assistant» de mentira
     test/mosquitto.test.mjs  con un Mosquitto de verdad si está instalado (apt install mosquitto)
   herramientas/         pantalla-servidor.mjs: de punta a punta con Playwright; docker-prueba.mjs: la imagen con
-                        compose (ver herramientas/LEEME.md)
+                        compose (ver herramientas/LEEME.md); pantalla-servidor y vistazo, con LANG=es_ES
   dist/app/             app compilada (no va al repo)
 Dockerfile              la imagen (paso 5.3); docker/: entrypoint.sh, talaia (la orden dentro), compose.yaml
 .github/workflows/      ci.yml (pruebas, compilar, imagen amd64+arm64 y docker-prueba.mjs) y release.yml (imagen a ghcr.io)
+docs/                   guide.md (inglés) y guide.es.md: el manual de uso (README.md / README.es.md, CHANGELOG.md)
 ```
 
 El motor recibe el objeto de estado `S` (ver `estadoInicial()`) y ganchos; la app le añade a `S` lo de pantalla.
@@ -230,8 +231,8 @@ con Tasmota/ESPHome, Zigbee por zigbee2mqtt, ESPHome, Home Assistant…).
   defecto) y vale para todo lo que escribe el servidor: el registro (Alarmas → Registro), los avisos y resultados por
   la malla, los nombres en Home Assistant (al cambiarlo se le vuelven a anunciar; los `unique_id`, temas y tipos de
   evento no cambian), lo que contesta a las órdenes, el diario (journalctl) y el CSV (en español, «;» y coma decimal;
-  en inglés, «,» y punto). Lo que ya está en el registro se queda en el idioma en que se escribió. Siguen en español
-  hasta el paso 5 (Docker): las líneas de main.js antes de arrancar y los errores de configuración (config.js).
+  en inglés, «,» y punto). Lo que ya está en el registro se queda en el idioma en que se escribió. Desde el 5.4,
+  también las líneas de main.js antes de arrancar y los errores de configuración (ver «Paso 5.4»).
   servidor/test/textos.test.mjs comprueba que cada clave que se pide con tx() está en los dos idiomas con los mismos
   huecos.
 - Estilo (3.2): arena y verde bosque de día, «guardia nocturna» (fondo casi negro verdoso, texto color arena) de
@@ -269,7 +270,24 @@ con Tasmota/ESPHome, Zigbee por zigbee2mqtt, ESPHome, Home Assistant…).
   (Releases; desde esta sesión no se pueden subir etiquetas) y eso publica la imagen. Por partes: 5.1) nombres
   internos (hecho, 23 oct. 2026: `INSTALADOR=4`, probado en un contenedor desde una instalación de Vigía hecha con el
   instalador 3); 5.2) usuarios del broker por seguridad dinámica (hecho, 23 oct. 2026: `INSTALADOR=5`); 5.3) imagen
-  Docker, compose y GitHub Actions (hecho, 23 oct. 2026); 5.4) documentación en inglés (y español) → 2.0.
+  Docker, compose y GitHub Actions (hecho, 23 oct. 2026); 5.4) documentación en inglés (y español) → 2.0 (hecho,
+  23 oct. 2026, en `paso5`).
+- **Paso 5.4** (Dani, 23 oct. 2026: «también terminal»): documentación en `docs/guide.md` (inglés) y
+  `docs/guide.es.md`, `README.md` (inglés) y `README.es.md`, `CHANGELOG.md` (en inglés); `codigo/servidor/README.md`
+  solo apunta al manual. La pantalla enlaza el manual de su idioma en *Ajustes → Sistema → Acerca de*. Lo que escribe
+  la orden `talaia` va en el idioma de la terminal (`idiomaDelEntorno`: LANG, español también para ca/eu/gl) o, si no
+  dice ninguno (Docker), en el del servidor guardado (`leerGuardado`, sin abrir la base para escribir) y si no, inglés;
+  el servicio escribe desde la primera línea en el del servidor. Una instalación nueva (sin `nodes` ni `cfg` guardados:
+  el instalador ya puede haber creado la base para el broker) empieza en el idioma del equipo (`idiomaNuevo`); una de
+  antes sin idioma guardado, en español, y se guarda. Cada opción tiene nombre en inglés (`--ports`, `--password`,
+  `--users`, `--code`, `--broker-init`, `--health`; el instalador: `--port`, `--reconfigure`, `--branch`,
+  `--uninstall`, `--delete-data`, `--local-code`, `--local-node`, `--no-mosquitto`, `--no-systemd`, `--lang`), las de
+  español siguen valiendo. `talaia --code` sale con 0 (el código), 3 (ya hay usuarios) o 4 (aún no hay): el
+  instalador lo lee así y no por las palabras. `config.json` admite las claves en inglés (`receiver.type/port`,
+  `web.port/listen`, `data`, `retentionDays`, `logLevel` con debug/info/warn/error, `broker.port/host`; si están las
+  dos, manda la española) y el instalador (`INSTALADOR=6`) escribe uno nuevo con las de su idioma. Las etiquetas de
+  nivel del diario fuera de systemd (Docker) van en el idioma del servidor (`WARN`/`AVISO`). La versión de la pantalla
+  sale de `app/package.json` al compilar (`__APP_VERSION__`). Todo a 2.0.0.
 - Broker por seguridad dinámica (5.2): Talaia es el cliente admin «talaia» de su Mosquitto (contraseña al azar en
   SQLite, «mosquitto») y le manda órdenes por `$CONTROL/dynamic-security/v1` (crear, cambiar contraseña, quitar,
   listar); Mosquitto guarda los usuarios en `/var/lib/mosquitto/talaia-dynamic-security.json` (suyo, 600). Los
@@ -312,10 +330,12 @@ con Tasmota/ESPHome, Zigbee por zigbee2mqtt, ESPHome, Home Assistant…).
 
 ## Publicar
 
-- **Desarrollo de la 2.0** en `main` de `talaia-hub`. Dani lo prueba instalando desde aquí (se instala encima de lo
-  que haya: mismo servicio, mismos datos):
+- **Desarrollo** en `main` de `talaia-hub` (cada paso, en su rama hasta que Dani lo prueba). Dani lo prueba instalando
+  desde aquí (se instala encima de lo que haya: mismo servicio, mismos datos):
   `wget -qO- https://raw.githubusercontent.com/Dani-NRos/talaia-hub/main/codigo/servidor/instalar.sh | sudo bash`
-  Hasta la 2.0, la versión estable del servidor es la 1.20 (instalador de `main` de `vigia-mesh`).
+- **Versiones**: subir la de los cuatro `package.json` (y `npm install --package-lock-only`), apuntarla en
+  `CHANGELOG.md` y, ya en `main`, Dani crea la versión en GitHub (etiqueta `vX.Y.Z`): `release.yml` pasa las pruebas y
+  publica la imagen. La primera vez, el paquete de ghcr.io sale privado: hacerlo público en sus ajustes.
 - **`INSTALADOR=` en `instalar.sh`**: subirlo cada vez que cambia lo que hace el instalador. Si el programa descargado
   trae uno más nuevo, el instalador que corre sigue con ese (`--programa`), pero eso solo lo hacen los de la 2 en adelante.
 - **Arreglos en la app ligera** (repositorio `vigia-mesh`): rama desde `main`, compilar, copia en `beta/` sin `sw.js`
