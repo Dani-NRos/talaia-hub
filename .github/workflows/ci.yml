@@ -14,6 +14,7 @@ jobs:
   tests:
     runs-on: ubuntu-latest
     strategy:
+      fail-fast: false
       matrix:
         node: [22, 24]
     steps:
@@ -32,6 +33,15 @@ jobs:
         working-directory: codigo
       - run: npm test
         working-directory: codigo
+      - name: What failed, as annotations on the run
+        if: failure()
+        working-directory: codigo
+        run: |
+          for w in nucleo app servidor; do
+            (cd "$w" && node --test --test-force-exit --test-reporter=tap test/*.test.mjs > "/tmp/$w.tap" 2>&1) && continue
+            msg="$(grep -E -A25 '^ *not ok' "/tmp/$w.tap" | head -c 6000 | sed -e 's/%/%25/g' -e 's/\r/%0D/g' | awk 'BEGIN{ORS="%0A"} {print}')"
+            echo "::error title=Tests of ${w} (Node ${{ matrix.node }})::${msg}"
+          done
       - run: npm run build
         working-directory: codigo
 
