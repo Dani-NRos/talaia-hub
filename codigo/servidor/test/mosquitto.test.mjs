@@ -76,10 +76,25 @@ async function entra(puerto, usuario, clave) {
   }
 }
 /** Mosquitto as the installer leaves it: with users only, managed by the plugin. As root in the tests. */
+let salidaMq = ""; // what Mosquitto says, to show it if Talaia can't get in
 function mosquitto(datos, puerto, fichero) {
   const conf = path.join(datos, "mosquitto.conf");
-  fs.writeFileSync(conf, `listener ${puerto} 127.0.0.1\nallow_anonymous false\nplugin ${PLUGIN}\nplugin_opt_config_file ${fichero}\npersistence false\nuser ${os.userInfo().username}\n`);
-  return spawn("mosquitto", ["-c", conf], { stdio: "ignore" });
+  fs.writeFileSync(conf, `listener ${puerto} 127.0.0.1\nallow_anonymous false\nplugin ${PLUGIN}\nplugin_opt_config_file ${fichero}\npersistence false\nlog_dest stderr\nuser ${os.userInfo().username}\n`);
+  const p = spawn("mosquitto", ["-c", conf], { stdio: ["ignore", "pipe", "pipe"] });
+  const apuntar = (d) => { salidaMq = (salidaMq + d).slice(-4000); };
+  p.stdout.on("data", apuntar);
+  p.stderr.on("data", apuntar);
+  p.on("exit", (code, sig) => apuntar(`\n[mosquitto exited: ${code ?? sig}]\n`));
+  return p;
+}
+/** hasta(), and if it doesn't happen, with what Mosquitto and Talaia said. */
+async function hastaMq(cond, ms, que, estado) {
+  try {
+    await hasta(cond, ms, que);
+  } catch (e) {
+    e.message += `\nMosquitto (${PLUGIN}):\n${salidaMq}\nTalaia: ${JSON.stringify(estado())}`;
+    throw e;
+  }
 }
 
 test("with a real Mosquitto: the users of before stay, users are added, changed and removed at once", { skip: !MOSQUITTO && "no Mosquitto with the dynamic security plugin" }, async (t) => {
@@ -108,7 +123,7 @@ test("with a real Mosquitto: the users of before stay, users are added, changed 
 
   const local = () => talaia.S.mqtt.brokers.find((b) => b.id === "local");
   assert.equal(local().nombre, "Este servidor");
-  await hasta(() => local().estado.fase === "conectada", 15000, "Talaia connected to its broker");
+  await hastaMq(() => local().estado.fase === "conectada", 15000, "Talaia connected to its broker", () => local().estado);
   await hasta(() => talaia.S.mqtt.local.usuarios.length === 1, 5000, "the users, from Mosquitto");
   assert.deepEqual(talaia.S.mqtt.local.usuarios, [{ nombre: "viejo" }]);
   assert.deepEqual(almacen.leer("mosquitto"), { interno: { clave: "la-clave-interna-de-antes" }, usuarios: [] }, "the old copy goes once Mosquitto has them");
@@ -154,7 +169,7 @@ test("with a real Mosquitto: the users of before stay, users are added, changed 
   await hasta(() => local().estado.fase !== "conectada", 10000, "broker gone");
   assert.match((await talaia.mqtt.ponerUsuario("otro", "clave-del-otro")).error, /no contesta/);
   mq = mosquitto(datos, puerto, fichero);
-  await hasta(() => local().estado.fase === "conectada", 20000, "Talaia back in");
+  await hastaMq(() => local().estado.fase === "conectada", 20000, "Talaia back in", () => local().estado);
   assert.equal(await entra(puerto, "viejo", "clave-del-viejo"), true);
   assert.notEqual(await entra(puerto, "shelly", "clave-nueva-1"), true);
   assert.ok(!fs.readFileSync(fichero, "utf8").includes("shelly"));
