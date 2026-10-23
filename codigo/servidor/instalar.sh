@@ -20,13 +20,13 @@
 # Qué hace: pone su propio Node en /opt/talaia/node (no toca el del sistema), el programa en /opt/talaia/versiones/…
 # (con /opt/talaia/actual apuntando a la última), un usuario «talaia» sin privilegios en el grupo dialout, la
 # configuración en /etc/talaia/config.json, los datos en /var/lib/talaia, el servicio talaia y la orden «talaia».
-# Además, Mosquitto (apt) como broker MQTT de casa, con usuario y contraseña: los usuarios se gestionan desde Talaia y
-# el servicio talaia-mosquitto (path + oneshot, como root) se los pasa a Mosquitto.
+# Además, Mosquitto (apt) como broker MQTT de casa, con usuario y contraseña: los usuarios se gestionan desde Talaia,
+# que se los pide al plugin de seguridad dinámica de Mosquitto.
 set -euo pipefail
 
 # Sube cada vez que cambia lo que hace el instalador. Si el programa que se descarga trae uno más nuevo (pasa al
 # instalar otra rama con el instalador de main), se sigue con ese.
-INSTALADOR=4
+INSTALADOR=5
 ARGS=("$@")
 
 REPO="Dani-NRos/talaia-hub"
@@ -41,7 +41,8 @@ ORDEN="/usr/local/bin/talaia"
 # Descargas de Node: nodejs.org, o un espejo con la misma estructura (TALAIA_NODE_DIST=https://…/dist).
 NODE_DIST="${TALAIA_NODE_DIST:-${VIGIA_NODE_DIST:-https://nodejs.org/dist}}"
 MOSQ_CONF="/etc/mosquitto/conf.d/talaia.conf"
-MOSQ_PW="/etc/mosquitto/talaia.passwd"
+# Los usuarios del broker, de Mosquitto (los escribe él: su carpeta tiene que ser suya).
+MOSQ_DYN="/var/lib/mosquitto/talaia-dynamic-security.json"
 TCP="" PUERTO="" RECONFIGURAR=0 DESINSTALAR=0 BORRAR=0 CODIGO_LOCAL="" NODE_LOCAL="" SIN_SYSTEMD=0 SIN_MOSQUITTO=0 PROGRAMA=""
 
 ayuda() {
@@ -131,27 +132,40 @@ desde_vigia() {
     rm -rf /opt/vigia
   fi
   rm -f /usr/local/bin/vigia-servidor /etc/udev/rules.d/60-vigia-meshtastic.rules
-  # Mosquitto: su configuración con el nombre nuevo (más abajo); los usuarios del broker son los mismos.
-  rm -f /etc/mosquitto/conf.d/vigia.conf
-  if [ -f /etc/mosquitto/vigia.passwd ]; then
-    if [ ! -f "$MOSQ_PW" ]; then mv /etc/mosquitto/vigia.passwd "$MOSQ_PW"; else rm -f /etc/mosquitto/vigia.passwd; fi
-  fi
+  # Mosquitto: su configuración con el nombre nuevo (más abajo); los usuarios del broker pasan de la base de datos de
+  # Talaia, donde estaban, al plugin de seguridad dinámica.
+  rm -f /etc/mosquitto/conf.d/vigia.conf /etc/mosquitto/vigia.passwd
   dice "Hecho: ahora es el servicio «$SERVICIO» y la orden «talaia» (antes, vigia-servidor)."
 }
 desde_vigia
 
+# Hasta el instalador 4, Talaia escribía un fichero de usuarios y un servicio de systemd (talaia-mosquitto.path, como
+# root) se lo pasaba a Mosquitto. Ya no: se quita (los usuarios siguen en la base de datos hasta pasar al plugin).
+quitar_passwd() {
+  if con_systemd && [ -e /etc/systemd/system/talaia-mosquitto.path ]; then
+    systemctl disable --now talaia-mosquitto.path talaia-mosquitto.service >/dev/null 2>&1 || true
+    rm -f /etc/systemd/system/talaia-mosquitto.path /etc/systemd/system/talaia-mosquitto.service
+    systemctl daemon-reload
+  fi
+  rm -f /etc/systemd/system/talaia-mosquitto.path /etc/systemd/system/talaia-mosquitto.service /etc/mosquitto/talaia.passwd
+  rm -rf "$DATOS/mosquitto"
+}
+
 # ── desinstalar ──
 if [ "$DESINSTALAR" -eq 1 ]; then
   if con_systemd; then
-    systemctl disable --now "$SERVICIO" talaia-mosquitto.path 2>/dev/null || true
-    rm -f "/etc/systemd/system/$SERVICIO.service" /etc/systemd/system/talaia-mosquitto.path /etc/systemd/system/talaia-mosquitto.service
+    systemctl disable --now "$SERVICIO" 2>/dev/null || true
+    rm -f "/etc/systemd/system/$SERVICIO.service"
     systemctl daemon-reload
   fi
+  quitar_passwd
   if [ -f "$MOSQ_CONF" ]; then
-    rm -f "$MOSQ_CONF" "$MOSQ_PW"
+    rm -f "$MOSQ_CONF"
     if con_systemd; then systemctl restart mosquitto 2>/dev/null || true; fi
     aviso "Mosquitto sigue instalado, sin la configuración de Talaia. Si no lo usas para nada más: sudo apt remove mosquitto"
   fi
+  # Sus usuarios se quedan (si se vuelve a instalar, siguen valiendo), salvo que se borren los datos.
+  if [ "$BORRAR" -eq 1 ]; then rm -f "$MOSQ_DYN"; fi
   rm -rf "$BASE" "$ORDEN" /etc/udev/rules.d/60-talaia-meshtastic.rules
   if [ "$BORRAR" -eq 1 ]; then
     rm -rf "$DATOS" "$ETC"
@@ -309,19 +323,30 @@ if [ "$SIN_MOSQUITTO" -eq 0 ]; then
     fi
   fi
   if command -v mosquitto >/dev/null 2>&1 && id mosquitto >/dev/null 2>&1; then
-    # Si Mosquitto ya tiene otra configuración que escucha en la red o pide usuarios, no se toca.
-    OTRA="$(grep -lsE '^[[:space:]]*(listener|port|password_file)[[:space:]]' /etc/mosquitto/mosquitto.conf /etc/mosquitto/conf.d/*.conf 2>/dev/null | grep -vx "$MOSQ_CONF" || true)"
+    # Si Mosquitto ya tiene otra configuración que escucha en la red, pide usuarios o lleva plugins, no se toca.
+    OTRA="$(grep -lsE '^[[:space:]]*(listener|port|password_file|allow_anonymous|plugin|auth_plugin)[[:space:]]' /etc/mosquitto/mosquitto.conf /etc/mosquitto/conf.d/*.conf 2>/dev/null | grep -vx "$MOSQ_CONF" || true)"
+    PLUGIN="$(find /usr/lib /usr/local/lib -name mosquitto_dynamic_security.so 2>/dev/null | head -1)"
     if [ -n "$OTRA" ]; then
       aviso "Mosquitto ya tiene su propia configuración ($(echo $OTRA)): no se toca. Talaia puede usarlo como un broker más (Ajustes → MQTT)."
+    elif [ -z "$PLUGIN" ]; then
+      aviso "Este Mosquitto no trae el plugin de seguridad dinámica (mosquitto_dynamic_security.so), con el que Talaia gestiona sus usuarios: no se configura."
     else
       MOSQUITTO_OK=1
-      install -m 644 "$BASE/actual/servidor/sistema/mosquitto-talaia.conf" "$MOSQ_CONF"
-      [ -f "$MOSQ_PW" ] || install -m 600 -o mosquitto -g mosquitto /dev/null "$MOSQ_PW"
-      mkdir -p "$DATOS/mosquitto" && chown "$USUARIO:$USUARIO" "$DATOS/mosquitto" && chmod 700 "$DATOS/mosquitto"
       # Que Talaia sepa que tiene su broker (también en una configuración que ya existía).
       "$NODE" -e '
         const fs = require("fs"), f = process.argv[1], c = JSON.parse(fs.readFileSync(f, "utf8"));
         if (!c.mosquitto) { c.mosquitto = { puerto: 1883 }; fs.writeFileSync(f, JSON.stringify(c, null, 2) + "\n"); }' "$CONFIG"
+      # Los usuarios: los primeros, de Talaia (su usuario y los de antes de la 2.0, con las mismas contraseñas). Si el
+      # fichero ya está, es de Mosquitto y se deja.
+      if [ ! -s "$MOSQ_DYN" ]; then
+        install -d -o mosquitto -g mosquitto -m 755 "$(dirname "$MOSQ_DYN")"
+        TMPD="$(mktemp)"
+        "$ORDEN" --broker-inicial > "$TMPD" || { rm -f "$TMPD"; falla "no se pudieron preparar los usuarios del broker"; }
+        install -o mosquitto -g mosquitto -m 600 "$TMPD" "$MOSQ_DYN" && rm -f "$TMPD"
+      fi
+      sed "s#@PLUGIN@#$PLUGIN#" "$BASE/actual/servidor/sistema/mosquitto-talaia.conf" > "$MOSQ_CONF.nuevo"
+      chmod 644 "$MOSQ_CONF.nuevo" && mv -f "$MOSQ_CONF.nuevo" "$MOSQ_CONF"
+      quitar_passwd
       dice "Mosquitto: broker MQTT en el puerto 1883, con usuario y contraseña (se crean en Talaia: Ajustes → MQTT)"
     fi
   fi
@@ -341,11 +366,6 @@ if command -v brltty >/dev/null 2>&1; then
 fi
 
 if con_systemd && [ "$MOSQUITTO_OK" -eq 1 ]; then
-  install -m 644 "$BASE/actual/servidor/sistema/talaia-mosquitto.path" "$BASE/actual/servidor/sistema/talaia-mosquitto.service" /etc/systemd/system/
-  systemctl daemon-reload
-  systemctl enable --now talaia-mosquitto.path >/dev/null 2>&1
-  # Los usuarios que ya hubiera (de una instalación anterior) pasan a Mosquitto antes de arrancarlo.
-  [ -f "$DATOS/mosquitto/passwd" ] && systemctl start talaia-mosquitto.service 2>/dev/null || true
   systemctl enable mosquitto >/dev/null 2>&1
   systemctl restart mosquitto || aviso "Mosquitto no ha arrancado. Mira qué dice: journalctl -u mosquitto -n 30"
 fi

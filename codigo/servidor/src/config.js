@@ -7,11 +7,12 @@
 //   "datos": "/var/lib/talaia",
 //   "retencionDias": 365,
 //   "registro": "info",                                      // o "depurar"
-//   "mosquitto": { "puerto": 1883 }                          // el broker MQTT de este equipo, que gestiona Talaia
+//   "mosquitto": { "puerto": 1883, "host": "127.0.0.1" }     // el broker MQTT de este equipo, que gestiona Talaia
 // }
 //
-// «mosquitto» lo pone el instalador cuando instala Mosquitto: Talaia escribe sus usuarios en
-// <datos>/mosquitto/passwd y un servicio del sistema (talaia-mosquitto.path) lo pasa a Mosquitto y lo recarga.
+// «mosquitto» lo pone el instalador cuando instala Mosquitto: Talaia gestiona sus usuarios por el plugin de seguridad
+// dinámica (mosquitto.js). «host»: dónde está (con Docker, el nombre de su contenedor). «fichero»: con Docker, dónde
+// escribir el primer dynamic-security.json si no está (el instalador lo hace con `talaia --broker-inicial`).
 import fs from "node:fs";
 import { tx } from "@talaia/nucleo/idioma.js";
 import "./textos.js";
@@ -52,9 +53,11 @@ export function comprobar(dada) {
     web: { ...DEFECTO.web, ...(dada.web || {}) },
   };
   if (c.mosquitto) {
-    c.mosquitto = { puerto: 1883, usuarios: null, ...c.mosquitto };
+    c.mosquitto = { puerto: 1883, host: "127.0.0.1", fichero: null, ...c.mosquitto };
+    delete c.mosquitto.usuarios; // the password file Talaia wrote, up to 2.0: no longer used
     if (!Number.isInteger(c.mosquitto.puerto) || c.mosquitto.puerto < 1 || c.mosquitto.puerto > 65535) throw new ErrorConfig("mosquitto.puerto tiene que ser un número de puerto (por defecto 1883)");
-    if (c.mosquitto.usuarios != null && (typeof c.mosquitto.usuarios !== "string" || !c.mosquitto.usuarios.startsWith("/"))) throw new ErrorConfig("mosquitto.usuarios tiene que ser la ruta completa del fichero de usuarios");
+    if (typeof c.mosquitto.host !== "string" || !/^[A-Za-z0-9.:_-]{1,253}$/.test(c.mosquitto.host)) throw new ErrorConfig("mosquitto.host tiene que ser un nombre o una IP (por defecto 127.0.0.1)");
+    if (c.mosquitto.fichero != null && (typeof c.mosquitto.fichero !== "string" || !c.mosquitto.fichero.startsWith("/"))) throw new ErrorConfig("mosquitto.fichero tiene que ser la ruta completa de su dynamic-security.json");
   }
   const r = c.receptor;
   if (r.tipo !== "usb" && r.tipo !== "tcp") throw new ErrorConfig(`receptor.tipo tiene que ser "usb" o "tcp" (pone "${r.tipo}")`);

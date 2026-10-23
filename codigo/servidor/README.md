@@ -174,9 +174,12 @@ Talaia se conecta a la vez a varios brokers MQTT, que se apuntan en Ajustes → 
 - **Otros brokers** con *Añadir broker*, como el Mosquitto de Home Assistant: nombre, dirección, usuario y
   contraseña. Debajo de cada uno dice si está conectado o qué falla.
 
-Por dentro, Talaia escribe los usuarios en `/var/lib/talaia/mosquitto/passwd` y el servicio `talaia-mosquitto.path` los
-pasa a Mosquitto y lo recarga, sin cortar a quien ya está conectado. Si usas un cortafuegos (`ufw`), abre el 1883 para
-la red de casa.
+Por dentro, Talaia se los pide al plugin de seguridad dinámica de Mosquitto (por MQTT, con su propio usuario,
+`talaia`): un usuario nuevo o una contraseña cambiada valen al momento, sin recargar Mosquitto ni cortar a quien ya está
+conectado. Mosquitto los guarda, con la contraseña cifrada, en `/var/lib/mosquitto/talaia-dynamic-security.json`. Los
+usuarios de los dispositivos pueden publicar y suscribirse en cualquier tema salvo en los que empiezan por `$` (así no
+pueden crearse usuarios). Al pasar de una versión anterior, el instalador lleva allí los usuarios que hubiera, con las
+mismas contraseñas. Si usas un cortafuegos (`ufw`), abre el 1883 para la red de casa.
 
 Home Assistant solo se conecta a un broker. Si quieres en Home Assistant algo que se publica en el de Talaia, lo normal
 es un «puente» entre los dos Mosquitto (unas líneas de configuración en uno de ellos).

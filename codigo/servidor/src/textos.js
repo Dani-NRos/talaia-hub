@@ -235,6 +235,10 @@ addTexts({
     "s.u.noSession": "Esa sesión ya estaba cerrada.",
     "s.web.signIn": "hace falta entrar con tu usuario",
     "s.log.signIn": "{name} ha entrado ({device})",
+    "s.j.mqFirstFile": "Broker de este equipo: primer fichero de usuarios en {file}",
+    "s.j.mqControl": "Broker de este equipo: no deja gestionar sus usuarios ({e}). ¿Tiene el plugin de seguridad dinámica con el usuario «talaia»?",
+    "s.mq.refused": "El broker no lo ha aceptado: {e}",
+    "s.mq.noAnswer": "El broker de este equipo no contesta. Mira que Mosquitto esté en marcha.",
   },
   en: {
     // the journal (journalctl): what the server does
@@ -467,5 +471,9 @@ addTexts({
     "s.u.noSession": "That session had already ended.",
     "s.web.signIn": "you need to sign in",
     "s.log.signIn": "{name} signed in ({device})",
+    "s.j.mqFirstFile": "This machine's broker: first users file in {file}",
+    "s.j.mqControl": "This machine's broker doesn't let its users be managed ({e}). Does it have the dynamic security plugin with the user “talaia”?",
+    "s.mq.refused": "The broker didn't accept it: {e}",
+    "s.mq.noAnswer": "This machine's broker doesn't answer. Check that Mosquitto is running.",
   },
 });

@@ -180,7 +180,7 @@ export async function crearTalaia(config, registro, opts = {}) {
   let mqtt = null;
   const paneles = crearPaneles({ S, motor, eventos, almacen, registro, receptor: () => receptor, brokers: () => mqtt?.brokers() || [] });
   mqtt = await crearServicioMqtt({ S, motor, eventos, almacen, registro }, {
-    crearSalidaHA, clienteId: `talaia-${os.hostname()}`, enganches: [paneles.enganchar], local, usos: paneles.usos,
+    crearSalidaHA, clienteId: `talaia-${os.hostname()}`, enganches: [paneles.enganchar, ...(local ? [local.enganchar] : [])], local, usos: paneles.usos,
   });
 
   /* ── tareas periódicas ── */

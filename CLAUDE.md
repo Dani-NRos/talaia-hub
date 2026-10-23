@@ -10,7 +10,7 @@ Todo dice ya Talaia, también por dentro (paso 5.1, 23 oct. 2026): paquetes `@ta
 instalador pasa solo una instalación de Vigía a esos nombres (`desde_vigia` en `instalar.sh`) y el servidor renombra
 `vigia.db` a `talaia.db` al arrancar (`rutaAlmacen`). **Se quedan con «vigia»**, a propósito: los identificadores y
 temas de Home Assistant (`vigia_…`, `vigia/…`; cambiarlos sin migrar duplicaría los dispositivos en HA y perdería su
-histórico) y el usuario interno del broker `vigia-servidor` (hasta el 5.2).
+histórico).
 
 El repositorio `vigia-mesh` sigue aparte:
 - `main`: la **app ligera** (PWA de Bluetooth y cable) **congelada en la 1.20**, publicada en GitHub Pages
@@ -90,8 +90,8 @@ codigo/                 raíz de npm workspaces: npm install, npm test, npm run 
                         intentos fallidos que frenan; desde la terminal: --clave, --usuarios, --codigo (main.js)
     src/mqtt.js         MQTT (MQTT.js): varios brokers a la vez (una conexión cada uno), configurados en Ajustes y
                         guardados en SQLite; reconexión; testamento solo en el de Home Assistant; migra lo de la 1.16
-    src/mosquitto.js    el broker de este equipo: usuarios (cifrado de mosquitto_passwd: $7$, PBKDF2-SHA512) que Talaia
-                        escribe en <datos>/mosquitto/passwd; talaia-mosquitto.path (root) los pasa a Mosquitto y recarga
+    src/mosquitto.js    el broker de este equipo: sus usuarios, por el plugin de seguridad dinámica de Mosquitto
+                        ($CONTROL/dynamic-security/v1, como su cliente admin «talaia»); el primer fichero, ficheroInicial
     src/homeassistant.js  salida a Home Assistant por MQTT con autodescubrimiento (los temas, arriba del fichero)
     src/paneles.js      paneles: nombres, paneles sin nodo (números negativos: -1, -2…), datos MQTT de cada panel
                         (claves «mq1», «mq2»…: lecturas, alarmas e histórico como una métrica más; una lectura por
@@ -265,8 +265,18 @@ con Tasmota/ESPHome, Zigbee por zigbee2mqtt, ESPHome, Home Assistant…).
   de systemd); los **nombres internos pasan a Talaia** (con migración); **Dani crea cada versión en GitHub**
   (Releases; desde esta sesión no se pueden subir etiquetas) y eso publica la imagen. Por partes: 5.1) nombres
   internos (hecho, 23 oct. 2026: `INSTALADOR=4`, probado en un contenedor desde una instalación de Vigía hecha con el
-  instalador 3); 5.2) usuarios del broker por seguridad dinámica; 5.3) imagen Docker, compose y GitHub Actions;
-  5.4) documentación en inglés (y español) → 2.0.
+  instalador 3); 5.2) usuarios del broker por seguridad dinámica (hecho, 23 oct. 2026: `INSTALADOR=5`); 5.3) imagen
+  Docker, compose y GitHub Actions; 5.4) documentación en inglés (y español) → 2.0.
+- Broker por seguridad dinámica (5.2): Talaia es el cliente admin «talaia» de su Mosquitto (contraseña al azar en
+  SQLite, «mosquitto») y le manda órdenes por `$CONTROL/dynamic-security/v1` (crear, cambiar contraseña, quitar,
+  listar); Mosquitto guarda los usuarios en `/var/lib/mosquitto/talaia-dynamic-security.json` (suyo, 600). Los
+  dispositivos tienen el rol `talaia-dispositivos`: todo menos los temas que empiezan por «$». El primer fichero lo hace
+  Talaia (`ficheroInicial`): el instalador con `talaia --broker-inicial` si no existe (nunca lo pisa), y con Docker el
+  propio servidor si `mosquitto.fichero` está en la configuración. Lleva los usuarios de antes (los hashes `$7$` que
+  guardaba SQLite valen tal cual) y, cuando Talaia ve que Mosquitto los tiene, borra esa copia de SQLite. El
+  instalador quita `talaia-mosquitto.path/.service`, `/etc/mosquitto/talaia.passwd` y `<datos>/mosquitto/`; si el
+  Mosquitto no trae el plugin o tiene otra configuración (listener, plugin, allow_anonymous…), no lo toca. En las
+  pruebas, Mosquitto como root necesita `user root` (si no, no puede leer el fichero).
 - Orden (1 y 2, hechos): 1) nombre y política de idioma; 2) congelar la webapp y reorganizar el repositorio;
   3) rediseño con los dos idiomas; 4) usuarios; 5) Docker y documentación en inglés → **2.0**. Las
   **automatizaciones** («si… entonces…», centradas en la malla, con la fase 6 de control desde la malla dentro) →

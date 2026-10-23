@@ -237,6 +237,7 @@ export async function crearServicioMqtt(talaia, { crearSalidaHA, clienteId = "ta
   let cfg = { brokers: Array.isArray(leido.brokers) ? leido.brokers : [], ha: comprobarHA(leido.ha || {}).ha || { ...MQTT_DEFECTO.ha } };
   const activas = new Map(); // id → { conexion, soltar: [], ha, testamento }
 
+  if (local) local.alCambiar = () => contar(); // its users, as Mosquitto has them
   const brokerLocal = () => (local ? { id: BROKER_LOCAL, nombre: tx("s.mqtt.localName"), url: local.url, usuario: local.interno.usuario, clave: local.interno.clave, activado: true, local: true } : null);
   const lista = () => [brokerLocal(), ...cfg.brokers].filter(Boolean);
   const buscar = (id) => lista().find((b) => b.id === id) || null;
@@ -285,7 +286,6 @@ export async function crearServicioMqtt(talaia, { crearSalidaHA, clienteId = "ta
     nombre: (id) => buscar(id)?.nombre || null,
     /** Conecta con todos los brokers activados. Lo llama el servidor al arrancar. */
     arrancar() {
-      local?.escribir();
       for (const b of lista()) arrancarUno(b);
       contar();
     },
@@ -345,17 +345,13 @@ export async function crearServicioMqtt(talaia, { crearSalidaHA, clienteId = "ta
       return { ok: true, toast: tx(ahoraOn ? "s.mqtt.haSaved" : "s.mqtt.haSavedOff") };
     },
     /** Usuarios del broker de este equipo. */
-    ponerUsuario(nombre, clave) {
+    async ponerUsuario(nombre, clave) {
       if (!local) return { ok: false, error: tx("s.mqtt.noLocal") };
-      const r = local.ponerUsuario(nombre, clave);
-      contar();
-      return r;
+      return local.ponerUsuario(nombre, clave);
     },
-    quitarUsuario(nombre) {
+    async quitarUsuario(nombre) {
       if (!local) return { ok: false, error: tx("s.mqtt.noLocalShort") };
-      const r = local.quitarUsuario(nombre);
-      contar();
-      return r;
+      return local.quitarUsuario(nombre);
     },
     /** Vuelve a conectar un broker (para las pruebas y por si se queda colgado). */
     reiniciar,

@@ -1,16 +1,15 @@
-// El broker de este equipo: Talaia escribe los usuarios de Mosquitto (contraseñas cifradas como mosquitto_passwd) y se
-// conecta a él con su usuario interno. Con un Mosquitto de verdad si está instalado (si no, solo las piezas).
-// Lo que en el BMAX hace el servicio vigia-mosquitto.path (copiar el fichero y recargar Mosquitto), aquí lo hace la
-// prueba: Mosquitto lee directamente el fichero de Talaia y se recarga con SIGHUP.
+// The broker of this machine: Talaia manages its users through Mosquitto's dynamic security plugin, as its own admin
+// client. With a real Mosquitto if it's installed with the plugin (if not, only the pieces).
 import test from "node:test";
 import assert from "node:assert/strict";
+import crypto from "node:crypto";
 import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
 import net from "node:net";
 import { spawn, spawnSync } from "node:child_process";
 import mqtt from "mqtt";
-import { cifrarClave, claveValida, comprobarUsuario, USUARIO_INTERNO } from "../src/mosquitto.js";
+import { cifrar, desdePasswd, claveValida, comprobarUsuario, ficheroInicial, USUARIO_INTERNO, ROL_DISPOSITIVOS } from "../src/mosquitto.js";
 import { crearTalaia } from "../src/talaia.js";
 import { comprobar } from "../src/config.js";
 import { crearRegistro } from "../src/registro.js";
@@ -19,21 +18,30 @@ import { instantanea } from "../src/sincro.js";
 import { NodoFalso, hasta } from "./nodo-falso.mjs";
 
 const hay = (orden) => spawnSync("sh", ["-c", `command -v ${orden}`]).status === 0;
-const MOSQUITTO = hay("mosquitto");
+const PLUGIN = (spawnSync("sh", ["-c", "find /usr/lib /usr/local/lib -name mosquitto_dynamic_security.so 2>/dev/null | head -1"]).stdout || "").toString().trim();
+const MOSQUITTO = hay("mosquitto") && !!PLUGIN;
 
-test("contraseñas cifradas como las de mosquitto_passwd; usuarios válidos", () => {
-  const c = cifrarClave("Clave secreta ñ");
-  assert.match(c, /^\$7\$101\$[A-Za-z0-9+/]{16}\$[A-Za-z0-9+/]{86}==$/);
-  assert.ok(claveValida("Clave secreta ñ", c));
-  assert.ok(!claveValida("otra", c));
+/** A line of a Mosquitto password file, as mosquitto_passwd writes it (up to 2.0, Talaia kept these). */
+function lineaPasswd(clave) {
+  const sal = crypto.randomBytes(12);
+  return `$7$101$${sal.toString("base64")}$${crypto.pbkdf2Sync(clave, sal, 101, 64, "sha512").toString("base64")}`;
+}
+
+test("hashes as Mosquitto's; a password file line becomes the same hash; valid users", () => {
+  const h = cifrar("Clave secreta ñ");
+  assert.equal(h.iterations, 101);
+  assert.equal(Buffer.from(h.salt, "base64").length, 12);
+  assert.ok(claveValida("Clave secreta ñ", h));
+  assert.ok(!claveValida("otra", h));
+  assert.ok(claveValida("del viejo", desdePasswd(lineaPasswd("del viejo"))));
+  assert.equal(desdePasswd("texto plano"), null);
   if (hay("mosquitto_passwd")) {
-    // Una hecha por mosquitto_passwd se reconoce igual.
+    // One made by mosquitto_passwd itself.
     const dir = fs.mkdtempSync(path.join(os.tmpdir(), "talaia-pw-"));
     const f = path.join(dir, "pw");
     fs.writeFileSync(f, "", { mode: 0o600 });
     spawnSync("mosquitto_passwd", ["-b", f, "shelly", "Clave secreta ñ"]);
-    const linea = fs.readFileSync(f, "utf8").trim();
-    assert.ok(claveValida("Clave secreta ñ", linea.split(":").slice(1).join(":")));
+    assert.ok(claveValida("Clave secreta ñ", desdePasswd(fs.readFileSync(f, "utf8").trim().split(":").slice(1).join(":"))));
   }
   assert.equal(comprobarUsuario("shelly_salon", "12345678"), null);
   assert.match(comprobarUsuario("con espacio", "12345678"), /solo puede llevar/);
@@ -41,8 +49,22 @@ test("contraseñas cifradas como las de mosquitto_passwd; usuarios válidos", ()
   assert.match(comprobarUsuario("shelly", "corta"), /al menos 8/);
 });
 
+test("the first file: Talaia as admin, and the users of before 2.0 with their hashes", () => {
+  const f = ficheroInicial({ interno: { clave: "la-de-talaia" }, usuarios: [{ nombre: "shelly", cifrada: lineaPasswd("del-shelly") }, { nombre: "talaia", cifrada: lineaPasswd("x") }, { nombre: "roto", cifrada: "nada" }] });
+  assert.deepEqual(f.clients.map((c) => c.username), ["talaia", "shelly"]);
+  assert.deepEqual(f.clients[0].roles.map((r) => r.rolename), ["admin", ROL_DISPOSITIVOS]);
+  assert.deepEqual(f.clients[1].roles.map((r) => r.rolename), [ROL_DISPOSITIVOS]);
+  assert.ok(claveValida("la-de-talaia", f.clients[0]));
+  assert.ok(claveValida("del-shelly", f.clients[1]));
+  // Devices: everything but «$» topics ($CONTROL among them); by default, nothing.
+  const dispositivos = f.roles.find((r) => r.rolename === ROL_DISPOSITIVOS);
+  assert.ok(dispositivos.acls.every((a) => a.topic === "#"));
+  assert.equal(f.defaultACLAccess.publishClientSend, false);
+  assert.equal(f.defaultACLAccess.subscribe, false);
+});
+
 const puertoLibre = () => new Promise((r) => { const s = net.createServer().listen(0, "127.0.0.1", () => { const p = s.address().port; s.close(() => r(p)); }); });
-/** ¿Entra ese usuario? true, o el error. */
+/** Does that user get in? true, or the error. */
 async function entra(puerto, usuario, clave) {
   try {
     const c = await mqtt.connectAsync(`mqtt://127.0.0.1:${puerto}`, { username: usuario, password: clave, reconnectPeriod: 0, connectTimeout: 3000 });
@@ -52,64 +74,80 @@ async function entra(puerto, usuario, clave) {
     return e.code ?? e.message;
   }
 }
+/** Mosquitto as the installer leaves it: with users only, managed by the plugin. As root in the tests. */
+function mosquitto(datos, puerto, fichero) {
+  const conf = path.join(datos, "mosquitto.conf");
+  fs.writeFileSync(conf, `listener ${puerto} 127.0.0.1\nallow_anonymous false\nplugin ${PLUGIN}\nplugin_opt_config_file ${fichero}\npersistence false\nuser ${os.userInfo().username}\n`);
+  return spawn("mosquitto", ["-c", conf], { stdio: "ignore" });
+}
 
-test("con un Mosquitto de verdad: Talaia entra con su usuario, y los usuarios se añaden, cambian y quitan", { skip: !MOSQUITTO && "no hay Mosquitto instalado" }, async (t) => {
+test("with a real Mosquitto: the users of before stay, users are added, changed and removed at once", { skip: !MOSQUITTO && "no Mosquitto with the dynamic security plugin" }, async (t) => {
   const datos = fs.mkdtempSync(path.join(os.tmpdir(), "talaia-mq-"));
   const puerto = await puertoLibre();
   const nodo = new NodoFalso();
   const puertoNodo = await nodo.escucharTcp();
-  const config = comprobar({ receptor: { tipo: "tcp", host: "127.0.0.1", puerto: puertoNodo }, datos, mosquitto: { puerto } });
-  const talaia = await crearTalaia(config, crearRegistro({ nivel: "error", salida: [] }), { almacen: abrirAlmacen(":memory:") });
-  talaia.arrancar(); // escribe los usuarios
-  const fichero = path.join(datos, "mosquitto", "passwd");
-  assert.match(fs.readFileSync(fichero, "utf8"), new RegExp(`^${USUARIO_INTERNO}:\\$7\\$`));
-  assert.equal(fs.statSync(fichero).mode & 0o777, 0o600);
-  // Mosquitto como en el BMAX: con usuario y contraseña, sin entrar sin ellos. (Como root en las pruebas, para que
-  // pueda leer el fichero de Talaia sin el servicio que lo copia.)
-  const conf = path.join(datos, "mosquitto.conf");
-  fs.writeFileSync(conf, `listener ${puerto} 127.0.0.1\nallow_anonymous false\npassword_file ${fichero}\npersistence false\nuser ${os.userInfo().username}\n`);
-  const mq = spawn("mosquitto", ["-c", conf], { stdio: "ignore" });
-  const recargar = () => mq.kill("SIGHUP");
+  const fichero = path.join(datos, "mosquitto", "dynamic-security.json");
+  const config = comprobar({ receptor: { tipo: "tcp", host: "127.0.0.1", puerto: puertoNodo }, datos, mosquitto: { puerto, fichero } });
+  // As an install of before 2.0: Talaia's password and a Shelly's user, from the password file.
+  const almacen = abrirAlmacen(":memory:");
+  almacen.guardar("mosquitto", { interno: { clave: "la-clave-interna-de-antes", cifrada: lineaPasswd("la-clave-interna-de-antes") }, usuarios: [{ nombre: "viejo", cifrada: lineaPasswd("clave-del-viejo") }] });
+  const talaia = await crearTalaia(config, crearRegistro({ nivel: "error", salida: [] }), { almacen });
+  assert.equal(fs.statSync(fichero).mode & 0o777, 0o600); // written by Talaia, as with Docker
+  let mq = mosquitto(datos, puerto, fichero);
   t.after(async () => { await talaia.detener(); await nodo.cerrar(); mq.kill(); });
+  await new Promise((r) => setTimeout(r, 400));
+  talaia.arrancar();
 
   const local = () => talaia.S.mqtt.brokers.find((b) => b.id === "local");
   assert.equal(local().nombre, "Este servidor");
-  await hasta(() => local().estado.fase === "conectada", 15000, "Talaia conectado a su broker");
-  assert.notEqual(await entra(puerto, null, null), true, "sin usuario no se entra");
+  await hasta(() => local().estado.fase === "conectada", 15000, "Talaia connected to its broker");
+  await hasta(() => talaia.S.mqtt.local.usuarios.length === 1, 5000, "the users, from Mosquitto");
+  assert.deepEqual(talaia.S.mqtt.local.usuarios, [{ nombre: "viejo" }]);
+  assert.deepEqual(almacen.leer("mosquitto"), { interno: { clave: "la-clave-interna-de-antes" }, usuarios: [] }, "the old copy goes once Mosquitto has them");
+  assert.equal(await entra(puerto, "viejo", "clave-del-viejo"), true, "the user of before gets in with the same password");
+  assert.notEqual(await entra(puerto, null, null), true, "without a user, no");
 
-  // Un usuario para un Shelly.
-  assert.match(talaia.mqtt.ponerUsuario("shelly", "corta").error, /al menos 8/);
-  assert.equal(talaia.mqtt.ponerUsuario("shelly", "clave-del-shelly").ok, true);
-  recargar();
-  await hasta(async () => (await entra(puerto, "shelly", "clave-del-shelly")) === true, 5000, "entra el Shelly");
+  // A user for a Shelly: in at once, without reloading anything.
+  assert.match((await talaia.mqtt.ponerUsuario("shelly", "corta")).error, /al menos 8/);
+  assert.equal((await talaia.mqtt.ponerUsuario("shelly", "clave-del-shelly")).ok, true);
+  assert.equal(await entra(puerto, "shelly", "clave-del-shelly"), true);
   assert.notEqual(await entra(puerto, "shelly", "otra-clave-mala"), true);
-  // Cambiar la contraseña: la vieja ya no vale.
-  assert.match(talaia.mqtt.ponerUsuario("shelly", "clave-nueva-1").toast, /Contraseña de «shelly» cambiada/);
-  recargar();
-  await hasta(async () => (await entra(puerto, "shelly", "clave-nueva-1")) === true, 5000, "entra con la nueva");
+  // New password: the old one no longer works.
+  assert.match((await talaia.mqtt.ponerUsuario("shelly", "clave-nueva-1")).toast, /Contraseña de «shelly» cambiada/);
+  assert.equal(await entra(puerto, "shelly", "clave-nueva-1"), true);
   assert.notEqual(await entra(puerto, "shelly", "clave-del-shelly"), true);
-  // Lo que ven las pantallas: los usuarios, sin contraseñas ni cifrados.
-  assert.deepEqual(talaia.S.mqtt.local.usuarios, [{ nombre: "shelly" }]);
-  assert.equal(talaia.S.mqtt.local.puerto, puerto);
+  // What the screens see: names, no passwords or hashes.
+  assert.deepEqual(talaia.S.mqtt.local.usuarios, [{ nombre: "shelly" }, { nombre: "viejo" }]);
   const foto = JSON.stringify(instantanea(talaia.S));
-  assert.doesNotMatch(foto, /\$7\$|clave-nueva/);
-  assert.ok(!foto.includes(talaia.mqtt.brokers().find((b) => b.id === "local").clave), "la contraseña interna no sale");
+  assert.doesNotMatch(foto, /clave-nueva|"salt"|"iterations"/);
+  assert.ok(!foto.includes(talaia.mqtt.brokers().find((b) => b.id === "local").clave), "Talaia's password doesn't go out");
 
-  // Home Assistant en el broker de este equipo: «online» lo ve quien entra.
+  // A device can't make itself users through $CONTROL.
+  const shelly = await mqtt.connectAsync(`mqtt://127.0.0.1:${puerto}`, { username: "shelly", password: "clave-nueva-1" });
+  await shelly.publishAsync("$CONTROL/dynamic-security/v1", JSON.stringify({ commands: [{ command: "createClient", username: "intruso", password: "clave-intrusa" }] }));
+  await new Promise((r) => setTimeout(r, 400));
+  assert.notEqual(await entra(puerto, "intruso", "clave-intrusa"), true);
+  // Home Assistant on this broker: «online» is seen by whoever gets in.
   assert.equal((await talaia.mqtt.configurarHA({ activado: true, broker: "local" })).ok, true);
-  const espia = await mqtt.connectAsync(`mqtt://127.0.0.1:${puerto}`, { username: "shelly", password: "clave-nueva-1" });
   const visto = new Map();
-  espia.on("message", (tema, c) => visto.set(tema, c.toString()));
-  await espia.subscribeAsync("vigia/#");
-  await hasta(() => visto.get("vigia/estado") === "online", 15000, "online en el broker local");
-  await espia.endAsync();
+  shelly.on("message", (tema, c) => visto.set(tema, c.toString()));
+  await shelly.subscribeAsync("vigia/#");
+  await hasta(() => visto.get("vigia/estado") === "online", 15000, "online on the local broker");
+  await shelly.endAsync();
   assert.match((await talaia.mqtt.quitarBroker("local")).error, /no se puede quitar/);
 
-  // Quitar el usuario: ya no entra.
-  assert.equal(talaia.mqtt.quitarUsuario("shelly").ok, true);
-  recargar();
-  await hasta(async () => (await entra(puerto, "shelly", "clave-nueva-1")) !== true, 5000, "ya no entra");
-  // Talaia sigue dentro.
-  await new Promise((r) => setTimeout(r, 500));
-  assert.equal(local().estado.fase, "conectada");
+  // Removing the user: out.
+  assert.equal((await talaia.mqtt.quitarUsuario("shelly")).ok, true);
+  assert.notEqual(await entra(puerto, "shelly", "clave-nueva-1"), true);
+  assert.match((await talaia.mqtt.quitarUsuario("shelly")).error, /no existe/);
+
+  // Mosquitto starts again: its users are kept (it saves them in its file) and Talaia gets back in by itself.
+  mq.kill();
+  await hasta(() => local().estado.fase !== "conectada", 10000, "broker gone");
+  assert.match((await talaia.mqtt.ponerUsuario("otro", "clave-del-otro")).error, /no contesta/);
+  mq = mosquitto(datos, puerto, fichero);
+  await hasta(() => local().estado.fase === "conectada", 20000, "Talaia back in");
+  assert.equal(await entra(puerto, "viejo", "clave-del-viejo"), true);
+  assert.notEqual(await entra(puerto, "shelly", "clave-nueva-1"), true);
+  assert.ok(!fs.readFileSync(fichero, "utf8").includes("shelly"));
 });

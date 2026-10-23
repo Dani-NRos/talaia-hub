@@ -7,6 +7,7 @@
 //   sudo talaia --clave NOMBRE   contraseña nueva para ese usuario (lo crea si no está); cierra sus sesiones
 //   sudo talaia --usuarios       los usuarios de la pantalla
 //   sudo talaia --codigo         el código para crear el primer usuario
+//   sudo talaia --broker-inicial el primer dynamic-security.json del broker de este equipo (lo usa el instalador)
 import fs from "node:fs";
 import path from "node:path";
 import { leerConfig, RUTA_CONFIG, ErrorConfig } from "./config.js";
@@ -47,7 +48,7 @@ try {
   console.error(`Configuración no válida: ${e instanceof ErrorConfig ? e.message : e.stack}`);
   process.exit(2);
 }
-if (args.includes("--clave") || args.includes("--usuarios") || args.includes("--codigo")) process.exit(await usuariosTerminal());
+if (["--clave", "--usuarios", "--codigo", "--broker-inicial"].some((o) => args.includes(o))) process.exit(await usuariosTerminal());
 const registro = crearRegistro({ nivel: config.registro });
 // Una promesa rechazada sin atender (suele ser de la librería, al cortarse el enlace) se apunta y se sigue.
 process.on("unhandledRejection", (e) => registro.error(`Error sin atender: ${e?.stack || e}`));
@@ -127,6 +128,13 @@ async function usuariosTerminal() {
   const { crearUsuarios } = await import("./usuarios.js");
   const usuarios = crearUsuarios({ almacen, datos: config.datos, codigoInicial: false });
   try {
+    if (args.includes("--broker-inicial")) {
+      // The broker's first users file, to standard output: Talaia's client (with the password it keeps) and the
+      // users of before 2.0, with their same passwords.
+      const { guardadoBroker, ficheroInicial } = await import("./mosquitto.js");
+      process.stdout.write(`${JSON.stringify(ficheroInicial(guardadoBroker(almacen)), null, 2)}\n`);
+      return 0;
+    }
     if (args.includes("--usuarios")) {
       const lista = usuarios.lista();
       if (!lista.length) console.log("No hay usuarios todavía. Crea el primero desde la pantalla (sudo talaia --codigo) o aquí: sudo talaia --clave NOMBRE");
