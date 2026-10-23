@@ -65,19 +65,23 @@ function timeAxis(from, to, W, x, top, bottom, H) {
 
 /** Full chart with axes, in real pixels. */
 export function chartSVG(series, metric, rule, from, to, W, H = 132) {
-  const pl = 42, pr = 12, pt = 10, pb = 22;
+  const pr = 12, pt = 10, pb = 22;
   const ser = series.filter((p) => !(metric === "batteryLevel" && p.v > 100));
   const dom = yDomain(ser, metric, rule);
   if (!dom) return `<p class="empty-chart">${esc(t("chart.empty"))}</p>`;
   const [lo, hi] = dom;
+  const st = niceStep(hi - lo, H > 180 ? 5 : 3);
+  const ticks = [];
+  for (let v = Math.ceil(lo / st) * st; v <= hi; v += st) ticks.push([v, fmtNum(v, st < 1 ? 1 : 0)]);
+  // Room on the left for the longest number of the axis (10.5 px monospaced letters: about 6.4 px each).
+  const pl = Math.max(42, Math.ceil(12 + 6.4 * Math.max(0, ...ticks.map(([, s]) => s.length))));
   const x = (ts) => pl + ((ts - from) / (to - from)) * (W - pl - pr);
   const y = (v) => pt + ((hi - v) / (hi - lo)) * (H - pt - pb);
   const m = metricMeta(metric);
   let g = "";
-  const st = niceStep(hi - lo, H > 180 ? 5 : 3);
-  for (let v = Math.ceil(lo / st) * st; v <= hi; v += st) {
+  for (const [v, s] of ticks) {
     const yy = y(v).toFixed(1);
-    g += `<line class="grid" x1="${pl}" x2="${W - pr}" y1="${yy}" y2="${yy}"/><text class="tick" x="${pl - 6}" y="${yy}" text-anchor="end" dominant-baseline="middle">${fmtNum(v, st < 1 ? 1 : 0)}</text>`;
+    g += `<line class="grid" x1="${pl}" x2="${W - pr}" y1="${yy}" y2="${yy}"/><text class="tick" x="${pl - 6}" y="${yy}" text-anchor="end" dominant-baseline="middle">${s}</text>`;
   }
   g += timeAxis(from, to, W, x, pt, H - pb, H);
   let thr = "";

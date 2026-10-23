@@ -7,6 +7,27 @@ export const esc = (s) => String(s ?? "").replace(/[&<>"']/g, (c) => ({ "&": "&a
 /** Sets innerHTML only when it changes (no repaint, no lost focus or scroll). */
 export function setHTML(el, html) { if (el && el._h !== html) { el.innerHTML = html; el._h = html; } }
 
+/**
+ * Every `sel` inside `box` fits its own width, all of them at the same size: their CSS size is the largest, and if
+ * one doesn't fit, all get smaller by the same factor (the CSS variable `name` on `box`, a multiplier their
+ * font-size uses). Hidden ones (no width yet) don't count. Returns that factor (1: they all fit as they are).
+ */
+export function fitSame(box, sel, name = "--fit") {
+  if (!box) return 1;
+  box.style.removeProperty(name);
+  const els = [...box.querySelectorAll(sel)];
+  let f = 1;
+  // Measured again after shrinking: what doesn't shrink in proportion (a minimum size, a fixed gap) may still stick out.
+  for (let i = 0; i < 3; i++) {
+    let g = 1;
+    for (const el of els) if (el.clientWidth > 0 && el.scrollWidth > el.clientWidth) g = Math.min(g, el.clientWidth / el.scrollWidth);
+    if (g >= 1) break;
+    f = Math.floor(f * g * 0.98 * 1000) / 1000;
+    box.style.setProperty(name, String(f));
+  }
+  return f;
+}
+
 /** localStorage of this device: never throws (private window, blocked storage…). */
 export const LS = {
   get(k, d) { try { const v = localStorage.getItem(k); return v == null ? d : JSON.parse(v); } catch { return d; } },

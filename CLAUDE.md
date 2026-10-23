@@ -231,7 +231,11 @@ con Tasmota/ESPHome, Zigbee por zigbee2mqtt, ESPHome, Home Assistant…).
   Letras Overpass y Overpass Mono (OFL, de npm @fontsource-variable, incrustadas por build.mjs: sin internet se ve
   igual). Las lecturas, en Overpass con cifras tabulares (todas igual de anchas), no en la monoespaciada: esa le da a la
   coma decimal el ancho de una cifra y Dani las vio demasiado espaciadas. Overpass dibuja «·» sin anchura: ese carácter sale de otra letra
-  (unicode-range). Ajustes, en cinco apartados con pestañas, cada uno con su dirección (#/settings/mesh…): Malla
+  (unicode-range). Las lecturas (tarjetas y pantalla completa) caben siempre en su casilla: `fitSame` (ui.js) las
+  mide y, si una no cabe, las de esa tarjeta (o todas las casillas de la pantalla completa) bajan a la vez por el mismo
+  factor (`--fit`); si una tarjeta tendría que bajar de 0,7, pasa a columnas más anchas. En las tarjetas, las lecturas
+  van separadas como una tabla sin cerrar: unas rayas discontinuas en los huecos (Dani, 23 oct. 2026). El botón de
+  pantalla completa va en la cabecera de la tarjeta, a la izquierda de la flecha de contraer. Ajustes, en cinco apartados con pestañas, cada uno con su dirección (#/settings/mesh…): Malla
   (sin señal para los nodos nuevos, avisos por la malla), MQTT (brokers, usuarios del broker de este equipo, Home
   Assistant), Receptor (estado, nodo, radio, canales, diagnóstico; ahí lleva el botón de estado de arriba), Sistema
   (idioma del servidor, histórico, acerca de) y Esta pantalla (idioma, tema, sonido, notificaciones, pantalla encendida, mapa sin

@@ -6,7 +6,7 @@ import { $, esc, setHTML, LS, ICON } from "./ui.js";
 import { refreshPosition, copyText, patchSwitches, setFence, setFenceRadius, removeFence, toggleSwitch } from "./views/node-parts.js";
 import { renderNodes, onNodesQuery, saveNodesView } from "./views/nodes.js";
 import { renderLog } from "./views/alarms.js";
-import { boardHTML, renderCards, toggleCard, toggleAllCards, moveCard } from "./views/dashboard.js";
+import { boardHTML, renderCards, toggleCard, toggleAllCards, moveCard, watchCardsWidth } from "./views/dashboard.js";
 import { openSheet, onSheetClose, renderSheet, drawCharts, refreshSheetLive, refreshRequests, patchRequestStatus, legHops, setSheetRange, resizeSheet, trendFormFill, addTrend, removeTrend, saveStateAlarm, saveRuleFromInput, watch, unwatch, isSheetOpen } from "./views/sheet.js";
 import { patchPanels, data, meshOut, newPanelSheet, createPanel } from "./views/panel-config.js";
 import { openFull, closeFull, refreshFull, setFullRange, resizeFull } from "./views/fullscreen.js";
@@ -425,6 +425,7 @@ function boot() {
   S.ui = { collapsed: {}, order: [], ...(LS.get("vigia.cards", {}) || {}) };
   S.meshView = { filters: [], sort: "auto", ...(LS.get("vigia.meshView", {}) || {}) };
   S.link = { state: "connecting", extra: null };
+  watchCardsWidth();
   render();
   servidor = conectarServidor({
     onConexion(ok) {

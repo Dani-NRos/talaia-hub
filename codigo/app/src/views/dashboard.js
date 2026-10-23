@@ -2,7 +2,7 @@
 // reordered (arrows or dragging) and opened (sheet or full screen).
 import { ctx } from "../ctx.js";
 import { t } from "../i18n.js";
-import { $, esc, setHTML, LS, ICON } from "../ui.js";
+import { $, $$, esc, setHTML, fitSame, LS, ICON } from "../ui.js";
 import { requestBlock, positionBlock, switchHTML } from "./node-parts.js";
 import { metricMeta, sortMetrics, fmtValue, fmtNum, fmtLimit } from "@vigia/nucleo/metrics.js";
 import { seriesKey, trendKey, estadoKey } from "@vigia/nucleo/motor.js";
@@ -117,7 +117,9 @@ function batteryHTML(num) {
 function cardHead(num, n, st, stLabel, min) {
   const name = displayName(n);
   const meta = min ? seenText(n) : metaLine(n);
-  return `<header class="card-h"><span class="tag">${esc(n.short)}</span><h3><button type="button" class="name-btn" data-open="${num}" aria-label="${esc(t("card.open", { name, state: stLabel }))}">${esc(name)}</button></h3><p class="meta">${esc(meta)}${min ? batteryHTML(num) : ""}</p><span class="st st-${st}">${esc(stLabel)}</span><button type="button" class="icon-btn tg" data-card-toggle="${num}" aria-expanded="${!min}" aria-label="${esc(t(min ? "card.expand" : "card.collapse", { name }))}">${ICON.chevron}</button></header>`;
+  const full = `<button type="button" class="icon-btn" data-full="${num}" aria-label="${esc(t("card.fullHint", { name }))}" title="${esc(t("card.full"))}">${ICON.expand}</button>`;
+  const fold = `<button type="button" class="icon-btn tg" data-card-toggle="${num}" aria-expanded="${!min}" aria-label="${esc(t(min ? "card.expand" : "card.collapse", { name }))}">${ICON.chevron}</button>`;
+  return `<header class="card-h"><span class="tag">${esc(n.short)}</span><h3><button type="button" class="name-btn" data-open="${num}" aria-label="${esc(t("card.open", { name, state: stLabel }))}">${esc(name)}</button></h3><p class="meta">${esc(meta)}${min ? batteryHTML(num) : ""}</p><span class="st st-${st}">${esc(stLabel)}</span><span class="card-acts">${full}${fold}</span></header>`;
 }
 
 function readingHTML(num, n, k, rules) {
@@ -144,11 +146,10 @@ function cardHTML(num) {
   const keys = sortMetrics(Object.keys(n.metrics).filter((k) => !metricMeta(k).minor));
   const readings = keys.map((k) => readingHTML(num, n, k, rules)).join("");
   const sparkMetric = ["temperature", "batteryLevel", "relativeHumidity"].find((k) => n.metrics[k]) || keys.find((k) => !metricMeta(k).estados) || keys[0];
-  const fullBtn = `<button type="button" class="mini full-btn" data-full="${num}" title="${esc(t("card.fullHint"))}">${ICON.expand}${esc(t("card.full"))}</button>`;
   const series = S.recent.get(seriesKey(num, sparkMetric)) || [];
   const spark = sparkMetric
-    ? `<div class="spark-wrap"><div class="spark-top"><span class="spark-cap">${esc(t("card.spark", { label: metricMeta(sparkMetric).label }))}</span>${fullBtn}</div>${metricMeta(sparkMetric).estados ? ctx.sparkStateHTML(series, sparkMetric, n.metrics[sparkMetric]) : ctx.sparkHTML(series, sparkMetric, rules[sparkMetric])}</div>`
-    : `<div class="spark-top">${fullBtn}</div>`;
+    ? `<div class="spark-wrap"><span class="spark-cap">${esc(t("card.spark", { label: metricMeta(sparkMetric).label }))}</span>${metricMeta(sparkMetric).estados ? ctx.sparkStateHTML(series, sparkMetric, n.metrics[sparkMetric]) : ctx.sparkHTML(series, sparkMetric, rules[sparkMetric])}</div>`
+    : "";
   return `<article class="card st-${st}" data-open="${num}">
       ${cardHead(num, n, st, stLabel, false)}
       ${readings ? `<div class="rds">${readings}</div>` : `<p class="no-rd">${esc(t(num < 0 ? "card.noDataPanel" : "card.noDataNode"))}</p>`}
@@ -186,6 +187,29 @@ export function renderCards() {
     return;
   }
   setHTML(el, nums.map(cardHTML).join(""));
+  fitCards();
+}
+
+/**
+ * The readings of each card fit in their columns, all of a card at the same size. If that would make them too small
+ * (a very long figure), that card gets wider columns, fewer of them.
+ */
+export function fitCards() {
+  for (const box of $$("#cards .rds")) {
+    box.classList.remove("wide");
+    if (fitSame(box, ".rd-v:not(.est)") < 0.7) { box.classList.add("wide"); fitSame(box, ".rd-v:not(.est)"); }
+  }
+}
+// Also when the width changes (window, rotating the phone, the section shown again after being hidden).
+let cardsWidth = 0;
+const cardsSeen = new ResizeObserver(([e]) => {
+  const w = Math.round(e.contentRect.width);
+  if (w !== cardsWidth) { cardsWidth = w; fitCards(); }
+});
+export function watchCardsWidth() {
+  const el = $("#cards");
+  if (el) cardsSeen.observe(el);
+  document.fonts?.ready.then(fitCards); // measured again with their own letters, once they are ready
 }
 
 export function toggleCard(num) {

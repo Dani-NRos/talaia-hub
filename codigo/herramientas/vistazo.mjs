@@ -39,7 +39,8 @@ const orden = (o) => fetch(`${URL0}api/orden`, { method: "POST", headers: { "con
 await orden({ orden: "vigilar", num: CASETA });
 await orden({ orden: "vigilar", num: ME });
 for (const [t, h] of [[22.1, 63], [23.4, 61], [24.0, 60], [26.2, 58]]) { nodo.ambiente(CASETA, { temperature: t, relativeHumidity: h }); await sleep(150); }
-nodo.ambiente(ME, { temperature: 19.6, relativeHumidity: 55, barometricPressure: 1014.8 });
+// The receiver as a weather station: many readings, some long (they must fit in their boxes).
+nodo.ambiente(ME, { temperature: 19.6, relativeHumidity: 55, barometricPressure: 1014.8, windSpeed: 3.4, windGust: 12.9, rainfall1h: 0.4, rainfall24h: 112.6, lux: 12450, voltage: 4.12 });
 nodo.ambiente(AVISADO, { temperature: 17.2, relativeHumidity: 70 });
 // Around Alzira, for the map.
 nodo.posicion(ME, 39.1513, -0.4352);
@@ -48,6 +49,14 @@ nodo.posicion(AVISADO, 39.1388, -0.4189);
 await orden({ orden: "limite", num: CASETA, metrica: "temperature", lado: "max", valor: 30 });
 nodo.ambiente(CASETA, { temperature: 31.4, relativeHumidity: 57 });
 await sleep(800);
+
+/** Readings that don't fit in their box: the figure wider than its box, or sticking out of it. */
+function overflow(page, box, val) {
+  return page.evaluate(([box, val]) => [...document.querySelectorAll(val)].flatMap((v) => {
+    const b = v.closest(box).getBoundingClientRect(), r = v.getBoundingClientRect();
+    return v.scrollWidth > v.clientWidth + 1 || r.right > b.right + 0.5 ? [`«${v.textContent}» does not fit (${Math.round(v.scrollWidth)} > ${Math.round(v.clientWidth)} px)`] : [];
+  }), [box, val]);
+}
 
 const browser = await pw.chromium.launch();
 const SIZES = { pc: { width: 1280, height: 820 }, movil: { width: 390, height: 844 } };
@@ -76,11 +85,14 @@ for (const [size, viewport] of Object.entries(SIZES)) {
         continue;
       }
       if (v === "full") {
-        await page.evaluate((num) => { location.hash = "#/dashboard"; document.querySelector(`#cards [data-full="${num}"]`)?.click(); }, CASETA);
-        await sleep(800);
-        await page.screenshot({ path: file });
-        await page.keyboard.press("Escape");
-        await sleep(200);
+        for (const [num, name] of [[CASETA, "full"], [ME, "full-receiver"]]) {
+          await page.evaluate((x) => { location.hash = "#/dashboard"; document.querySelector(`#cards [data-full="${x}"]`)?.click(); }, num);
+          await sleep(800);
+          errors.push(...(await overflow(page, ".nv-tile", ".nv-v")).map((e) => `${size}/${scheme}/${name}: ${e}`));
+          await page.screenshot({ path: path.join(out, `${size}-${scheme}-${name}.png`) });
+          await page.keyboard.press("Escape");
+          await sleep(200);
+        }
         continue;
       }
       if (v === "settings") {
@@ -93,6 +105,15 @@ for (const [size, viewport] of Object.entries(SIZES)) {
       }
       await page.evaluate((x) => { location.hash = `#/${x}`; }, v);
       await sleep(v === "map" ? 900 : 350);
+      if (v === "dashboard") {
+        errors.push(...(await overflow(page, ".rd", ".rd-v")).map((e) => `${size}/${scheme}/dashboard: ${e}`));
+        // and with every card collapsed
+        await page.click("[data-cards-all]");
+        await sleep(300);
+        await page.screenshot({ path: path.join(out, `${size}-${scheme}-dashboard-collapsed.png`), fullPage: true });
+        await page.click("[data-cards-all]");
+        await sleep(300);
+      }
       await page.screenshot({ path: file, fullPage: v !== "map" });
     }
     await ctx.close();

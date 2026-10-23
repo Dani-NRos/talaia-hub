@@ -293,7 +293,7 @@ export function renderSheet() {
       : `<section class="blk end"><button class="btn danger-ghost" id="unwatchBtn" data-unwatch="${num}">${esc(t("sheet.unwatch"))}</button></section>`;
   }
   sheet().setAttribute("aria-label", displayName(n));
-  sheet().innerHTML = `<div class="sheet-h"><span class="tag">${esc(n.short)}</span><div class="sheet-t"><h2>${esc(displayName(n))}</h2><p class="meta">${esc(tags)}<br>${esc(metaLine(n))}</p></div><button class="icon-btn" data-full="${num}" aria-label="${esc(t("card.fullHint"))}" title="${esc(t("card.full"))}">${ICON.expand}</button><button class="icon-btn" data-close aria-label="${esc(t("sheet.close"))}">${ICON.close}</button></div><div class="sheet-b">${body}</div>`;
+  sheet().innerHTML = `<div class="sheet-h"><span class="tag">${esc(n.short)}</span><div class="sheet-t"><h2>${esc(displayName(n))}</h2><p class="meta">${esc(tags)}<br>${esc(metaLine(n))}</p></div><button class="icon-btn" data-full="${num}" aria-label="${esc(t("card.fullHint", { name: displayName(n) }))}" title="${esc(t("card.full"))}">${ICON.expand}</button><button class="icon-btn" data-close aria-label="${esc(t("sheet.close"))}">${ICON.close}</button></div><div class="sheet-b">${body}</div>`;
 }
 
 export async function drawCharts() {

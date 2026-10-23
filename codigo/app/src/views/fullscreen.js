@@ -2,7 +2,7 @@
 // It asks the browser for real full screen (no system bars) and keeps the screen on while it is open.
 import { ctx } from "../ctx.js";
 import { t } from "../i18n.js";
-import { $, $$, esc, setHTML, ICON } from "../ui.js";
+import { $, $$, esc, setHTML, fitSame, ICON } from "../ui.js";
 import { chartSVG, stateSpans, stateSummary, stateSVG } from "../charts.js";
 import { switchHTML } from "./node-parts.js";
 import { panelState, metaLine, stateRuleText, trendShort, displayName } from "./dashboard.js";
@@ -26,6 +26,7 @@ export async function openFull(num) {
   if (!S.full) return; // closed while asking for full screen
   renderFull();
   if (!view().open) view().showModal();
+  fitTiles();
   // The screen stays on while it is being looked at.
   try { if (!wakeLock && "wakeLock" in navigator) { wakeLock = await navigator.wakeLock.request("screen"); wakeLock.addEventListener("release", () => { wakeLock = null; }); } } catch { /* no permission */ }
   drawFullCharts();
@@ -81,6 +82,14 @@ export function renderFull() {
     <div class="nv-b"><div data-full-al>${alarms(num)}</div><div class="nv-tiles" data-full-tiles>${tiles(num)}</div><div class="nv-charts">${charts}</div></div>`;
 }
 
+/** Big readings that fit in their tiles: all the figures at the same size, and the ON/OFF states at theirs. */
+function fitTiles() {
+  const tl = $("[data-full-tiles]");
+  fitSame(tl, ".nv-v:not(.est)");
+  fitSame(tl, ".nv-v.est", "--fit-est");
+}
+document.fonts?.ready.then(() => { if (ctx.S?.full) fitTiles(); });
+
 /** Live readings without redrawing everything (the charts, at most every 2 s). num null: only what's on screen. */
 export function refreshFull(num) {
   const { S, motor } = ctx;
@@ -92,7 +101,7 @@ export function refreshFull(num) {
   const meta = $("[data-full-meta]");
   if (meta) meta.textContent = metaLine(n);
   const tl = $("[data-full-tiles]");
-  if (tl) setHTML(tl, tiles(S.full.num));
+  if (tl) { setHTML(tl, tiles(S.full.num)); fitTiles(); }
   const al = $("[data-full-al]");
   if (al) setHTML(al, alarms(S.full.num));
   if (num != null) { clearTimeout(chartsTimer); chartsTimer = setTimeout(drawFullCharts, 2000); }
@@ -107,6 +116,7 @@ export function setFullRange(range) {
 /** On rotating the phone or resizing: the charts again, at the new size. */
 export function resizeFull() {
   if (!ctx.S.full) return;
+  fitTiles();
   clearTimeout(chartsTimer);
   chartsTimer = setTimeout(drawFullCharts, 250);
 }

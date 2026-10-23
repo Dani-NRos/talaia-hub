@@ -43,12 +43,12 @@
 .card.st-crit { border-color: var(--crit); box-shadow: inset 4px 0 0 var(--crit); }
 .card.st-off { box-shadow: inset 4px 0 0 var(--off); }
 .card.st-off .rds, .card.st-off .spark-wrap { opacity: .6; }
-.card-h { display: grid; grid-template-columns: auto minmax(0, 1fr) auto auto; grid-template-areas: "tag title st tg" "tag meta meta meta"; column-gap: 10px; row-gap: 2px; align-items: center; }
+.card-h { display: grid; grid-template-columns: auto minmax(0, 1fr) auto auto; grid-template-areas: "tag title st acts" "tag meta meta meta"; column-gap: 10px; row-gap: 2px; align-items: center; }
 .card-h > .tag { grid-area: tag; align-self: start; margin-top: 2px; }
 .card-h > h3 { grid-area: title; min-width: 0; font: 600 17px/1.25 var(--f-body); overflow-wrap: anywhere; }
 .card-h > .meta { grid-area: meta; min-width: 0; }
 .card-h > .st { grid-area: st; }
-.card-h > .tg { grid-area: tg; }
+.card-h > .card-acts { grid-area: acts; display: flex; gap: 2px; }
 .meta { font: 400 13px/1.4 var(--f-body); color: var(--ink-2); }
 .tag { flex: none; padding: 4px 6px; border-radius: 4px; border: 1px solid var(--line); font: 600 11.5px/1 var(--f-mono); color: var(--ink-2); }
 .tag.sm { font-size: 11px; padding: 3px 5px; min-width: 42px; text-align: center; }
@@ -62,11 +62,13 @@
 .st.st-crit::before { background: var(--crit); }
 .st.st-off { color: var(--off); }
 .st.st-off::before { background: var(--off); }
-.icon-btn.sm, .card-h .tg { width: 32px; height: 32px; border-radius: 6px; }
-.icon-btn.sm svg, .card-h .tg svg { width: 18px; height: 18px; }
+.icon-btn.sm, .card-acts .icon-btn { width: 32px; height: 32px; border-radius: 6px; }
+.icon-btn.sm svg, .card-acts .icon-btn svg { width: 18px; height: 18px; }
 .icon-btn:disabled { opacity: .35; cursor: default; }
-.card-h .tg { border-color: transparent; background: transparent; color: var(--ink-2); }
-.card-h .tg:hover { border-color: var(--line); }
+/* full screen and fold, side by side: quiet until the pointer is on them */
+.card-acts .icon-btn { border-color: transparent; background: transparent; color: var(--ink-2); }
+.card-acts .icon-btn:hover { border-color: var(--line); color: var(--ink); }
+.card-acts [data-full] svg { width: 16px; height: 16px; }
 .card-h .tg svg { transition: transform .15s; }
 .card.min .card-h .tg svg { transform: rotate(-90deg); }
 .card.min { padding: 10px 12px 10px 14px; }
@@ -74,13 +76,20 @@
 .card.min .card-h > h3 { font-size: 16px; }
 .card.min .meta { display: flex; flex-wrap: wrap; align-items: center; gap: 3px 12px; }
 
-/* readings: big figures of equal width, the label above, the limits below */
-.rds { display: grid; gap: 12px 14px; grid-template-columns: repeat(auto-fill, minmax(90px, 1fr)); }
-.rd { display: grid; gap: 2px; min-width: 0; align-content: start; }
+/* readings: big figures of equal width, the label above, the limits below. Like a table without closing its cells:
+   a few dashes in the gaps between columns and between rows (each reading draws the ones to its left and above it;
+   those of the first column and the first row fall outside the box and are cut off). */
+.rds { --cg: 22px; --rg: 18px; display: grid; gap: var(--rg) var(--cg); grid-template-columns: repeat(auto-fill, minmax(92px, 1fr)); overflow: hidden; padding: 4px; margin: -4px; }
+.rds.wide { grid-template-columns: repeat(auto-fill, minmax(140px, 1fr)); }
+.rd { position: relative; display: grid; grid-template-columns: minmax(0, 1fr); gap: 2px; min-width: 0; align-content: start; }
+.rd::before, .rd::after { content: ""; position: absolute; pointer-events: none; }
+.rd::before { left: calc(var(--cg) / -2); top: 12%; bottom: 12%; border-left: 1px dashed var(--line); }
+.rd::after { top: calc(var(--rg) / -2); left: 0; width: 64%; border-top: 1px dashed var(--line); }
 .rd-l { font: 600 12.5px/1.2 var(--f-body); color: var(--ink-2); }
-.rd-v { font: 600 34px/1 var(--f-num); font-variant-numeric: tabular-nums; letter-spacing: -.01em; }
-.rd-v small { font: 500 14px/1 var(--f-body); letter-spacing: 0; color: var(--ink-2); margin-left: 3px; }
-.rd-v.est { font-size: 19px; line-height: 1.2; min-height: 34px; display: flex; align-items: flex-end; hyphens: auto; overflow-wrap: break-word; }
+/* the figure fits its column: if one of the card is too wide, all of them get smaller (--fit, from fitCards) */
+.rd-v { font: 700 calc(34px * var(--fit, 1))/1 var(--f-num); font-variant-numeric: tabular-nums; letter-spacing: -.01em; white-space: nowrap; }
+.rd-v small { font: 500 max(11.5px, calc(14px * var(--fit, 1)))/1 var(--f-body); letter-spacing: 0; color: var(--ink-2); margin-left: .1em; }
+.rd-v.est { font-size: 19px; font-weight: 600; line-height: 1.2; min-height: 34px; display: flex; align-items: flex-end; white-space: normal; hyphens: auto; overflow-wrap: break-word; }
 .rd-lim { font: 400 12px/1.3 var(--f-body); font-variant-numeric: tabular-nums; color: var(--ink-2); }
 .rd.bad .rd-v, .rd.bad .rd-lim { color: var(--crit); }
 .no-rd { font-size: 14px; color: var(--ink-2); }
@@ -90,9 +99,7 @@
 
 /* the last 24 hours, small */
 .spark-wrap { display: grid; gap: 6px; padding-top: 10px; border-top: 1px dashed var(--line); }
-.spark-top { display: flex; align-items: center; justify-content: space-between; gap: 8px; }
 .spark-cap { font: 400 12.5px/1 var(--f-body); color: var(--ink-2); }
-.full-btn svg { width: 14px; height: 14px; }
 .spark { position: relative; height: 46px; }
 .spark svg { display: block; width: 100%; height: 100%; overflow: visible; }
 .spark .ar { fill: color-mix(in oklab, var(--accent) 16%, transparent); }
@@ -166,4 +173,4 @@
 .tgl.env { opacity: .55; cursor: progress; }
 .tgl:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
 .tgl-t { font: 400 12.5px/1.2 var(--f-body); color: var(--ink-2); }
-@media (max-width: 420px) { .rd-v { font-size: 30px; } }
+@media (max-width: 420px) { .rd-v { font-size: calc(30px * var(--fit, 1)); } .rds { --cg: 18px; --rg: 16px; } }
