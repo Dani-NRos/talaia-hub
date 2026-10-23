@@ -263,7 +263,7 @@ con Tasmota/ESPHome, Zigbee por zigbee2mqtt, ESPHome, Home Assistant…).
   entradas y los cambios de usuarios. El instalador (`INSTALADOR=3`) enseña el código y la orden de la terminal corre
   como el usuario del servicio con sudo (lo que escribe en los datos sigue siendo del servicio). El service worker ya no guarda nada de
   `/api/`.
-- **Paso 5, Docker y documentación** (Dani, 23 oct. 2026), en la rama **`paso5`** (Dani prueba con `--rama paso5`):
+- **Paso 5, Docker y documentación** (Dani, 23 oct. 2026), hecho en la rama `paso5` y pasado a `main` el 24 oct. 2026:
   **Docker además del instalador** (el instalador sigue siendo la vía para Pi y BMAX; Docker, para quien ya lo usa);
   los usuarios del broker pasan al **plugin de seguridad dinámica de Mosquitto** (sirve para los dos y quita el apaño
   de systemd); los **nombres internos pasan a Talaia** (con migración); **Dani crea cada versión en GitHub**
@@ -271,7 +271,7 @@ con Tasmota/ESPHome, Zigbee por zigbee2mqtt, ESPHome, Home Assistant…).
   internos (hecho, 23 oct. 2026: `INSTALADOR=4`, probado en un contenedor desde una instalación de Vigía hecha con el
   instalador 3); 5.2) usuarios del broker por seguridad dinámica (hecho, 23 oct. 2026: `INSTALADOR=5`); 5.3) imagen
   Docker, compose y GitHub Actions (hecho, 23 oct. 2026); 5.4) documentación en inglés (y español) → 2.0 (hecho,
-  23 oct. 2026, en `paso5`).
+  23 oct. 2026). La versión `v2.0.0` la crea Dani en GitHub desde `main`.
 - **Paso 5.4** (Dani, 23 oct. 2026: «también terminal»): documentación en `docs/guide.md` (inglés) y
   `docs/guide.es.md`, `README.md` (inglés) y `README.es.md`, `CHANGELOG.md` (en inglés); `codigo/servidor/README.md`
   solo apunta al manual. La pantalla enlaza el manual de su idioma en *Ajustes → Sistema → Acerca de*. Lo que escribe
@@ -293,7 +293,7 @@ con Tasmota/ESPHome, Zigbee por zigbee2mqtt, ESPHome, Home Assistant…).
   listar); Mosquitto guarda los usuarios en `/var/lib/mosquitto/talaia-dynamic-security.json` (suyo, 600). Los
   dispositivos tienen el rol `talaia-dispositivos`: todo menos los temas que empiezan por «$». El primer fichero lo hace
   Talaia (`ficheroInicial`): el instalador con `talaia --broker-inicial` si no existe (nunca lo pisa), y con Docker el
-  propio servidor si `mosquitto.fichero` está en la configuración. Lleva los usuarios de antes (los hashes `$7$` que
+  entrypoint de la imagen, con la misma orden. Lleva los usuarios de antes (los hashes `$7$` que
   guardaba SQLite valen tal cual) y, cuando Talaia ve que Mosquitto los tiene, borra esa copia de SQLite. El
   instalador quita `talaia-mosquitto.path/.service`, `/etc/mosquitto/talaia.passwd` y `<datos>/mosquitto/`; si el
   Mosquitto no trae el plugin o tiene otra configuración (listener, plugin, allow_anonymous…), no lo toca. En las
