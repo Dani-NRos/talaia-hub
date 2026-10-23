@@ -31,14 +31,26 @@ async function montar(t) {
   await hasta(() => vigia.S.link.state === "ready", 8000, "receptor listo");
   t.after(async () => { await web.cerrar(); await vigia.detener(); await nodo.cerrar(); });
   const base = `http://127.0.0.1:${puerto}`;
+  // Everything needs a session: a user, signed in; its cookie goes with every request of these tests.
+  await vigia.usuarios.crear("Prueba", "clave-de-prueba");
+  galletas.set(base, await entrarComo(base, "Prueba", "clave-de-prueba"));
   return { vigia, web, nodo, base, puerto };
+}
+
+const galletas = new Map(); // base → the cookie of its session
+/** Signs in and returns the cookie («talaia_sesion=…») to send. */
+async function entrarComo(base, nombre, clave) {
+  const r = await pedir(base, "/api/entrar", { metodo: "POST", cabeceras: { "content-type": "application/json", cookie: "" }, cuerpo: JSON.stringify({ nombre, clave }) });
+  assert.equal(r.status, 200, r.cuerpo);
+  return String(r.headers["set-cookie"]).split(";")[0];
 }
 
 /** Petición HTTP con cabeceras a mano (fetch no deja cambiar Host ni Origin). */
 function pedir(base, ruta, { metodo = "GET", cabeceras = {}, cuerpo = null } = {}) {
   return new Promise((resolve, reject) => {
     const u = new URL(ruta, base);
-    const req = http.request({ host: u.hostname, port: u.port, path: u.pathname + u.search, method: metodo, headers: cabeceras }, (res) => {
+    const headers = { ...(galletas.has(base) ? { cookie: galletas.get(base) } : {}), ...cabeceras };
+    const req = http.request({ host: u.hostname, port: u.port, path: u.pathname + u.search, method: metodo, headers }, (res) => {
       let d = "";
       res.setEncoding("utf8");
       res.on("data", (c) => { d += c; });
@@ -53,9 +65,11 @@ const orden = (base, datos, extra = {}) => pedir(base, "/api/orden", { metodo: "
   .then((r) => ({ ...r, json: JSON.parse(r.cuerpo) }));
 
 /** Escucha /api/eventos y va guardando lo que llega. */
-function escuchar(base) {
+function escuchar(base, galleta = galletas.get(base)) {
   const ev = [];
-  const req = http.get(new URL("/api/eventos", base), (res) => {
+  let cerrado = false;
+  const req = http.get(new URL("/api/eventos", base), { headers: { cookie: galleta } }, (res) => {
+    res.on("end", () => { cerrado = true; });
     let buf = "";
     res.setEncoding("utf8");
     res.on("data", (c) => {
@@ -69,7 +83,7 @@ function escuchar(base) {
       }
     });
   });
-  return { ev, cerrar: () => req.destroy() };
+  return { ev, cerrar: () => req.destroy(), get cerrado() { return cerrado; } };
 }
 
 test("eventos: el estado al conectar y después solo lo que cambia", async (t) => {

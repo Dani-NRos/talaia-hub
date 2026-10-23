@@ -25,7 +25,7 @@ set -euo pipefail
 
 # Sube cada vez que cambia lo que hace el instalador. Si el programa que se descarga trae uno más nuevo (pasa al
 # instalar otra rama con el instalador de main), se sigue con ese.
-INSTALADOR=2
+INSTALADOR=3
 ARGS=("$@")
 
 REPO="Dani-NRos/talaia-hub"
@@ -191,8 +191,12 @@ VERSION_VIGIA="$("$NODE" "$DEST/servidor/src/main.js" --version)" || falla "el p
 ln -sfn "$DEST" "$BASE/actual.nuevo" && mv -Tf "$BASE/actual.nuevo" "$BASE/actual"
 # Se guardan las tres últimas versiones, para volver atrás si hace falta.
 find "$BASE/versiones" -mindepth 1 -maxdepth 1 -type d -printf '%T@ %p\n' | sort -rn | tail -n +4 | cut -d' ' -f2- | xargs -r rm -rf
+# Con sudo, como el usuario del servicio: lo que escriba en los datos (usuarios de la pantalla) sigue siendo suyo.
 cat > /usr/local/bin/vigia-servidor <<EOF
 #!/bin/sh
+if [ "\$(id -u)" = 0 ] && id vigia >/dev/null 2>&1 && command -v runuser >/dev/null; then
+  exec runuser -u vigia -- "$NODE" "$BASE/actual/servidor/src/main.js" "\$@"
+fi
 exec "$NODE" "$BASE/actual/servidor/src/main.js" "\$@"
 EOF
 chmod 755 /usr/local/bin/vigia-servidor
@@ -310,8 +314,24 @@ if [ -n "$IPS" ]; then
     for ip in $IPS; do echo "    mqtt://$ip:1883"; done
   fi
 fi
+# Sin usuarios todavía, el servicio escribe un código para crear el primero desde la pantalla: aquí se enseña.
+if con_systemd && systemctl is-active --quiet "$SERVICIO"; then
+  for _ in $(seq 1 30); do
+    CODIGO="$(/usr/local/bin/vigia-servidor --codigo 2>/dev/null || true)"
+    case "$CODIGO" in
+      *"Código para crear"*)
+        echo
+        dice "Aún no hay usuarios. Abre la pantalla y crea el primero con este código:"
+        echo "    ${CODIGO##*: }"
+        break ;;
+      *"Ya hay usuarios"*) break ;;
+    esac
+    sleep 0.5
+  done
+fi
 echo
 dice "Hecho. Para seguirlo:"
 echo "    journalctl -u $SERVICIO -f          lo que va pasando"
 echo "    vigia-servidor --puertos            los nodos enchufados por USB"
+echo "    sudo vigia-servidor --clave NOMBRE  contraseña nueva para un usuario de la pantalla"
 echo "    sudo systemctl restart $SERVICIO    tras cambiar $ETC/servidor.json"

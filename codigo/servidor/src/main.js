@@ -4,7 +4,11 @@
 //   vigia-servidor [--config /etc/vigia/servidor.json]
 //   vigia-servidor --puertos        lista los nodos enchufados por USB
 //   vigia-servidor --version
+//   sudo vigia-servidor --clave NOMBRE   contraseña nueva para ese usuario (lo crea si no está); cierra sus sesiones
+//   sudo vigia-servidor --usuarios       los usuarios de la pantalla
+//   sudo vigia-servidor --codigo         el código para crear el primer usuario
 import fs from "node:fs";
+import path from "node:path";
 import { leerConfig, RUTA_CONFIG, ErrorConfig } from "./config.js";
 import { crearRegistro } from "./registro.js";
 import { listarPuertos, describirPuerto } from "./puertos.js";
@@ -43,6 +47,7 @@ try {
   console.error(`Configuración no válida: ${e instanceof ErrorConfig ? e.message : e.stack}`);
   process.exit(2);
 }
+if (args.includes("--clave") || args.includes("--usuarios") || args.includes("--codigo")) process.exit(await usuariosTerminal());
 const registro = crearRegistro({ nivel: config.registro });
 // Una promesa rechazada sin atender (suele ser de la librería, al cortarse el enlace) se apunta y se sigue.
 process.on("unhandledRejection", (e) => registro.error(`Error sin atender: ${e?.stack || e}`));
@@ -83,3 +88,70 @@ async function parar(senal) {
 }
 process.on("SIGTERM", () => parar("SIGTERM"));
 process.on("SIGINT", () => parar("SIGINT"));
+
+/* ── users, from the terminal (in Spanish until step 5, like the rest of what is written before starting) ── */
+
+/** A line typed without showing it (a password); from a pipe, the next line. */
+function leerOculto(pregunta, lineas) {
+  if (!process.stdin.isTTY) return lineas.next().then((r) => (r.done ? "" : r.value));
+  process.stdout.write(pregunta);
+  return new Promise((resolve) => {
+    const { stdin } = process;
+    let s = "";
+    const fin = (v) => { stdin.setRawMode(false); stdin.pause(); stdin.off("data", tecla); process.stdout.write("\n"); resolve(v); };
+    const tecla = (trozo) => {
+      for (const c of trozo) {
+        if (c === "\r" || c === "\n") return fin(s);
+        if (c === "\u0003") { process.stdout.write("\n"); process.exit(130); }
+        s = c === "\u007f" || c === "\b" ? [...s].slice(0, -1).join("") : s + c;
+      }
+    };
+    stdin.setRawMode(true);
+    stdin.setEncoding("utf8");
+    stdin.resume();
+    stdin.on("data", tecla);
+  });
+}
+
+async function usuariosTerminal() {
+  const ruta = path.join(config.datos, "vigia.db");
+  let almacen;
+  try {
+    fs.accessSync(config.datos, fs.constants.R_OK | fs.constants.W_OK);
+    almacen = (await import("./almacen.js")).abrirAlmacen(ruta);
+  } catch (e) {
+    console.error(`No se puede abrir ${ruta} (${e.code || e.message}). Prueba con sudo: sudo vigia-servidor ${args.join(" ")}`);
+    return 1;
+  }
+  const { crearUsuarios } = await import("./usuarios.js");
+  const usuarios = crearUsuarios({ almacen, datos: config.datos, codigoInicial: false });
+  try {
+    if (args.includes("--usuarios")) {
+      const lista = usuarios.lista();
+      if (!lista.length) console.log("No hay usuarios todavía. Crea el primero desde la pantalla (sudo vigia-servidor --codigo) o aquí: sudo vigia-servidor --clave NOMBRE");
+      const fecha = (t) => (t ? new Date(t).toLocaleString("es-ES") : "nunca");
+      for (const u of lista) console.log(`${u.nombre} · ${u.sesiones.length} sesiones abiertas · último uso: ${fecha(u.usado)}`);
+      return 0;
+    }
+    if (args.includes("--codigo")) {
+      if (usuarios.hay()) { console.log("Ya hay usuarios: no hace falta código. Para cambiar una contraseña: sudo vigia-servidor --clave NOMBRE"); return 0; }
+      let cod = null;
+      try { cod = fs.readFileSync(path.join(config.datos, "primer-usuario.txt"), "utf8").trim(); } catch { /* not made yet */ }
+      console.log(cod ? `Código para crear el primer usuario: ${cod}` : "Aún no hay código: arranca el servicio (sudo systemctl restart vigia-servidor) y vuelve a mirarlo.");
+      return 0;
+    }
+    const nombre = opcion("--clave");
+    if (!nombre || nombre.startsWith("--")) { console.error("Falta el nombre: sudo vigia-servidor --clave NOMBRE"); return 2; }
+    const { createInterface } = await import("node:readline");
+    const lineas = process.stdin.isTTY ? null : createInterface({ input: process.stdin })[Symbol.asyncIterator]();
+    const clave = await leerOculto(`Contraseña nueva para ${nombre}: `, lineas);
+    const otra = await leerOculto("Otra vez: ", lineas);
+    if (clave !== otra) { console.error("No coinciden. No se ha cambiado nada."); return 1; }
+    const r = await usuarios.ponerDesdeTerminal(nombre, clave);
+    if (!r.ok) { console.error(r.error); return 1; }
+    console.log(`Hecho: ${r.nombre} ya puede entrar con esa contraseña. Sus sesiones abiertas se han cerrado.`);
+    return 0;
+  } finally {
+    almacen.cerrar();
+  }
+}

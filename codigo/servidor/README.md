@@ -42,7 +42,8 @@ El instalador:
 - instala **Mosquitto** (el broker MQTT de casa) en el puerto 1883, **con usuario y contraseña**; los usuarios se
   crean desde la pantalla (ver *MQTT* más abajo). Si Mosquitto ya tenía su propia configuración, no la toca. Para no
   instalarlo: `--sin-mosquitto`;
-- deja el servicio `vigia-servidor` en marcha, y arranca solo al encender.
+- deja el servicio `vigia-servidor` en marcha, y arranca solo al encender;
+- si aún no hay usuarios de la pantalla, termina diciendo el **código para crear el primero** (ver *La pantalla*).
 
 Para **actualizar**, vuelve a ejecutar la misma orden: se queda con tu configuración y tus datos.
 
@@ -52,6 +53,9 @@ Para **actualizar**, vuelve a ejecutar la misma orden: se queda con tu configura
 journalctl -u vigia-servidor -f       lo que va pasando
 vigia-servidor --puertos              qué nodos hay enchufados por USB
 systemctl status vigia-servidor       si está en marcha
+sudo vigia-servidor --usuarios        los usuarios de la pantalla
+sudo vigia-servidor --clave NOMBRE    contraseña nueva para ese usuario (lo crea si no está)
+sudo vigia-servidor --codigo          el código para crear el primer usuario
 ```
 
 En el diario salen la conexión con el receptor, las alarmas, las resueltas, los fallos (con qué hacer) y un resumen
@@ -106,8 +110,17 @@ Al terminar, el instalador dice en qué direcciones abrirla, como `http://192.16
 Vigía, pero los datos y el receptor son los del servidor: todos tus aparatos ven lo mismo, y si das «Enterado» en uno,
 queda visto en todos. El sonido y la pantalla encendida son de cada aparato.
 
-- **Sin contraseña**: la protege la red de casa. Cualquiera conectado a tu WiFi puede abrirla, ver las posiciones de
-  los nodos y mandar mensajes por la malla con tu receptor.
+- **Con usuario y contraseña**, también en casa: sin entrar no se ve nada (ni nodos, ni posiciones, ni el
+  histórico) ni se puede mandar nada. La primera vez, la pantalla pide crear el primer usuario con un **código** que
+  dice el instalador al terminar (también está en el diario y con `sudo vigia-servidor --codigo`); así nadie de tu red
+  se adelanta. Después, cada aparato entra una vez y se recuerda **30 días desde la última vez que se usa** (una
+  pantalla que no se apaga no se cierra nunca).
+- **Usuarios** (*Ajustes → Usuarios*): todos pueden hacerlo todo, también añadir y quitar usuarios o ponerles una
+  contraseña nueva. Ahí se ve en qué aparatos está abierta cada sesión y se pueden cerrar. Nadie se puede quitar a sí
+  mismo, así que siempre queda alguien. El registro dice quién hizo cada cosa (*Vigilando Garaje · Ana*). Si olvidas
+  tu contraseña y no hay nadie más: `sudo vigia-servidor --clave TU_NOMBRE` en el equipo.
+- **Las contraseñas** van cifradas (scrypt) y nunca salen del servidor; al menos 10 caracteres, sin más reglas (una
+  frase sirve). Tras cinco intentos fallidos con un nombre, cada intento más espera el doble (hasta 15 min).
 - **Por http, el navegador no deja** instalarla como app ni mostrar notificaciones con la página cerrada. Eso llega
   con https (Tailscale). Mientras tanto, la página suena y avisa mientras está abierta.
 - **No conectes también el móvil por Bluetooth** al nodo del servidor: el nodo repartiría lo que recibe entre los dos.
@@ -134,10 +147,10 @@ puertos en el router: solo los aparatos de tu red de Tailscale llegan al servido
 
 Lo que hay que saber:
 
-- **Nada de Tailscale Funnel**: Funnel publica en internet, y Vigía no tiene contraseña. Si llega algo por Funnel,
-  Vigía lo rechaza y lo apunta en el diario. Usa `tailscale serve`, que solo es para tu red de Tailscale.
-- Cualquiera que esté en tu red de Tailscale puede abrir la pantalla y manejarla (mandar por la malla, encender y
-  apagar). Si compartes tu red de Tailscale con alguien, tenlo en cuenta.
+- **Nada de Tailscale Funnel**: Funnel publica en internet. Si llega algo por Funnel, Talaia lo rechaza y lo apunta
+  en el diario. Usa `tailscale serve`, que solo es para tu red de Tailscale.
+- Desde tu red de Tailscale se llega a la pantalla, pero hay que entrar con un usuario, como en casa. Con https, la
+  sesión solo viaja cifrada.
 - El certificado de https sale en los registros públicos de certificados: el nombre del equipo y de tu red de
   Tailscale se pueden ver (no se puede entrar con ellos).
 - Las notificaciones con la app cerrada (push) llegarán más adelante.
@@ -229,8 +242,8 @@ homeassistant/…/vigia_…/config   autodescubrimiento de Home Assistant (reten
 
 `<id>` es el número del nodo en hexadecimal, sin `!` (como `3c6e19a2`).
 
-**Sin contraseña en la pantalla**: cualquiera en tu WiFi puede cambiar a qué broker se conecta el servidor o apagar
-MQTT (no ver la contraseña guardada).
+Cualquier usuario de la pantalla puede cambiar a qué broker se conecta el servidor o apagar MQTT, pero no ver la
+contraseña guardada.
 
 ## Paneles y datos por MQTT
 
@@ -267,7 +280,7 @@ alarmas (también avisos por la malla) e histórico, como un nodo. Solo en el se
   `…/command/switch:0` con `on` y `off`, con *Enable MQTT Control* activado en el Shelly; Tasmota: `cmnd/…/POWER` con
   `ON` y `OFF`; zigbee2mqtt: `zigbee2mqtt/…/set` con `{"state":"ON"}`; ESPHome: `…/switch/…/command`); se puede
   cambiar. En la tarjeta, la ficha y la pantalla completa sale un interruptor: se pulsa y se manda, **sin
-  confirmación** y sin contraseña (cualquiera en la red de casa puede usarlo). Dice *Enviando…* hasta que el
+  confirmación** (cualquier usuario de la pantalla puede usarlo). Dice *Enviando…* hasta que el
   dispositivo cuenta por su tema de estado que lo ha hecho; si en 10 s no lo cuenta, *No ha contestado*. Cada orden
   queda en el registro. Home Assistant no recibe órdenes por `mqtt_statestream`.
 - **Los Shelly no guardan su estado en el broker**: al conectar con él (y al guardar los datos), Vigía les pide que lo

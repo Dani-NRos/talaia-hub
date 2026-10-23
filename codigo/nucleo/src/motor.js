@@ -438,7 +438,9 @@ export function crearMotor(S, g = {}) {
   // En el registro, las alarmas de datos MQTT llevan «mqtt» (solo con servidor: en la app no hay datos MQTT).
   const marcaMqtt = (al) => (esAlarmaMqtt(al) ? { mqtt: true } : null);
   function addLog(type, text, num, extra = null) {
-    S.log.unshift({ t: Date.now(), type, text, num: num ?? null, ...extra });
+    // Who did it (on the server, while an order from a screen runs): for what people do, not for alarms coming and going.
+    const by = type === "info" || type === "ack" ? S.actor : null;
+    S.log.unshift({ t: Date.now(), type, text, num: num ?? null, ...(by ? { by } : {}), ...extra });
     if (S.log.length > 300) S.log.length = 300;
     saveLog();
   }

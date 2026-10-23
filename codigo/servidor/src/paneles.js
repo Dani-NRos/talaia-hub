@@ -228,7 +228,7 @@ export function crearPaneles({ S, motor, eventos, almacen, registro, receptor, b
     if (o && !o.error && o.v === r.v) { // el dispositivo dice que lo ha hecho
       clearTimeout(o.timer);
       ordenes.delete(d.clave);
-      motor.addLog("info", tx("s.log.cmdDone", { panel: nombrePanel(num), datum: nombreDato(d), value: textoDato(d, r.v) }), num);
+      motor.addLog("info", tx("s.log.cmdDone", { panel: nombrePanel(num), datum: nombreDato(d), value: textoDato(d, r.v) }), num, o.by ? { by: o.by } : null);
       contar(); // a las pantallas ya, junto con el estado nuevo (sin el segundo de espera de los valores)
     } else if (o?.error) ordenes.delete(d.clave); // ya ha dicho algo: fuera el «no ha contestado»
   }
@@ -562,7 +562,7 @@ export function crearPaneles({ S, motor, eventos, almacen, registro, receptor, b
     },
     /**
      * Enciende (v = 1) o apaga (v = 0) un dato ON/OFF que tenga orden: publica su mensaje y espera a que su tema de
-     * estado diga que ha cambiado. Sin confirmación (decisión de Dani; sin usuarios por ahora).
+     * estado diga que ha cambiado. Sin confirmación (decisión de Dani): cualquier usuario puede.
      */
     async mandar(num, clave, v) {
       const d = panel(num)?.datos.find((x) => x.clave === clave);
@@ -575,7 +575,7 @@ export function crearPaneles({ S, motor, eventos, almacen, registro, receptor, b
       if (antes && !antes.error) return { ok: false, error: tx("s.pan.waitCmd") };
       // Pending before publishing: a device on the same broker can answer before the broker acknowledges (qos 1),
       // and its answer has to find the order waiting.
-      const o = { num, v, t: Date.now(), timer: null };
+      const o = { num, v, t: Date.now(), timer: null, by: S.actor || null }; // who sent it, for the log when it answers
       ordenes.set(clave, o);
       if (!(await con.publicar(d.orden.tema, v ? d.orden.on : d.orden.off, { qos: 1 }))) {
         if (ordenes.get(clave) === o) ordenes.delete(clave);
@@ -585,7 +585,7 @@ export function crearPaneles({ S, motor, eventos, almacen, registro, receptor, b
       o.timer = setTimeout(() => {
         if (ordenes.get(clave) !== o) return;
         ordenes.set(clave, { v, t: o.t, error: tx("s.pan.noAnswer") });
-        motor.addLog("info", tx("s.log.cmdNoAnswer", { panel: nombrePanel(num), datum: nombreDato(d), value: textoDato(d, v) }), num);
+        motor.addLog("info", tx("s.log.cmdNoAnswer", { panel: nombrePanel(num), datum: nombreDato(d), value: textoDato(d, v) }), num, o.by ? { by: o.by } : null);
         contar();
       }, ORDEN_MS);
       o.timer.unref?.();

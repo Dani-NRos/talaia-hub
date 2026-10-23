@@ -13,6 +13,7 @@ import { openFull, closeFull, refreshFull, setFullRange, resizeFull } from "./vi
 import { loraSf } from "@vigia/nucleo/route.js";
 import { FILTERS } from "./meshsearch.js";
 import { conectarServidor, crearStoreRemoto } from "./remoto.js";
+import { whoAmI, showGate } from "./views/signin.js";
 import { t as tr, getLang } from "./i18n.js";
 import { initShell, go, isView, setAlarms, relabel } from "./shell.js";
 import { initSettings, openSettings, enterSettings, renderSettings, patchSettings, patchMeshLast, pushDiag } from "./views/settings.js";
@@ -38,6 +39,8 @@ const S = {
   logExpanded: false,
   detail: null, // { num, range }
   servidorOk: false, // modo «Servidor»: hay conexión con él
+  me: null, // who this screen is signed in as: { nombre, sesion } (the start of its session's id)
+  usuarios: [], // the server's users and their sessions (Settings → Users)
 };
 let mapView = null; // se crea al abrir el mapa por primera vez
 
@@ -367,7 +370,7 @@ function aplicarPartes(p) {
     S.active = new Map(p.active.map((a) => [a.key, a]));
     if (prueba) S.active.set("test", prueba);
   }
-  for (const k of ["log", "channels", "myNode", "myUser", "lora", "traces", "meshLast", "link", "device", "trouble", "diag", "mqtt"]) if (k in p) S[k] = p[k];
+  for (const k of ["log", "channels", "myNode", "myUser", "lora", "traces", "meshLast", "link", "device", "trouble", "diag", "mqtt", "usuarios"]) if (k in p) S[k] = p[k];
   if ("paneles" in p) {
     S.paneles = p.paneles;
     registrarMetricas(metasDe(S.paneles?.paneles)); // los datos MQTT, como métricas con su nombre y su unidad
@@ -409,7 +412,16 @@ function leaveView(view) {
   if (view === "map") mapView?.leave();
 }
 
-function boot() {
+/** The session has ended (signed out here or elsewhere, the password changed, the user removed): back to signing in. */
+function salida(primero) {
+  for (const d of ["#detail", "#nodeview"]) if ($(d).open) $(d).close();
+  // Nothing of the server's stays to warn about: no alarm sound behind the sign-in, with no way to acknowledge it.
+  S.active = new Map();
+  setAlarms(0);
+  showGate(primero, { ended: true, onLang: () => { document.documentElement.lang = getLang(); } });
+}
+
+async function boot() {
   document.documentElement.lang = getLang();
   renderSoon();
   initAlerts();
@@ -427,7 +439,12 @@ function boot() {
   S.link = { state: "connecting", extra: null };
   watchCardsWidth();
   render();
+  // Who is this screen? Without a session, only the sign-in (there is nothing to see without one).
+  const yo = await whoAmI();
+  if (yo && !yo.ok) return showGate(yo.primero, { onLang: () => { document.documentElement.lang = getLang(); } });
+  if (yo?.ok) S.me = { nombre: yo.nombre, sesion: yo.sesion };
   servidor = conectarServidor({
+    onSalida: salida,
     onConexion(ok) {
       if (ok === S.servidorOk) return;
       S.servidorOk = ok;
@@ -436,6 +453,7 @@ function boot() {
       if (isView("settings")) renderSettings();
     },
     onEstado(foto) {
+      if (!S.me) whoAmI().then((r) => { if (r?.ok) { S.me = { nombre: r.nombre, sesion: r.sesion }; if (isView("settings")) renderSettings(); } });
       S.nodes = new Map(foto.nodes.map((n) => [n.num, n]));
       aplicarPartes({ ...foto, nodes: null });
       render();

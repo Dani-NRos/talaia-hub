@@ -71,6 +71,8 @@ self.addEventListener("fetch", (e) => {
     return;
   }
   if (url.origin !== self.location.origin) return;
+  // The server's API (state, readings, the session) is never kept: it is private and has to be the current one.
+  if (url.pathname.includes("/api/")) return;
   // App: primero la red (para coger actualizaciones), si no hay, la copia guardada.
   e.respondWith(fetch(req).then(async (res) => {
     if (res.ok) { const copy = res.clone(); caches.open(CACHE).then((c) => c.put(req, copy)); return res; }

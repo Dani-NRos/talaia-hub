@@ -4,11 +4,24 @@
 import { t } from "./i18n.js";
 
 /**
- * h: { onEstado(foto), onCambio(parche), onAlarma({ al, titulo, detalle }), onConexion(conectado) }
+ * h: { onEstado(foto), onCambio(parche), onAlarma({ al, titulo, detalle }), onConexion(conectado),
+ *      onSalida(primero) — the session has ended (or there is none): back to signing in }
  * Devuelve { orden(datos) → Promise<{ ok, toast?, error? }>, cerrar() }.
  */
 export function conectarServidor(h) {
   let es = null, otra = null, cerrada = false;
+  /** Without a session the server answers 401 and the browser gives up: is that it, or is the server away? */
+  async function sinSesion() {
+    try {
+      const r = await fetch("api/sesion", { cache: "no-store" });
+      if (r.status !== 401) return false;
+      const j = await r.json().catch(() => ({}));
+      cerrar();
+      h.onSalida?.(!!j.primero);
+      return true;
+    } catch { return false; }
+  }
+  function cerrar() { cerrada = true; clearTimeout(otra); es?.close(); }
   function abrir() {
     es = new EventSource("api/eventos");
     // EventSource vuelve a conectar solo (el servidor pide 3 s) y, al volver, llega otra vez la foto completa.
@@ -19,7 +32,10 @@ export function conectarServidor(h) {
       h.onConexion?.(false);
       // Si el navegador se rinde (le llega algo que no son eventos, como la página de error de un proxy mientras el
       // servidor arranca), no vuelve a intentarlo: se abre otra conexión.
-      if (es.readyState === EventSource.CLOSED && !cerrada) { clearTimeout(otra); otra = setTimeout(abrir, 3000); }
+      if (es.readyState === EventSource.CLOSED && !cerrada) {
+        clearTimeout(otra);
+        sinSesion().then((fuera) => { if (!fuera && !cerrada) otra = setTimeout(abrir, 3000); });
+      }
     });
   }
   abrir();
@@ -28,12 +44,15 @@ export function conectarServidor(h) {
     try {
       const r = await fetch("api/orden", { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify(datos) });
       const j = await r.json().catch(() => ({}));
+      if (r.status === 401) { sinSesion(); return { ok: false, error: t("gate.ended") }; }
       return { ok: false, ...j };
     } catch {
       return { ok: false, error: t("link.noServerOrder") };
     }
   }
-  return { orden, cerrar: () => { cerrada = true; clearTimeout(otra); es.close(); } };
+  // Every few hours, «still here»: a screen that never reloads (on a wall) keeps its 30 days of session counting.
+  const renovar = setInterval(() => { if (!cerrada) sinSesion(); }, 6 * 3600 * 1000);
+  return { orden, cerrar: () => { clearInterval(renovar); cerrar(); } };
 }
 
 /** Histórico guardado en el servidor, con la misma forma que el de la app (store.js). */

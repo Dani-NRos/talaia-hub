@@ -11,7 +11,7 @@ const REPO = fileURLToPath(new URL("..", import.meta.url)).replace(/\/$/, ""); /
 // Playwright no va en el repo: el que haya instalado (PLAYWRIGHT_DIR = carpeta node_modules que lo contiene).
 const PW_DIR = process.env.PLAYWRIGHT_DIR || "/opt/npm-tools/node_modules/";
 const pw = createRequire(PW_DIR)("playwright");
-const { NodoFalso, ME, CASETA, VECINO, PORT } = await import(`${REPO}/servidor/test/nodo-falso.mjs`);
+const { NodoFalso, ME, CASETA, VECINO, AVISADO, PORT } = await import(`${REPO}/servidor/test/nodo-falso.mjs`);
 const req = createRequire(`${REPO}/servidor/`);
 const { create, toBinary, fromBinary } = req("@bufbuild/protobuf");
 const { Protobuf } = await import(`${REPO}/node_modules/@meshtastic/core/dist/mod.js`);
@@ -94,6 +94,54 @@ const paso = async (que, f) => {
 const movil = await pantalla("móvil", { width: 400, height: 860 });
 const pc = await pantalla("pc", { width: 1200, height: 900 });
 
+// The script's own requests to the server go with a session (Dani's, once there is a Dani).
+let SESION = "";
+const api = (ruta, opts = {}) => fetch(`${URL0}${ruta}`, { ...opts, headers: { ...(opts.headers || {}), cookie: `talaia_sesion=${SESION}` } });
+async function entrarScript(nombre, clave) {
+  const r = await fetch(`${URL0}api/entrar`, { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ nombre, clave }) });
+  SESION = /talaia_sesion=([^;]+)/.exec(r.headers.get("set-cookie") || "")?.[1] || "";
+  if (!SESION) throw new Error(`no entra el script: ${r.status}`);
+}
+/** Fills in the sign-in of a screen and waits for the page to come back signed in. */
+async function entrarPantalla(page, nombre, clave) {
+  await page.fill("#gName", nombre);
+  await page.fill("#gPass", clave);
+  await Promise.all([page.waitForNavigation(), page.click(".gate-go")]);
+  await esperarTexto(page, /DNN5 conectado/, `${nombre} dentro`);
+}
+
+await paso("sin usuarios: el PC crea el primero con el código; el móvil entra con usuario y contraseña", async () => {
+  await esperarTexto(pc, /Crea el primer usuario/, "pantalla del primer usuario (PC)");
+  await esperarTexto(movil, /Crea el primer usuario/, "pantalla del primer usuario (móvil)");
+  if ((await api("api/estado")).status !== 401) throw new Error("/api/estado sin sesión no da 401");
+  const codigo = fs.readFileSync(path.join(datos, "primer-usuario.txt"), "utf8").trim();
+  if (!/Código para crear el primer usuario|crea el primero con este código/.test(serverLog) || !serverLog.includes(codigo)) throw new Error("el diario no dice el código");
+  await pc.fill("#gCode", "AAAA-BBBB");
+  await pc.fill("#gName", "Dani");
+  await pc.fill("#gPass", "clave-de-dani-1");
+  await pc.fill("#gPass2", "clave-de-dani-1");
+  await pc.click(".gate-go");
+  await esperarTexto(pc, /El código no es ese/, "código malo");
+  await pc.fill("#gCode", codigo.toLowerCase());
+  await Promise.all([pc.waitForNavigation(), pc.click(".gate-go")]);
+  await esperarTexto(pc, /DNN5 conectado/, "el PC dentro");
+  if (fs.existsSync(path.join(datos, "primer-usuario.txt"))) throw new Error("el código sigue en su fichero");
+  // The phone was showing «make the first one»: someone made it meanwhile, so it asks to sign in.
+  await movil.fill("#gCode", codigo);
+  await movil.fill("#gName", "Otro");
+  await movil.fill("#gPass", "clave-de-otro-1");
+  await movil.fill("#gPass2", "clave-de-otro-1");
+  await movil.click(".gate-go");
+  await esperarTexto(movil, /Entra en Talaia[\s\S]*Ya hay usuarios/, "el móvil pasa a «Entra»");
+  await movil.fill("#gName", "dani");
+  await movil.fill("#gPass", "mala-mala-mala");
+  await movil.click(".gate-go");
+  await esperarTexto(movil, /Usuario o contraseña incorrectos/, "contraseña mala");
+  await entrarPantalla(movil, "dani", "clave-de-dani-1");
+  await entrarScript("Dani", "clave-de-dani-1");
+});
+await foto(pc, "pc-dentro");
+
 await paso("las dos pantallas ven el receptor conectado", async () => {
   await esperarTexto(movil, /DNN5 conectado/, "DNN5 conectado (móvil)");
   await esperarTexto(pc, /DNN5 conectado/, "DNN5 conectado (pc)");
@@ -119,7 +167,7 @@ await paso("límite de temperatura desde el móvil", async () => {
   await sleep(300);
   await movil.keyboard.press("Escape");
   await sleep(500);
-  const cfg = (await (await fetch(`${URL0}api/estado`)).json()).cfg;
+  const cfg = (await (await api("api/estado")).json()).cfg;
   if (cfg.watched[CASETA]?.rules?.temperature?.max !== 30) throw new Error(`cfg: ${JSON.stringify(cfg.watched[CASETA])}`);
 });
 
@@ -138,7 +186,7 @@ await paso("Enterado en el PC queda visto en el móvil", async () => {
   const resp = await r;
   log("   respuesta:", resp.status(), await resp.text());
   await sleep(600);
-  log("   en el servidor:", JSON.stringify((await (await fetch(`${URL0}api/estado`)).json()).active.map((a) => [a.key, a.acked])));
+  log("   en el servidor:", JSON.stringify((await (await api("api/estado")).json()).active.map((a) => [a.key, a.acked])));
   await esperarTexto(movil, /alarma vista, sigue activa/i, "Visto en el móvil");
 });
 
@@ -235,7 +283,7 @@ await paso("MQTT desde Ajustes: añadir el broker de Home Assistant (con contras
   await esperarMqtt(() => visto.get(`homeassistant/sensor/vigia_${ID}/temperature/config`), "sensor de temperatura");
   const cfg = JSON.parse(visto.get(`homeassistant/sensor/vigia_${ID}/temperature/config`));
   if (cfg.device.name !== "Talaia · Caseta huerto") throw new Error(`nombre del dispositivo: ${cfg.device.name}`);
-  if (/clave-secreta/.test(await (await fetch(`${URL0}api/estado`)).text())) throw new Error("la contraseña sale en /api/estado");
+  if (/clave-secreta/.test(await (await api("api/estado")).text())) throw new Error("la contraseña sale en /api/estado");
 });
 
 await paso("broker de este servidor: un usuario creado desde Ajustes deja entrar a un Shelly; la contraseña mal, no", async () => {
@@ -274,7 +322,7 @@ await paso("Enterado desde Home Assistant queda visto en las pantallas", async (
   await ha.publishAsync(`vigia/nodo/${ID}/enterado`, "temperature_alta");
   await esperarTexto(movil, /alarma vista, sigue activa/i, "vista en el móvil");
   await esperarMqtt(() => JSON.parse(visto.get(`vigia/nodo/${ID}/estado`) || "{}").d?.temperature_alta?.visto === true, "vista en HA");
-  const act = (await (await fetch(`${URL0}api/estado`)).json()).active;
+  const act = (await (await api("api/estado")).json()).active;
   if (!act.some((a) => a.acked)) throw new Error(`en el servidor: ${JSON.stringify(act.map((a) => [a.key, a.acked]))}`);
 });
 
@@ -288,7 +336,7 @@ for (const [x, v, u] of [["temperature", "19.6", "°C"], ["humidity", "64", "%"]
 await ha.publishAsync("zigbee2mqtt/Salón", JSON.stringify({ temperature: 22.1, battery: 90 }), { retain: true });
 await ha.publishAsync("tele/enchufe/SENSOR", JSON.stringify({ Time: "2026-10-21T10:00:00", ENERGY: { Total: 12.5, Power: 45, Voltage: 231 } }), { retain: true });
 const fila = (page, i, k) => page.locator(`#datLista .est-d:nth-child(${i + 1}) [data-dat-k="${k}"]`);
-const estado = async () => (await fetch(`${URL0}api/estado`)).json();
+const estado = async () => (await api("api/estado")).json();
 const usarEn = (page) => async (tema, campo = "") => {
   await page.locator(`#datHallados li:has(.est-ht[title="${campo ? `${tema} · ${campo}` : tema}"]) [data-dat-usar]`).click();
   await sleep(150);
@@ -528,7 +576,7 @@ await paso("encender y apagar un Shelly desde la tarjeta del móvil: propone el 
 });
 
 await paso("gráfica: serie desde el servidor", async () => {
-  const r = await (await fetch(`${URL0}api/serie?nodo=${CASETA}&metrica=temperature&desde=0`)).json();
+  const r = await (await api(`api/serie?nodo=${CASETA}&metrica=temperature&desde=0`)).json();
   if (r.length < 4) throw new Error(`serie con ${r.length} puntos`);
 });
 
@@ -573,6 +621,40 @@ await paso("idioma del servidor: en inglés para Home Assistant y lo que contest
   await ir(pc, "dashboard");
   await ir(movil, "dashboard");
 });
+await paso("usuarios: el PC añade a Ana y cierra la sesión del móvil; el móvil entra como Ana y lo que hace lleva su nombre", async () => {
+  await ir(pc, "settings/users");
+  await esperarTexto(pc, /Tu cuenta[\s\S]*Has entrado como Dani/, "su cuenta");
+  await esperarTexto(pc, /Tus otros aparatos[\s\S]*Chrome · Linux/, "el móvil entre sus otros aparatos");
+  await pc.fill("#uAddName", "Ana");
+  await pc.fill("#uAdd1", "clave-de-ana-12");
+  await pc.fill("#uAdd2", "clave-de-ana-1");
+  await pc.click("[data-user-add]");
+  await esperarTexto(pc, /no coinciden/, "contraseñas distintas");
+  await pc.fill("#uAdd2", "clave-de-ana-12");
+  await pc.click("[data-user-add]");
+  await esperarTexto(pc, /Usuario «Ana» creado/, "Ana creada");
+  await esperarTexto(pc, /Ana[\s\S]*aún no ha entrado/, "Ana en la lista");
+  await foto(pc, "pc-usuarios");
+  await pc.locator("li", { hasText: "Chrome · Linux" }).locator("[data-ses-close]").first().click();
+  await esperarTexto(movil, /Tu sesión se ha cerrado/, "el móvil vuelve a «Entra»", 15000);
+  await entrarPantalla(movil, "Ana", "clave-de-ana-12");
+  await ir(movil, "nodes");
+  await movil.click(`[data-watch="${AVISADO}"]`);
+  await ir(pc, "alarms");
+  await esperarTexto(pc, /Ana ha entrado[\s\S]*/, "Ana ha entrado, en el registro");
+  await esperarTexto(pc, /Vigilando Garaje · Ana/, "lo que hace Ana lleva su nombre");
+  await esperarTexto(pc, /Usuario nuevo: Ana · Dani/, "y lo que hace Dani, el suyo");
+  await ir(pc, "dashboard");
+});
+await paso("cerrar sesión en el móvil: vuelve a pedir entrar, y sin sesión no se ve nada", async () => {
+  await ir(movil, "settings/users");
+  await esperarTexto(movil, /Has entrado como Ana/, "la cuenta de Ana");
+  await Promise.all([movil.waitForNavigation(), movil.click("[data-sign-out]")]);
+  await esperarTexto(movil, /Entra en Talaia/, "«Entra» en el móvil");
+  const t = await texto(movil);
+  if (/Garaje|Caseta|Huerto/.test(t)) throw new Error("sin sesión se ve algo de la malla");
+});
+await foto(movil, "movil-sin-sesion");
 await paso("al pararse avisa a Home Assistant (offline) y al volver se conecta solo (online)", async () => {
   await esperarMqtt(() => estados.lastIndexOf("offline") >= 0 && estados.lastIndexOf("online") > estados.lastIndexOf("offline"), "offline y luego online", 15000);
 });

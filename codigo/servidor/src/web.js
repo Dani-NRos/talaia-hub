@@ -6,15 +6,19 @@
 //   POST /api/orden            lo que se pulsa en una pantalla: { orden, … } → { ok, toast?, error? }
 //   GET  /api/serie?nodo=&metrica=&desde=&hasta=    lecturas de un sensor
 //   GET  /api/lecturas.csv     todo el histórico, para la hoja de cálculo
-//   GET  /api/salud            si está vivo y conectado (para vigilar el propio servidor)
+//   GET  /api/salud            si está vivo y conectado (para vigilar el propio servidor; sin entrar, solo eso)
+//   GET  /api/sesion           who this screen is signed in as (401 if nobody; it says if the first user is missing)
+//   POST /api/entrar           sign in { nombre, clave }: the session goes in an HttpOnly cookie
+//   POST /api/primero          the first user { codigo, nombre, clave }, with the code from the journal/installer
+//   POST /api/salir            sign out
 //
-// Sin contraseña (la red de casa es la protección), pero sin dejar que una web ajena mande órdenes desde el
-// navegador de quien la visita: las órdenes solo se aceptan en JSON y desde la propia página, y no se atienden
-// nombres de dominio públicos (lo que usan los ataques de «DNS rebinding» contra aparatos de la red local).
+// Everything but the app's files, /api/salud and signing in needs a session (usuarios.js), also at home. And a page
+// from elsewhere can't send orders from the browser of whoever visits it: POSTs are only taken as JSON and from this
+// same page, and public domain names are not served (what "DNS rebinding" attacks against home devices use).
 //
 // Desde fuera de casa, por Tailscale: directamente (http://100.x.y.z:4404, http://bmax:4404) o con «tailscale serve»
 // (https://bmax.<red>.ts.net), que deja el nombre tal cual (Host) y así valen las mismas comprobaciones. Lo que llega
-// por Tailscale Funnel (abierto a internet) se rechaza: sin contraseña, Vigía no puede estar en internet.
+// por Tailscale Funnel (abierto a internet) se rechaza.
 import http from "node:http";
 import net from "node:net";
 import os from "node:os";
@@ -24,6 +28,7 @@ import { esClaveMqtt } from "@vigia/nucleo/mqtt-datos.js";
 import { ASK_ALL } from "@vigia/nucleo/motor.js";
 import { metricMeta } from "@vigia/nucleo/metrics.js";
 import { crearSincro, instantanea } from "./sincro.js";
+import { aparatoDe, llaveDe, SESION_MS } from "./usuarios.js";
 import { tx, getLanguage } from "@vigia/nucleo/idioma.js";
 import "./textos.js";
 
@@ -32,6 +37,7 @@ const TIPOS = { ".html": "text/html; charset=utf-8", ".js": "text/javascript; ch
 const DOMINIOS_CASA = /\.(local|lan|home|internal|home\.arpa|ts\.net)$/;
 const MAX_CUERPO = 16 * 1024;
 const CSV_BLOQUE = 5000; // filas por bloque al exportar el histórico
+const COOKIE = "talaia_sesion";
 
 export class ErrorOrden extends Error {}
 
@@ -141,6 +147,20 @@ function crearOrdenes(vigia) {
     },
     buscarTemas: () => vigia.paneles.buscarTemas(),
     enviarMalla: () => vigia.paneles.enviarAhora(),
+
+    /* ── users: everyone can do everything (one kind of user) ── */
+    crearUsuario: ({ nombre, clave }, quien) => { exigir(typeof nombre === "string" && typeof clave === "string", "usuario"); return vigia.usuarios.crear(nombre, clave, { por: quien.nombre }); },
+    claveUsuario: ({ nombre, clave, actual }, quien) => {
+      exigir(typeof nombre === "string" && typeof clave === "string", "usuario"); exigir(actual == null || typeof actual === "string", "actual");
+      const propia = llaveDe(nombre) === quien.llave; // one's own needs the current one; it keeps this session
+      return vigia.usuarios.cambiarClave(nombre, clave, { actual, propia, menos: propia ? quien.id : null, por: quien.nombre });
+    },
+    quitarUsuario: ({ nombre }, quien) => { exigir(typeof nombre === "string", "nombre"); return vigia.usuarios.quitar(nombre, { yo: quien.llave, por: quien.nombre }); },
+    cerrarSesiones: ({ nombre }, quien) => {
+      exigir(typeof nombre === "string", "nombre");
+      return vigia.usuarios.cerrarSesiones(nombre, { menos: llaveDe(nombre) === quien.llave ? quien.id : null });
+    },
+    cerrarSesion: ({ id }) => { exigir(typeof id === "string", "id"); return vigia.usuarios.cerrarUna(id); },
   };
 }
 
@@ -161,14 +181,20 @@ export function crearWeb(vigia, config, registro, opts = {}) {
   const appDir = opts.appDir || config.web.app || path.resolve(path.dirname(new URL(import.meta.url).pathname), "../../dist/app");
   const nombres = new Set((config.web.nombres || []).map((n) => String(n).toLowerCase()));
   const ordenes = crearOrdenes(vigia);
-  const clientes = new Set();
+  const { usuarios } = vigia;
+  const clientes = new Map(); // open screens (server-sent events) → their session
   let avisadoFunnel = false;
 
   /* ── eventos a las pantallas ── */
   const emitir = (tipo, datos) => {
     const msg = `event: ${tipo}\ndata: ${JSON.stringify(datos)}\n\n`;
-    for (const res of clientes) res.write(msg);
+    for (const res of clientes.keys()) res.write(msg);
   };
+  /** Screens whose session has ended stop getting anything: they go back to signing in. */
+  function cortar(ids) {
+    const fuera = new Set(ids);
+    for (const [res, id] of clientes) if (fuera.has(id)) { clientes.delete(res); res.end(); }
+  }
   const sincro = crearSincro(S, (p) => emitir("cambio", p));
   const escuchas = {
     cambio: () => { sincro.marcar("link"); sincro.marcar("device"); sincro.marcar("trouble"); sincro.marcar("myUser"); },
@@ -179,11 +205,17 @@ export function crearWeb(vigia, config, registro, opts = {}) {
     registro: () => sincro.marcar("log"),
     diag: () => sincro.marcar("diag"),
     filas: (rows) => sincro.filas(rows),
+    sesionesCerradas: (ids) => cortar(ids),
     alarma: (al) => emitir("alarma", { al, titulo: vigia.motor.alarmTitle(al), detalle: vigia.motor.alarmDetail(al) }),
   };
   for (const [ev, f] of Object.entries(escuchas)) eventos.on(ev, f);
-  // Cada 25 s algo por cada conexión abierta: los intermediarios no la cortan y se nota si la pantalla se fue.
-  const latido = setInterval(() => { for (const res of clientes) res.write(": vivo\n\n"); }, 25000);
+  // Cada 25 s algo por cada conexión abierta: los intermediarios no la cortan y se nota si la pantalla se fue. And
+  // each open screen's session is looked at again: still there (ended from the terminal?) and in use (renewed).
+  const latido = setInterval(() => {
+    for (const [res, id] of clientes) {
+      if (!usuarios.sigue(id)) { clientes.delete(res); res.end(); } else res.write(": vivo\n\n");
+    }
+  }, 25000);
 
   /* ── comprobaciones ── */
   function hostValido(host) {
@@ -199,6 +231,18 @@ export function crearWeb(vigia, config, registro, opts = {}) {
     try { return new URL(o).host === req.headers.host; } catch { return false; }
   }
 
+  /* ── sessions: a cookie only the browser keeps (the page's code can't read it) ── */
+  function token(req) {
+    const m = /(?:^|;\s*)talaia_sesion=([^;]*)/.exec(req.headers.cookie || "");
+    return m ? m[1] : null;
+  }
+  const sesionDe = (req) => usuarios.sesion(token(req));
+  // Over https (tailscale serve) the cookie only travels encrypted; over plain http at home it couldn't be set so.
+  const seguro = (req) => /\.ts\.net(:\d+)?$/i.test(req.headers.host || "") || req.headers["x-forwarded-proto"] === "https";
+  const galleta = (req, res, valor, s) =>
+    res.setHeader("set-cookie", `${COOKIE}=${valor}; Path=/; HttpOnly; SameSite=Lax; Max-Age=${s}${seguro(req) ? "; Secure" : ""}`);
+  const renovar = (req, res) => galleta(req, res, token(req), Math.floor(SESION_MS / 1000)); // 30 days more from now
+
   const json = (res, code, datos) => {
     res.writeHead(code, { "content-type": "application/json; charset=utf-8", "cache-control": "no-store" });
     res.end(JSON.stringify(datos));
@@ -211,20 +255,56 @@ export function crearWeb(vigia, config, registro, opts = {}) {
     req.on("error", reject);
   });
 
-  /* ── rutas ── */
-  async function orden(req, res) {
+  /** The body of a POST from this same page, as JSON; null if it was refused (the answer is already sent). */
+  async function cuerpoDe(req, res) {
+    if (!mismoOrigen(req)) { json(res, 403, { ok: false, error: tx("s.web.otherPage") }); return null; }
+    if (!/^application\/json\b/i.test(req.headers["content-type"] || "")) { json(res, 415, { ok: false, error: tx("s.web.json") }); return null; }
+    try {
+      const c = JSON.parse(await leerCuerpo(req));
+      if (c && typeof c === "object" && !Array.isArray(c)) return c;
+    } catch (e) {
+      if (e instanceof ErrorOrden) { json(res, 400, { ok: false, error: e.message }); return null; }
+    }
+    json(res, 400, { ok: false, error: "JSON no válido" });
+    return null;
+  }
+
+  /* ── signing in and out ── */
+  async function entrar(req, res, primero) {
+    const c = await cuerpoDe(req, res);
+    if (!c) return;
+    const aparato = aparatoDe(req.headers["user-agent"]);
+    const r = primero
+      ? await usuarios.primero(String(c.codigo ?? ""), c.nombre, c.clave, { aparato })
+      : await usuarios.entrar(c.nombre, c.clave, { aparato });
+    if (!r.ok) return json(res, r.espera ? 429 : primero && usuarios.hay() ? 409 : 401, { ok: false, error: r.error, espera: r.espera });
+    galleta(req, res, r.token, Math.floor(SESION_MS / 1000));
+    json(res, 200, { ok: true, nombre: r.nombre });
+  }
+  async function salir(req, res) {
     if (!mismoOrigen(req)) return json(res, 403, { ok: false, error: tx("s.web.otherPage") });
-    if (!/^application\/json\b/i.test(req.headers["content-type"] || "")) return json(res, 415, { ok: false, error: tx("s.web.json") });
-    let cuerpo;
-    try { cuerpo = JSON.parse(await leerCuerpo(req)); } catch (e) { return json(res, 400, { ok: false, error: e instanceof ErrorOrden ? e.message : "JSON no válido" }); }
-    const f = ordenes[cuerpo?.orden];
+    const s = sesionDe(req);
+    if (s) usuarios.salir(s.id);
+    galleta(req, res, "", 0);
+    json(res, 200, { ok: true });
+  }
+
+  /* ── rutas ── */
+  async function orden(req, res, quien) {
+    const cuerpo = await cuerpoDe(req, res);
+    if (!cuerpo) return;
+    const f = Object.hasOwn(ordenes, cuerpo.orden) ? ordenes[cuerpo.orden] : null;
     if (!f) return json(res, 400, { ok: false, error: tx("s.web.unknownOrder", { what: cuerpo?.orden }) });
     // Los avisos cortos del motor durante la orden (p. ej. «espera 20 s») vuelven a quien la mandó.
     const avisos = [];
     const oir = (m) => avisos.push(m);
     eventos.on("toast", oir);
     try {
-      const r = await f(cuerpo);
+      // Who did it goes with what it writes in the log: only while the order itself runs, not while it waits.
+      S.actor = quien.nombre;
+      let p;
+      try { p = f(cuerpo, quien); } finally { S.actor = null; }
+      const r = await p;
       sincro.vaciar(); // que las pantallas vean el cambio ya, antes de la respuesta
       json(res, 200, { ok: !!r?.ok, toast: r?.toast || avisos[0], error: r?.error, ...(r?.radio != null ? { radio: r.radio } : {}), ...(r?.valor != null ? { valor: r.valor } : {}), ...(r?.temas ? { temas: r.temas } : {}), ...(r?.num != null ? { num: r.num } : {}) });
     } catch (e) {
@@ -236,11 +316,11 @@ export function crearWeb(vigia, config, registro, opts = {}) {
     }
   }
 
-  function eventosSse(req, res) {
+  function eventosSse(req, res, quien) {
     res.writeHead(200, { "content-type": "text/event-stream; charset=utf-8", "cache-control": "no-store", connection: "keep-alive", "x-accel-buffering": "no" });
     res.write("retry: 3000\n\n");
     res.write(`event: estado\ndata: ${JSON.stringify(instantanea(S))}\n\n`);
-    clientes.add(res);
+    clientes.set(res, quien.id);
     req.on("close", () => clientes.delete(res));
   }
 
@@ -319,15 +399,31 @@ export function crearWeb(vigia, config, registro, opts = {}) {
       if (!hostValido(req.headers.host)) return json(res, 421, { error: tx("s.web.host") });
       const url = new URL(req.url, "http://x");
       const p = url.pathname;
-      if (req.method === "POST" && p === "/api/orden") return await orden(req, res);
+      if (req.method === "POST" && p === "/api/entrar") return await entrar(req, res, false);
+      if (req.method === "POST" && p === "/api/primero") return await entrar(req, res, true);
+      if (req.method === "POST" && p === "/api/salir") return await salir(req, res);
+      if (!p.startsWith("/api/")) {
+        if (req.method !== "GET" && req.method !== "HEAD") return json(res, 405, { error: tx("s.web.method") });
+        return estatico(url, res); // the app itself: anyone, so it can show how to sign in
+      }
+      const quien = sesionDe(req);
+      if (p === "/api/salud" && req.method === "GET") {
+        if (!quien) return json(res, 200, { ok: true, receptor: S.link.state }); // alive, and nothing else
+        return json(res, 200, { ok: true, receptor: S.link.state, nodos: S.nodes.size, alarmas: S.active.size, lecturas: await S.store.count() });
+      }
+      if (p === "/api/sesion" && req.method === "GET") {
+        if (!quien) return json(res, 401, { ok: false, primero: !usuarios.hay() });
+        renovar(req, res);
+        return json(res, 200, { ok: true, nombre: quien.nombre, sesion: quien.id.slice(0, 12) });
+      }
+      if (!quien) return json(res, 401, { ok: false, entrar: true, primero: !usuarios.hay(), error: tx("s.web.signIn") });
+      if (req.method === "POST" && p === "/api/orden") return await orden(req, res, quien);
       if (req.method !== "GET" && req.method !== "HEAD") return json(res, 405, { error: tx("s.web.method") });
-      if (p === "/api/eventos") return eventosSse(req, res);
+      if (p === "/api/eventos") { renovar(req, res); return eventosSse(req, res, quien); }
       if (p === "/api/estado") return json(res, 200, instantanea(S));
       if (p === "/api/serie") return await serie(url, res);
       if (p === "/api/lecturas.csv") return await csv(req, res);
-      if (p === "/api/salud") return json(res, 200, { ok: true, receptor: S.link.state, nodos: S.nodes.size, alarmas: S.active.size, lecturas: await S.store.count() });
-      if (p.startsWith("/api/")) return json(res, 404, { error: tx("s.web.notFound") });
-      return estatico(url, res);
+      return json(res, 404, { error: tx("s.web.notFound") });
     } catch (e) {
       registro.error(`Web: ${e.stack || e}`);
       if (!res.headersSent) json(res, 500, { error: tx("s.web.fail") });
@@ -348,7 +444,7 @@ export function crearWeb(vigia, config, registro, opts = {}) {
       clearInterval(latido);
       sincro.parar();
       for (const [ev, f] of Object.entries(escuchas)) eventos.off(ev, f);
-      for (const res of clientes) res.end();
+      for (const res of clientes.keys()) res.end();
       clientes.clear();
       const cerrado = new Promise((r) => servidor.close(() => r()));
       // Sin esperar a las conexiones que quedan abiertas (las de las pantallas, de «keep-alive»): se para ya.

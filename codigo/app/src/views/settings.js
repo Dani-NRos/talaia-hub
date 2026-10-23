@@ -1,14 +1,15 @@
-// Settings, in five parts, each at its own address (#/settings/mesh…): the mesh (no-signal minutes for new nodes,
+// Settings, in six parts, each at its own address (#/settings/mesh…): the mesh (no-signal minutes for new nodes,
 // alerts over the mesh), MQTT (brokers, users of this server's broker, Home Assistant), the receiver (connection,
-// radio, channels, diagnostics), the system (history, about) and this screen (language, theme, sound,
-// notifications, keeping the screen on, the map saved for offline use). This screen's part belongs to each device;
-// the rest is the server's, the same on every screen.
+// radio, channels, diagnostics), the system (server language, history, about), users (views/users.js) and this
+// screen (language, theme, sound, notifications, keeping the screen on, the map saved for offline use). This
+// screen's part belongs to each device; the rest is the server's, the same on every screen.
 import { ctx } from "../ctx.js";
 import { t, getLang, setLang, locale, LANGS } from "../i18n.js";
 import { $, esc, parseNum } from "../ui.js";
 import { go, getTheme, setTheme } from "../shell.js";
 import { displayName } from "./dashboard.js";
 import { brokerLabel } from "./panel-config.js";
+import { usersTab, usersClick } from "./users.js";
 import { unlockAudio, beep, applyWake, notificationState } from "../alerts.js";
 import { channelWhy } from "@vigia/nucleo/canales.js";
 import { hexId, MESH_HOURLY } from "@vigia/nucleo/motor.js";
@@ -21,7 +22,7 @@ const REPO_URL = "https://github.com/Dani-NRos/talaia-hub";
 const ISSUES_URL = `${REPO_URL}/issues`;
 export const TILE_CACHE = "teselas-osm"; // the same name as in sw.js
 
-export const TABS = ["mesh", "mqtt", "receiver", "system", "screen"];
+export const TABS = ["mesh", "mqtt", "receiver", "system", "users", "screen"];
 const TAB_KEY = "talaia.settingsTab";
 let tab = null;
 let hooks = { languageChanged() {}, saveDeviceSettings() {} };
@@ -59,7 +60,7 @@ export function enterSettings(sub) {
 export function renderSettings() {
   if (!tab) return;
   const tabs = TABS.map((k) => `<a href="#/settings/${k}" class="tab"${k === tab ? ' aria-current="page"' : ""}>${esc(t(`set.tab.${k}`))}</a>`).join("");
-  const body = { mesh: meshTab, mqtt: mqttTab, receiver: receiverTab, system: systemTab, screen: screenTab }[tab]();
+  const body = { mesh: meshTab, mqtt: mqttTab, receiver: receiverTab, system: systemTab, users: usersTab, screen: screenTab }[tab]();
   box().innerHTML = `<nav class="tabs" aria-label="${esc(t("set.tabs"))}">${tabs}</nav><div class="tab-b" data-tab="${tab}">${body}</div>`;
   // On a phone not all the tabs fit: the row slides so the current one shows (without moving the page).
   const nav = box().querySelector(".tabs"), cur = nav.querySelector("[aria-current]");
@@ -78,6 +79,7 @@ export function patchSettings(p) {
     mqtt: [],
     receiver: ["link", "trouble", "device", "lora", "channels", "myNode", "myUser"],
     system: ["settings"],
+    users: ["usuarios"],
     screen: [],
   }[tab];
   if (redraw.some((k) => k in p) && !typingIn("#settings")) renderSettings();
@@ -431,6 +433,7 @@ async function onClick(ev) {
   if (!b) return;
   const ds = b.dataset;
   const { orden, toast } = ctx;
+  if (tab === "users" && (await usersClick(b, renderSettings))) return;
   if ("brkNuevo" in ds) { brokerEdit = { id: null, nombre: "", url: "", usuario: "", clave: "", activado: true }; renderMqtt(); return $("#brkNombre")?.focus(); }
   if ("brkEdit" in ds) { const x = brokers().find((y) => y.id === ds.brkEdit); if (x) brokerEdit = { id: x.id, nombre: x.nombre, url: x.url, usuario: x.usuario, clave: "", activado: x.activado }; return renderMqtt(); }
   if ("brkCancel" in ds) { brokerEdit = null; return renderMqtt(); }

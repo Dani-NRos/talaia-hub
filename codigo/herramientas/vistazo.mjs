@@ -2,7 +2,8 @@
 // (a watched sensor with an alarm, the receiver, a neighbour). To review the design, not to test behaviour.
 // Usage: npm run build && node herramientas/vistazo.mjs <output folder> [views…] [--en]
 // Views: the sections (Settings, each of its parts), and also "sheet" (the sensor's sheet, whole), "receiver" (the
-// receiver's sheet, with what it sends to the mesh) and "full" (the sensor full screen).
+// receiver's sheet, with what it sends to the mesh), "full" (the sensor full screen) and "signin" (making the first
+// user, and signing in).
 import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
@@ -15,7 +16,7 @@ const pw = createRequire(process.env.PLAYWRIGHT_DIR || "/opt/npm-tools/node_modu
 const { NodoFalso, ME, CASETA, AVISADO } = await import(`${REPO}/servidor/test/nodo-falso.mjs`);
 
 const args = process.argv.slice(2);
-const ALL = ["dashboard", "alarms", "nodes", "map", "automations", "settings", "sheet", "receiver", "full"];
+const ALL = ["dashboard", "alarms", "nodes", "map", "automations", "settings", "sheet", "receiver", "full", "signin"];
 const out = args.find((a) => !a.startsWith("--") && !ALL.includes(a)) || "vistazo";
 const views = args.filter((a) => ALL.includes(a));
 const VIEWS = views.length ? views : ALL;
@@ -33,7 +34,28 @@ fs.writeFileSync(cfgFile, JSON.stringify({ receptor: { tipo: "tcp", host: "127.0
 const srv = spawn(process.execPath, [`${REPO}/servidor/src/main.js`, "--config", cfgFile], { env: { ...process.env, TZ: "Europe/Madrid" }, stdio: "ignore" });
 const URL0 = `http://127.0.0.1:${WEB}/`;
 for (let i = 0; i < 100; i++) { try { if ((await (await fetch(`${URL0}api/salud`)).json()).receptor === "ready") break; } catch { /* not yet */ } await sleep(100); }
-const orden = (o) => fetch(`${URL0}api/orden`, { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify(o) }).then((r) => r.json());
+const browser = await pw.chromium.launch();
+const SIZES = { pc: { width: 1280, height: 820 }, movil: { width: 390, height: 844 } };
+const opciones = (size, scheme) => ({ viewport: SIZES[size], colorScheme: scheme, locale: lang === "en" ? "en-GB" : "es-ES", timezoneId: "Europe/Madrid", deviceScaleFactor: size === "movil" ? 2 : 1 });
+// Before there are users: the screen that makes the first one.
+if (VIEWS.includes("signin")) {
+  for (const size of Object.keys(SIZES)) {
+    const c = await browser.newContext(opciones(size, "light"));
+    await c.addInitScript((l) => { try { localStorage.setItem("talaia.lang", l); } catch { /* none */ } }, lang);
+    const p = await c.newPage();
+    await p.goto(URL0);
+    await sleep(700);
+    await p.screenshot({ path: path.join(out, `${size}-light-first-user.png`) });
+    await c.close();
+  }
+}
+// A user, with the code the server wrote in its data folder; its session goes with everything that follows.
+const codigo = fs.readFileSync(path.join(datos, "primer-usuario.txt"), "utf8").trim();
+const alta = await fetch(`${URL0}api/primero`, { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ codigo, nombre: "Dani", clave: "clave-de-prueba" }) });
+const SESION = /talaia_sesion=([^;]+)/.exec(alta.headers.get("set-cookie") || "")?.[1];
+if (!SESION) throw new Error(`no session: ${alta.status} ${await alta.text()}`);
+const orden = (o) => fetch(`${URL0}api/orden`, { method: "POST", headers: { "content-type": "application/json", cookie: `talaia_sesion=${SESION}` }, body: JSON.stringify(o) }).then((r) => r.json());
+await orden({ orden: "crearUsuario", nombre: "Ana", clave: "clave-de-ana-1" });
 
 // Something to show: the receiver and a sensor watched, readings, and an alarm on the sensor.
 await orden({ orden: "vigilar", num: CASETA });
@@ -58,12 +80,11 @@ function overflow(page, box, val) {
   }), [box, val]);
 }
 
-const browser = await pw.chromium.launch();
-const SIZES = { pc: { width: 1280, height: 820 }, movil: { width: 390, height: 844 } };
 const errors = [];
-for (const [size, viewport] of Object.entries(SIZES)) {
+for (const size of Object.keys(SIZES)) {
   for (const scheme of ["light", "dark"]) {
-    const ctx = await browser.newContext({ viewport, colorScheme: scheme, locale: lang === "en" ? "en-GB" : "es-ES", timezoneId: "Europe/Madrid", deviceScaleFactor: size === "movil" ? 2 : 1 });
+    const ctx = await browser.newContext(opciones(size, scheme));
+    await ctx.addCookies([{ name: "talaia_sesion", value: SESION, url: URL0 }]);
     await ctx.route(/openstreetmap\.org/, (r) => r.abort());
     await ctx.addInitScript((l) => { try { localStorage.setItem("talaia.lang", l); } catch { /* none */ } }, lang);
     const page = await ctx.newPage();
@@ -72,6 +93,16 @@ for (const [size, viewport] of Object.entries(SIZES)) {
     await sleep(900);
     for (const v of VIEWS) {
       const file = path.join(out, `${size}-${scheme}-${v}.png`);
+      if (v === "signin") {
+        const c = await browser.newContext(opciones(size, scheme)); // without the session
+        await c.addInitScript((l) => { try { localStorage.setItem("talaia.lang", l); } catch { /* none */ } }, lang);
+        const p = await c.newPage();
+        await p.goto(URL0);
+        await sleep(600);
+        await p.screenshot({ path: file });
+        await c.close();
+        continue;
+      }
       if (v === "sheet" || v === "receiver") {
         // The whole sheet: without its height limit, so one picture shows all of it.
         await page.evaluate(() => { location.hash = "#/dashboard"; });
@@ -96,7 +127,7 @@ for (const [size, viewport] of Object.entries(SIZES)) {
         continue;
       }
       if (v === "settings") {
-        for (const part of ["mesh", "mqtt", "receiver", "system", "screen"]) {
+        for (const part of ["mesh", "mqtt", "receiver", "system", "users", "screen"]) {
           await page.evaluate((x) => { location.hash = `#/settings/${x}`; }, part);
           await sleep(400);
           await page.screenshot({ path: path.join(out, `${size}-${scheme}-settings-${part}.png`), fullPage: true });

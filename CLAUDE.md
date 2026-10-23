@@ -67,6 +67,7 @@ codigo/                 raíz de npm workspaces: npm install, npm test, npm run 
                         «Panel nuevo»; lo cambiado sin guardar se queda si se vuelve a abrir el mismo), fullscreen.js
                         (un panel a pantalla completa, con la pantalla encendida), settings.js (Ajustes, en
                         apartados; el diagnóstico de conexión)
+    src/views/signin.js la entrada (y el primer usuario con su código), encima de todo; views/users.js, Ajustes → Usuarios
     src/alerts.js       cómo avisa esta pantalla: sonido, vibración, notificación, pantalla encendida
     src/charts.js       gráficas en SVG (con ejes, la de las tarjetas y la barra de los estados ON/OFF)
     src/logo.js         la torre de vigilancia (logo, icono de la pestaña: su ventana se enciende con alarmas sin atender)
@@ -81,7 +82,10 @@ codigo/                 raíz de npm workspaces: npm install, npm test, npm run 
     src/almacen.js      SQLite (node:sqlite): lecturas y el estado que la app guarda en localStorage
     src/textos.js       los textos del servidor en español e inglés (claves «s.*»: s.j.* el diario, s.log.* el
                         registro, s.ha.* Home Assistant…); se piden con tx() como los del núcleo
-    src/web.js sincro.js  la app servida en la red de casa y su API (SSE + órdenes), sin contraseña (decisión de Dani)
+    src/web.js sincro.js  la app servida en la red de casa y su API (SSE + órdenes); todo menos la app, /api/salud y
+                        entrar pide sesión (cookie HttpOnly)
+    src/usuarios.js     usuarios y sesiones (paso 4): scrypt, sesiones de 30 días sin usar, código del primer usuario,
+                        intentos fallidos que frenan; desde la terminal: --clave, --usuarios, --codigo (main.js)
     src/mqtt.js         MQTT (MQTT.js): varios brokers a la vez (una conexión cada uno), configurados en Ajustes y
                         guardados en SQLite; reconexión; testamento solo en el de Home Assistant; migra lo de la 1.16
     src/mosquitto.js    el broker de este equipo: usuarios (cifrado de mosquitto_passwd: $7$, PBKDF2-SHA512) que Vigía
@@ -106,7 +110,7 @@ La app ligera congelada tiene su propia copia del código en `main`: aquí ya no
 ### Decisiones del servidor (Dani, 18 oct. 2026)
 
 - Nodo propio por USB para el servidor (su DNN 5); Home Assistant sigue con el suyo por WiFi.
-- Sin contraseña ni token: la red de casa es la protección. Puerto web 4404.
+- Sin contraseña ni token: la red de casa es la protección (hasta el paso 4: desde entonces, usuarios). Puerto web 4404.
 - Manda por la malla todo lo que la app: peticiones que se pulsan y avisos automáticos de alarmas (si se activan).
 - Histórico de todos los nodos que oye el receptor, un año por defecto (`retencionDias`).
 - Con un año de todo, nada que recorra la tabla de lecturas entera en el camino normal: el total va en memoria y el
@@ -147,7 +151,7 @@ con Tasmota/ESPHome, Zigbee por zigbee2mqtt, ESPHome, Home Assistant…).
   modo Servidor; la app de Bluetooth no cambia.
 - Cada dato MQTT con nombre propio; varios del mismo tipo en un panel (salvo para la malla).
 - Números y **estados ON/OFF** (alarma «cuando esté ON/OFF»), **control** con interruptor (sin confirmación; sin
-  login por ahora: más adelante habrá).
+  login entonces; desde el paso 4, cualquier usuario).
 - Lo de los nodos sigue yendo a Home Assistant como hasta ahora; los datos MQTT, no (si Dani los quiere en HA, los
   lee del broker de Vigía).
 - Ubicación y mapa, solo nodos Meshtastic.
@@ -181,8 +185,8 @@ con Tasmota/ESPHome, Zigbee por zigbee2mqtt, ESPHome, Home Assistant…).
 - Para abrir la pantalla fuera de casa: Tailscale en el BMAX (ya unido a su cuenta) y `sudo tailscale serve --bg 4404`
   (https en `*.ts.net`, instalable como app). `tailscale serve` deja el Host tal cual, así valen las comprobaciones de
   `web.js` (`ts.net` está entre los nombres de casa). Lo que llega por **Funnel** (cabecera `Tailscale-Funnel-Request`)
-  se rechaza: Vigía no tiene contraseña. Más adelante: notificaciones push y quizá usar `Tailscale-User-Login` para
-  saber quién manda cada orden.
+  se rechaza (también con usuarios). Más adelante: notificaciones push. Quién manda cada orden ya lo dicen los usuarios
+  (paso 4).
 
 ### Versión 2.0 (Dani, 22 oct. 2026) — plan acordado
 
@@ -240,6 +244,20 @@ con Tasmota/ESPHome, Zigbee por zigbee2mqtt, ESPHome, Home Assistant…).
   (idioma del servidor, histórico, acerca de) y Esta pantalla (idioma, tema, sonido, notificaciones, pantalla encendida, mapa sin
   internet: todo lo que es de cada aparato). Cada aparato recuerda el último abierto. Ajustes, en una columna centrada (texto a la izquierda). Los registros y alarmas están en Alarmas; el Tablero
   tiene el aviso de alarmas y los paneles; el mapa es una sección (map.js ya no usa un diálogo).
+- **Paso 4, usuarios** (Dani, 23 oct. 2026), en la rama **`usuarios`** (Dani prueba con `--rama usuarios`; al acabar,
+  pasa a main): usuario y contraseña **siempre**, también en casa; **un solo tipo de usuario** (todos pueden todo,
+  también usuarios; la tabla guarda un `rol`, todos «admin», por si llegan tipos); el **primer usuario se crea en la
+  pantalla con un código** (8 letras, en `<datos>/primer-usuario.txt` hasta entonces; lo dicen el diario, el
+  instalador y `sudo vigia-servidor --codigo`); **sesión de 30 días sin usarla**, renovada con el uso (cookie
+  `talaia_sesion` HttpOnly, SameSite=Lax, Secure por `*.ts.net`; en la base, solo su SHA-256; las pantallas piden
+  `/api/sesion` cada 6 h). Contraseñas con scrypt (N=16384), de 10 a 200 caracteres y no iguales al nombre. Cinco
+  fallos libres por nombre y después esperas que doblan (hasta 15 min); 50 fallos en un minuto, esperan todos. No se
+  puede quitar uno a sí mismo; la propia contraseña pide la actual y deja abierta esta sesión; la de otro cierra todas
+  las suyas. Al cerrarse una sesión, sus pantallas abiertas (SSE) se cortan y vuelven a «Entra». El registro lleva
+  quién (`by`) en lo que hace una persona (tipo info y ack; no en alarmas que saltan o se resuelven), y apunta las
+  entradas y los cambios de usuarios. El instalador (`INSTALADOR=3`) enseña el código y `vigia-servidor` corre como
+  `vigia` con sudo (lo que escribe en los datos sigue siendo del servicio). El service worker ya no guarda nada de
+  `/api/`.
 - Orden (1 y 2, hechos): 1) nombre y política de idioma; 2) congelar la webapp y reorganizar el repositorio;
   3) rediseño con los dos idiomas; 4) usuarios; 5) Docker y documentación en inglés → **2.0**. Las
   **automatizaciones** («si… entonces…», centradas en la malla, con la fase 6 de control desde la malla dentro) →

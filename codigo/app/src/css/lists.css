@@ -45,3 +45,4 @@
 .lg-ack::before { background: var(--line); }
 .lg time { font: 400 13px/1 var(--f-body); font-variant-numeric: tabular-nums; color: var(--ink-2); white-space: nowrap; }
 .lg span { min-width: 0; overflow-wrap: anywhere; }
+.lg-by { font-style: normal; color: var(--ink-2); white-space: nowrap; }

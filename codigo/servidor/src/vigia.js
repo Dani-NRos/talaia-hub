@@ -13,6 +13,7 @@ import { crearServicioMqtt, migrar as migrarMqtt } from "./mqtt.js";
 import { crearSalidaHA } from "./homeassistant.js";
 import { crearPaneles, migrarEstacion } from "./paneles.js";
 import { crearBrokerLocal } from "./mosquitto.js";
+import { crearUsuarios } from "./usuarios.js";
 import { tx, setLanguage, localeOf, LANGUAGES } from "@vigia/nucleo/idioma.js";
 import "./textos.js";
 
@@ -78,7 +79,7 @@ export async function crearVigia(config, registro, opts = {}) {
     const nuevas = [];
     for (const e of S.log) { if (e === ultimo) break; nuevas.push(e); }
     ultimo = S.log[0] || null;
-    for (const e of nuevas.reverse()) (e.type === "raise" ? registro.aviso : registro.info)(tx(`s.j.log.${["raise", "clear", "ack"].includes(e.type) ? e.type : "info"}`, { text: e.text }));
+    for (const e of nuevas.reverse()) (e.type === "raise" ? registro.aviso : registro.info)(tx(`s.j.log.${["raise", "clear", "ack"].includes(e.type) ? e.type : "info"}`, { text: e.text }) + (e.by ? ` (${e.by})` : ""));
   }
 
   /* ── motor ── */
@@ -118,6 +119,11 @@ export async function crearVigia(config, registro, opts = {}) {
     (e.stage ? registro.depurar : registro.info)(tx("s.j.receiver", { msg: e.msg }));
     eventos.emit("diag", e);
   }
+
+  /* ── who can open the screens ── */
+  const usuarios = crearUsuarios({ almacen, datos: opts.almacen ? null : config.datos, registro, apuntar: (texto, por) => motor.addLog("info", texto, null, por ? { by: por } : null), alCerrar: (ids) => eventos.emit("sesionesCerradas", ids) });
+  S.usuarios = usuarios.lista();
+  usuarios.alCambiar = () => { S.usuarios = usuarios.lista(); eventos.emit("parte", "usuarios"); };
 
   /* ── acciones del usuario (las mismas que en la app) y lecturas recientes de los vigilados ── */
   const acciones = crearAcciones(motor);
@@ -193,6 +199,7 @@ export async function crearVigia(config, registro, opts = {}) {
   }
   await podar();
   const podarId = setInterval(podar, 6 * HOUR);
+  const sesionesId = setInterval(() => usuarios.podar(), HOUR); // sessions unused for 30 days
   // Resumen cada hora en el diario: para ver de un vistazo que sigue vivo y oyendo la malla.
   async function resumen() {
     const hace = Date.now() - HOUR;
@@ -206,7 +213,7 @@ export async function crearVigia(config, registro, opts = {}) {
   const resumenId = setInterval(resumen, HOUR);
 
   return {
-    S, motor, acciones, almacen, eventos, mqtt, paneles,
+    S, motor, acciones, almacen, eventos, mqtt, paneles, usuarios,
     get receptor() { return receptor; },
     /** The server's language: what it writes from now on (what is already in the log stays as it was). */
     idioma(l) {
@@ -232,6 +239,7 @@ export async function crearVigia(config, registro, opts = {}) {
       if (cerrado) return;
       clearInterval(offlineId);
       clearInterval(podarId);
+      clearInterval(sesionesId);
       clearInterval(resumenId);
       paneles.parar();
       await mqtt.parar(); // antes de cerrar: deja dicho «offline» a Home Assistant

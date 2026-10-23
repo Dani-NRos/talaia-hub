@@ -1,0 +1,25 @@
+/* Signing in, over everything (with nothing behind it to see without a session); and Settings → Users. */
+:root[data-gate] .shell, :root[data-gate] #toast { display: none; }
+.gate { min-height: 100vh; min-height: 100dvh; display: grid; place-items: center; padding: max(24px, env(safe-area-inset-top, 0px)) 16px max(24px, env(safe-area-inset-bottom, 0px)); background: var(--bg); }
+.gate[hidden] { display: none; }
+.gate-f { width: min(100%, 380px); display: grid; gap: 14px; }
+.gate-mark { display: flex; align-items: center; gap: 10px; font: 700 22px/1 var(--f-body); letter-spacing: -.01em; margin-bottom: 18px; }
+.gate-mark .logo { width: 34px; height: 34px; color: var(--ink); --lamp: var(--bg); }
+.gate-f h1 { font: 700 24px/1.2 var(--f-body); letter-spacing: -.01em; }
+.gate-note { padding: 8px 12px; border-radius: 6px; font-size: 14px; background: color-mix(in oklab, var(--warn) 12%, var(--surface)); border: 1px solid color-mix(in oklab, var(--warn) 45%, var(--line)); }
+.gate-fields { display: grid; gap: 6px; }
+.gate-fields label { margin-top: 6px; font: 600 13.5px/1.2 var(--f-body); color: var(--ink-2); }
+.gate-fields .inp { width: 100%; font-size: 17px; padding: 11px 12px; }
+#gCode { font-family: var(--f-mono); letter-spacing: .08em; text-transform: uppercase; }
+.gate-go { min-height: 46px; font-size: 15.5px; }
+.gate-help { font-size: 13px; }
+.gate-lang { justify-self: start; margin-top: 8px; }
+.gate-lang .sel { font-size: 14px; padding: 6px 8px; }
+
+/* Settings → Users */
+.us-ses { list-style: none; margin: 2px 0; padding: 0; display: grid; gap: 4px; }
+.us-ses li { display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: 4px 10px; font-size: 14px; color: var(--ink-2); }
+.us-ses b { font-weight: 600; color: var(--ink); }
+.us-u .btns { margin-top: 6px; }
+.us-u .mq-bh .hint { margin-left: auto; }
+.mini.danger { color: var(--crit); border-color: color-mix(in oklab, var(--crit) 45%, var(--line)); }
