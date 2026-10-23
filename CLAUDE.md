@@ -298,6 +298,13 @@ con Tasmota/ESPHome, Zigbee por zigbee2mqtt, ESPHome, Home Assistant…).
   pasa ci.yml y sube la imagen con las etiquetas X.Y.Z, X.Y, X y latest. El primer paquete en ghcr.io sale privado:
   hay que hacerlo público una vez en sus ajustes. Desde esta sesión no se puede bajar nada de Docker Hub: la imagen se
   prueba en GitHub Actions (y aquí, simulando el contenedor sin Docker).
+- Lo aprendido con GitHub Actions (23 oct. 2026): desde esta sesión no se pueden leer los registros de los trabajos
+  (el proxy no deja bajarlos), pero sí sus anotaciones por la API (`check-runs/<id>/annotations`): por eso ci.yml pasa
+  lo que falla a una anotación (`::error`). El AppArmor de Ubuntu 24.04 (`/etc/apparmor.d/mosquitto`) deja a Mosquitto
+  solo en sus carpetas: en el ejecutor se quita antes de las pruebas (sus ficheros van a /tmp); en una instalación
+  real no molesta, los usuarios del broker están en /var/lib/mosquitto. GitHub va en UTC: las pruebas que dependen de
+  la hora la fijan ellas (`process.env.TZ`). Corre en `ubuntu-24.04`, no `ubuntu-latest` (pasa a 26.04). Una vez falló
+  una prueba con Node 24 que al repetirla pasó; no se ha vuelto a ver (si vuelve, la anotación dirá cuál).
 - Orden (1 y 2, hechos): 1) nombre y política de idioma; 2) congelar la webapp y reorganizar el repositorio;
   3) rediseño con los dos idiomas; 4) usuarios; 5) Docker y documentación en inglés → **2.0**. Las
   **automatizaciones** («si… entonces…», centradas en la malla, con la fase 6 de control desde la malla dentro) →
