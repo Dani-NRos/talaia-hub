@@ -244,8 +244,7 @@ con Tasmota/ESPHome, Zigbee por zigbee2mqtt, ESPHome, Home Assistant…).
   (idioma del servidor, histórico, acerca de) y Esta pantalla (idioma, tema, sonido, notificaciones, pantalla encendida, mapa sin
   internet: todo lo que es de cada aparato). Cada aparato recuerda el último abierto. Ajustes, en una columna centrada (texto a la izquierda). Los registros y alarmas están en Alarmas; el Tablero
   tiene el aviso de alarmas y los paneles; el mapa es una sección (map.js ya no usa un diálogo).
-- **Paso 4, usuarios** (Dani, 23 oct. 2026), en la rama **`usuarios`** (Dani prueba con `--rama usuarios`; al acabar,
-  pasa a main): usuario y contraseña **siempre**, también en casa; **un solo tipo de usuario** (todos pueden todo,
+- **Paso 4, usuarios** (Dani, 23 oct. 2026), hecho en la rama `usuarios` y pasado a `main` el 23 oct. 2026: usuario y contraseña **siempre**, también en casa; **un solo tipo de usuario** (todos pueden todo,
   también usuarios; la tabla guarda un `rol`, todos «admin», por si llegan tipos); el **primer usuario se crea en la
   pantalla con un código** (8 letras, en `<datos>/primer-usuario.txt` hasta entonces; lo dicen el diario, el
   instalador y `sudo vigia-servidor --codigo`); **sesión de 30 días sin usarla**, renovada con el uso (cookie
