@@ -29,6 +29,10 @@ jobs:
           sudo apt-get update -q
           sudo apt-get install -y -q mosquitto
           sudo systemctl stop mosquitto || true
+          # The runner's AppArmor keeps Mosquitto in its own folders; the tests run it with their files in /tmp.
+          perfiles="$(grep -l -s -E 'mosquitto' /etc/apparmor.d/* || true)"
+          echo "::notice title=AppArmor and Mosquitto::profiles: ${perfiles:-none}; loaded: $(sudo aa-status 2>/dev/null | grep -i mosquitto | xargs)"
+          for f in $perfiles; do sudo apparmor_parser -R "$f" || true; done
       - run: npm ci --no-audit --no-fund
         working-directory: codigo
       - run: npm test
