@@ -7,10 +7,11 @@
 //   sudo talaia --clave NOMBRE   contraseña nueva para ese usuario (lo crea si no está); cierra sus sesiones
 //   sudo talaia --usuarios       los usuarios de la pantalla
 //   sudo talaia --codigo         el código para crear el primer usuario
-//   sudo talaia --broker-inicial el primer dynamic-security.json del broker de este equipo (lo usa el instalador)
+//   sudo talaia --broker-inicial el primer dynamic-security.json del broker de este equipo (instalador y Docker)
+//   talaia --salud          is the screen answering? (exit 0 or 1: Docker's health check)
 import fs from "node:fs";
 import path from "node:path";
-import { leerConfig, RUTA_CONFIG, ErrorConfig } from "./config.js";
+import { leerConfig, RUTA_CONFIG, ErrorConfig, VARIABLES } from "./config.js";
 import { crearRegistro } from "./registro.js";
 import { listarPuertos, describirPuerto } from "./puertos.js";
 
@@ -48,6 +49,14 @@ try {
   console.error(`Configuración no válida: ${e instanceof ErrorConfig ? e.message : e.stack}`);
   process.exit(2);
 }
+if (args.includes("--salud")) {
+  try {
+    const r = await fetch(`http://127.0.0.1:${config.web.puerto}/api/salud`, { signal: AbortSignal.timeout(4000) });
+    process.exit(r.ok ? 0 : 1);
+  } catch {
+    process.exit(1);
+  }
+}
 if (["--clave", "--usuarios", "--codigo", "--broker-inicial"].some((o) => args.includes(o))) process.exit(await usuariosTerminal());
 const registro = crearRegistro({ nivel: config.registro });
 // Una promesa rechazada sin atender (suele ser de la librería, al cortarse el enlace) se apunta y se sigue.
@@ -55,7 +64,8 @@ process.on("unhandledRejection", (e) => registro.error(`Error sin atender: ${e?.
 // Una excepción sin atender deja el estado en duda: se apunta y se sale; systemd vuelve a arrancar en 5 s.
 process.on("uncaughtException", (e) => { registro.error(`Excepción sin atender, se reinicia: ${e?.stack || e}`); process.exit(70); });
 
-registro.info(`Talaia Hub ${VERSION} · Node ${process.versions.node} · configuración: ${fs.existsSync(rutaConfig) ? rutaConfig : "por defecto"} · datos: ${config.datos}`);
+const variables = VARIABLES.filter((n) => process.env[n]?.trim());
+registro.info(`Talaia Hub ${VERSION} · Node ${process.versions.node} · configuración: ${fs.existsSync(rutaConfig) ? rutaConfig : "por defecto"}${variables.length ? ` + ${variables.join(", ")}` : ""} · datos: ${config.datos}`);
 const { crearTalaia } = await import("./talaia.js");
 let talaia;
 try {

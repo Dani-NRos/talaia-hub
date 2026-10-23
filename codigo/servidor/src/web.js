@@ -164,8 +164,9 @@ function crearOrdenes(talaia) {
   };
 }
 
-/** Direcciones IPv4 de la red de casa, para decir dónde abrir la app. */
+/** Direcciones IPv4 de la red de casa, para decir dónde abrir la app (in a container, Docker's own: none). */
 export function direcciones(puerto) {
+  if (process.env.TALAIA_DOCKER) return [];
   const out = [];
   for (const lista of Object.values(os.networkInterfaces())) {
     for (const d of lista || []) if (d.family === "IPv4" && !d.internal) out.push(`http://${d.address}:${puerto}`);
@@ -406,7 +407,7 @@ export function crearWeb(talaia, config, registro, opts = {}) {
         return json(res, 200, { ok: true, receptor: S.link.state, nodos: S.nodes.size, alarmas: S.active.size, lecturas: await S.store.count() });
       }
       if (p === "/api/sesion" && req.method === "GET") {
-        if (!quien) return json(res, 401, { ok: false, primero: !usuarios.hay() });
+        if (!quien) return json(res, 401, { ok: false, primero: !usuarios.hay(), ...(process.env.TALAIA_DOCKER ? { docker: true } : {}) });
         renovar(req, res);
         return json(res, 200, { ok: true, nombre: quien.nombre, sesion: quien.id.slice(0, 12) });
       }

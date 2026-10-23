@@ -1,0 +1,7 @@
+#!/bin/sh
+# «talaia» inside the container (docker compose exec talaia talaia --codigo): as the service's user, so whatever it
+# writes in the data stays the service's.
+if [ "$(id -u)" = 0 ]; then
+  exec setpriv --reuid=talaia --regid=talaia --init-groups -- node /opt/talaia/servidor/src/main.js "$@"
+fi
+exec node /opt/talaia/servidor/src/main.js "$@"

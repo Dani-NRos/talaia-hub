@@ -42,10 +42,10 @@ export class NodoFalso {
     flujo.on("error", () => {});
   }
 
-  /** Servidor TCP en un puerto libre de localhost. */
-  async escucharTcp() {
+  /** Servidor TCP en un puerto libre de localhost (o de «host»: 0.0.0.0 para un contenedor). */
+  async escucharTcp(host = "127.0.0.1") {
     this.tcp = net.createServer((s) => { this.cerrarFlujo(); this.atender(s); });
-    await new Promise((r) => this.tcp.listen(0, "127.0.0.1", r));
+    await new Promise((r) => this.tcp.listen(0, host, r));
     return this.tcp.address().port;
   }
 

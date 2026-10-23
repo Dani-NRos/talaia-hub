@@ -11,8 +11,9 @@
 // }
 //
 // «mosquitto» lo pone el instalador cuando instala Mosquitto: Talaia gestiona sus usuarios por el plugin de seguridad
-// dinámica (mosquitto.js). «host»: dónde está (con Docker, el nombre de su contenedor). «fichero»: con Docker, dónde
-// escribir el primer dynamic-security.json si no está (el instalador lo hace con `talaia --broker-inicial`).
+// dinámica (mosquitto.js). «host»: dónde está (con Docker, el nombre de su contenedor).
+//
+// With Docker, the environment can say the same (and it wins over the file): see desdeEntorno.
 import fs from "node:fs";
 import { tx } from "@talaia/nucleo/idioma.js";
 import "./textos.js";
@@ -30,8 +31,49 @@ export const DEFECTO = {
 
 export class ErrorConfig extends Error {}
 
-/** Lee y comprueba la configuración. Sin fichero, la de por defecto (salvo que se pida que exista). */
-export function leerConfig(ruta = RUTA_CONFIG, { obligatoria = false } = {}) {
+/**
+ * What the environment says (Docker), as a piece of configuration:
+ *   TALAIA_RECEIVER        usb · usb:/dev/ttyACM0 · usb:239a:8029 · tcp:192.168.1.60 · tcp:192.168.1.60:4403
+ *   TALAIA_WEB_PORT        4404
+ *   TALAIA_DATA            /data
+ *   TALAIA_BROKER          mosquitto · mosquitto:1883 · off   (this machine's broker, whose users Talaia manages)
+ *   TALAIA_RETENTION_DAYS  365
+ *   TALAIA_LOG_LEVEL       debug · info · warn · error
+ */
+export const VARIABLES = ["TALAIA_RECEIVER", "TALAIA_WEB_PORT", "TALAIA_DATA", "TALAIA_BROKER", "TALAIA_RETENTION_DAYS", "TALAIA_LOG_LEVEL"];
+export function desdeEntorno(env = process.env) {
+  const v = (n) => String(env[n] ?? "").trim();
+  const entero = (n) => {
+    if (!/^\d+$/.test(v(n))) throw new ErrorConfig(`${n} tiene que ser un número (pone "${v(n)}")`);
+    return Number(v(n));
+  };
+  // «host», «host:1234», «[fe80::1]:1234»
+  const hostPuerto = (n, texto) => {
+    const m = /^(\[[^\]]+\]|[^:]+)(?::(\d+))?$/.exec(texto);
+    if (!m) throw new ErrorConfig(`${n}: falta el nombre o la IP (pone "${v(n)}")`);
+    return { host: m[1].replace(/^\[(.*)\]$/, "$1"), ...(m[2] ? { puerto: Number(m[2]) } : {}) };
+  };
+  const c = {};
+  if (v("TALAIA_RECEIVER")) {
+    const [tipo, ...resto] = v("TALAIA_RECEIVER").split(":");
+    if (tipo === "usb") c.receptor = { tipo: "usb", puerto: resto.join(":") || "auto" };
+    else if (tipo === "tcp") c.receptor = { tipo: "tcp", ...hostPuerto("TALAIA_RECEIVER", resto.join(":")) };
+    else throw new ErrorConfig(`TALAIA_RECEIVER tiene que ser "usb", "usb:/dev/ttyACM0", "usb:239a:8029" o "tcp:IP" (pone "${v("TALAIA_RECEIVER")}")`);
+  }
+  if (v("TALAIA_WEB_PORT")) c.web = { puerto: entero("TALAIA_WEB_PORT") };
+  if (v("TALAIA_DATA")) c.datos = v("TALAIA_DATA");
+  if (v("TALAIA_BROKER")) c.mosquitto = v("TALAIA_BROKER") === "off" ? null : hostPuerto("TALAIA_BROKER", v("TALAIA_BROKER"));
+  if (v("TALAIA_RETENTION_DAYS")) c.retencionDias = entero("TALAIA_RETENTION_DAYS");
+  if (v("TALAIA_LOG_LEVEL")) {
+    const nivel = { debug: "depurar", info: "info", warn: "aviso", warning: "aviso", error: "error", depurar: "depurar", aviso: "aviso" }[v("TALAIA_LOG_LEVEL").toLowerCase()];
+    if (!nivel) throw new ErrorConfig(`TALAIA_LOG_LEVEL tiene que ser debug, info, warn o error (pone "${v("TALAIA_LOG_LEVEL")}")`);
+    c.registro = nivel;
+  }
+  return c;
+}
+
+/** Lee y comprueba la configuración (el fichero y, encima, el entorno). Sin fichero, la de por defecto (salvo que se pida que exista). */
+export function leerConfig(ruta = RUTA_CONFIG, { obligatoria = false, entorno = process.env } = {}) {
   let dada = {};
   if (fs.existsSync(ruta)) {
     try {
@@ -42,7 +84,12 @@ export function leerConfig(ruta = RUTA_CONFIG, { obligatoria = false } = {}) {
   } else if (obligatoria) {
     throw new ErrorConfig(`no existe ${ruta}`);
   }
-  return comprobar(dada);
+  const env = desdeEntorno(entorno);
+  return comprobar({
+    ...dada,
+    ...env,
+    ...(env.web ? { web: { ...(dada.web || {}), ...env.web } } : {}),
+  });
 }
 
 export function comprobar(dada) {
@@ -53,11 +100,10 @@ export function comprobar(dada) {
     web: { ...DEFECTO.web, ...(dada.web || {}) },
   };
   if (c.mosquitto) {
-    c.mosquitto = { puerto: 1883, host: "127.0.0.1", fichero: null, ...c.mosquitto };
+    c.mosquitto = { puerto: 1883, host: "127.0.0.1", ...c.mosquitto };
     delete c.mosquitto.usuarios; // the password file Talaia wrote, up to 2.0: no longer used
     if (!Number.isInteger(c.mosquitto.puerto) || c.mosquitto.puerto < 1 || c.mosquitto.puerto > 65535) throw new ErrorConfig("mosquitto.puerto tiene que ser un número de puerto (por defecto 1883)");
     if (typeof c.mosquitto.host !== "string" || !/^[A-Za-z0-9.:_-]{1,253}$/.test(c.mosquitto.host)) throw new ErrorConfig("mosquitto.host tiene que ser un nombre o una IP (por defecto 127.0.0.1)");
-    if (c.mosquitto.fichero != null && (typeof c.mosquitto.fichero !== "string" || !c.mosquitto.fichero.startsWith("/"))) throw new ErrorConfig("mosquitto.fichero tiene que ser la ruta completa de su dynamic-security.json");
   }
   const r = c.receptor;
   if (r.tipo !== "usb" && r.tipo !== "tcp") throw new ErrorConfig(`receptor.tipo tiene que ser "usb" o "tcp" (pone "${r.tipo}")`);

@@ -7,13 +7,11 @@
 // password file, but not $CONTROL (the "#" of an ACL doesn't reach topics that start with "$"), so a device can't
 // make itself users. Talaia's own client also has «admin», with $CONTROL.
 //
-// The first file (ficheroInicial) is made by Talaia: with the installer, `talaia --broker-inicial`; with Docker,
-// Talaia itself writes it if it's missing. It carries the users of before 2.0 (Mosquitto's password file, which
-// Talaia kept in SQLite), with the same hashes: their devices keep connecting with the same passwords.
+// The first file (ficheroInicial) is made by Talaia, with `talaia --broker-inicial`: the installer and the Docker
+// image's entrypoint run it when the file isn't there yet. It carries the users of before 2.0 (Mosquitto's password
+// file, which Talaia kept in SQLite), with the same hashes: their devices keep connecting with the same passwords.
 import crypto from "node:crypto";
-import fs from "node:fs";
 import os from "node:os";
-import path from "node:path";
 import { tx } from "@talaia/nucleo/idioma.js";
 import "./textos.js";
 
@@ -73,8 +71,12 @@ export function comprobarUsuario(nombre, clave) {
   return null;
 }
 
-/** This machine's addresses on the home network, to set up the devices («192.168.1.50»). */
+/**
+ * This machine's addresses on the home network, to set up the devices («192.168.1.50»). In a container, the ones it
+ * has are Docker's own (172.17.…), not the machine's: none, and the screen says «this machine's IP».
+ */
 export function direccionesLocales() {
+  if (process.env.TALAIA_DOCKER) return [];
   const out = [];
   for (const lista of Object.values(os.networkInterfaces())) {
     for (const a of lista || []) if (a.family === "IPv4" && !a.internal) out.push(a.address);
@@ -93,22 +95,11 @@ export function guardadoBroker(almacen) {
 }
 
 /**
- * config: the server's (with config.mosquitto: { puerto, fichero? }). almacen: SQLite. registro: the journal.
- * With config.mosquitto.fichero (Docker), the first dynamic-security.json is written there if it isn't.
+ * config: the server's (with config.mosquitto: { puerto, host }). almacen: SQLite. registro: the journal.
  * Returns { url, puerto, interno, usuarios(), enganchar(id, conexion), ponerUsuario, quitarUsuario, alCambiar }.
  */
 export function crearBrokerLocal({ config, almacen, registro }) {
   const guardado = guardadoBroker(almacen);
-  const ruta = config.mosquitto.fichero;
-  if (ruta && !fs.existsSync(ruta)) {
-    try {
-      fs.mkdirSync(path.dirname(ruta), { recursive: true });
-      fs.writeFileSync(ruta, `${JSON.stringify(ficheroInicial(guardado), null, 2)}\n`, { mode: 0o600 });
-      registro.info(tx("s.j.mqFirstFile", { file: ruta }));
-    } catch (e) {
-      registro.error(tx("s.j.mqWriteFail", { file: ruta, e: e.message }));
-    }
-  }
 
   let conexion = null;
   let lista = []; // the device users Mosquitto has (names only)

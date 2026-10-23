@@ -30,6 +30,8 @@ export function listarPuertos({ sys = "/sys", dev = "/dev" } = {}) {
   const out = [];
   for (const n of nombres.sort((a, b) => a.localeCompare(b, "en", { numeric: true }))) {
     // El dispositivo USB es el primer antecesor con idVendor (el tty cuelga de la interfaz, y esta del aparato).
+    // In a container /sys shows every port of the machine, but /dev only those passed to it.
+    if (!fs.existsSync(path.join(dev, n))) continue;
     let d;
     try { d = fs.realpathSync(path.join(base, n, "device")); } catch { continue; }
     let usb = null;

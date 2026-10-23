@@ -48,6 +48,50 @@ El instalador:
 
 Para **actualizar**, vuelve a ejecutar la misma orden: se queda con tu configuración y tus datos.
 
+## Con Docker
+
+Para quien ya usa Docker, en un mini PC o una Raspberry Pi de 64 bits (para 32 bits, el instalador). La imagen,
+`ghcr.io/dani-nros/talaia-hub` (amd64 y arm64), lleva el servidor y la pantalla; el `compose.yaml` le añade su propio
+Mosquitto (la imagen oficial, `eclipse-mosquitto`), cuyos usuarios gestiona Talaia igual que con el instalador. La
+imagen se publica con cada versión, desde la 2.0.
+
+```
+mkdir talaia && cd talaia
+wget https://raw.githubusercontent.com/Dani-NRos/talaia-hub/main/docker/compose.yaml
+docker compose up -d
+docker compose exec talaia talaia --codigo
+```
+
+Antes del `up`, en `compose.yaml`:
+
+- **El nodo por USB**: en `devices`, el aparato con el mismo nombre a los dos lados (`ls /dev/ttyACM* /dev/ttyUSB*`
+  dice cuál es). **Por la red**: quita `devices` y pon `TALAIA_RECEIVER: tcp:192.168.1.60`.
+- `TZ`: tu zona horaria (la de las horas del diario y del CSV).
+- Si ya tienes un broker en el puerto 1883 de ese equipo, cambia el de Talaia (`"1884:1883"`). Sin broker:
+  `TALAIA_BROKER: off` y quita el servicio `mosquitto`.
+
+La configuración va en variables, que mandan sobre `/data/config.json` (que no hace falta):
+
+| Variable | Qué es | Por defecto |
+|---|---|---|
+| `TALAIA_RECEIVER` | `usb`, `usb:/dev/ttyACM0`, `usb:239a:8029`, `tcp:192.168.1.60` o `tcp:192.168.1.60:4403` | `usb` |
+| `TALAIA_BROKER` | el broker de este equipo: `mosquitto` (el del compose) o `off` | sin broker |
+| `TALAIA_WEB_PORT` | el puerto de la pantalla dentro del contenedor | `4404` |
+| `TALAIA_RETENTION_DAYS` | días de histórico | `365` |
+| `TALAIA_LOG_LEVEL` | `debug`, `info`, `warn` o `error` | `info` |
+
+Lo que cambia respecto al instalador:
+
+- Las órdenes de la terminal van con `docker compose exec talaia talaia …` (`--codigo`, `--clave NOMBRE`,
+  `--usuarios`, `--puertos`), y el diario es `docker compose logs -f talaia`.
+- Para **actualizar**: `docker compose pull && docker compose up -d`. Los datos están en el volumen `talaia-data` y los
+  usuarios del broker en `broker-data`.
+- **El USB es más delicado**: el contenedor recibe el puerto que dice `devices` al arrancar. Si el nodo se desenchufa y
+  vuelve con otro nombre (`ttyACM1`), hay que cambiarlo ahí y repetir el `up`. Con el instalador no pasa.
+- Dentro del contenedor, Talaia no sabe la IP del equipo: en Ajustes → MQTT dice «la IP de este equipo».
+- Talaia corre con un usuario sin privilegios (uid 4404); el contenedor arranca como root solo para preparar sus
+  carpetas, los ficheros de Mosquitto y el permiso del puerto USB.
+
 ## Seguirlo
 
 ```

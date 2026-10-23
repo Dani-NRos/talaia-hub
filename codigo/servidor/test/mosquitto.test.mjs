@@ -20,6 +20,7 @@ import { NodoFalso, hasta } from "./nodo-falso.mjs";
 const hay = (orden) => spawnSync("sh", ["-c", `command -v ${orden}`]).status === 0;
 const PLUGIN = (spawnSync("sh", ["-c", "find /usr/lib /usr/local/lib -name mosquitto_dynamic_security.so 2>/dev/null | head -1"]).stdout || "").toString().trim();
 const MOSQUITTO = hay("mosquitto") && !!PLUGIN;
+const MAIN = new URL("../src/main.js", import.meta.url).pathname;
 
 /** A line of a Mosquitto password file, as mosquitto_passwd writes it (up to 2.0, Talaia kept these). */
 function lineaPasswd(clave) {
@@ -86,13 +87,20 @@ test("with a real Mosquitto: the users of before stay, users are added, changed 
   const puerto = await puertoLibre();
   const nodo = new NodoFalso();
   const puertoNodo = await nodo.escucharTcp();
-  const fichero = path.join(datos, "mosquitto", "dynamic-security.json");
-  const config = comprobar({ receptor: { tipo: "tcp", host: "127.0.0.1", puerto: puertoNodo }, datos, mosquitto: { puerto, fichero } });
+  const fichero = path.join(datos, "dynamic-security.json");
+  const dada = { receptor: { tipo: "tcp", host: "127.0.0.1", puerto: puertoNodo }, datos, mosquitto: { puerto } };
+  const config = comprobar(dada);
   // As an install of before 2.0: Talaia's password and a Shelly's user, from the password file.
-  const almacen = abrirAlmacen(":memory:");
+  const almacen = abrirAlmacen(path.join(datos, "talaia.db"));
   almacen.guardar("mosquitto", { interno: { clave: "la-clave-interna-de-antes", cifrada: lineaPasswd("la-clave-interna-de-antes") }, usuarios: [{ nombre: "viejo", cifrada: lineaPasswd("clave-del-viejo") }] });
+  // The first users file, as the installer and the Docker image make it: `talaia --broker-inicial`.
+  const cfg = path.join(datos, "config.json");
+  fs.writeFileSync(cfg, JSON.stringify(dada));
+  const r = spawnSync(process.execPath, [MAIN, "--config", cfg, "--broker-inicial"], { encoding: "utf8" });
+  assert.equal(r.status, 0, r.stderr);
+  assert.deepEqual(JSON.parse(r.stdout).clients.map((c) => c.username), ["talaia", "viejo"]);
+  fs.writeFileSync(fichero, r.stdout, { mode: 0o600 });
   const talaia = await crearTalaia(config, crearRegistro({ nivel: "error", salida: [] }), { almacen });
-  assert.equal(fs.statSync(fichero).mode & 0o777, 0o600); // written by Talaia, as with Docker
   let mq = mosquitto(datos, puerto, fichero);
   t.after(async () => { await talaia.detener(); await nodo.cerrar(); mq.kill(); });
   await new Promise((r) => setTimeout(r, 400));

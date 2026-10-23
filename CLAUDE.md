@@ -101,8 +101,11 @@ codigo/                 raíz de npm workspaces: npm install, npm test, npm run 
     test/nodo-falso.mjs nodo Meshtastic simulado (protobuf de verdad) por TCP o puerto virtual
     test/mqtt.test.mjs paneles.test.mjs  con un broker en memoria (aedes) y un «Home Assistant» de mentira
     test/mosquitto.test.mjs  con un Mosquitto de verdad si está instalado (apt install mosquitto)
-  herramientas/         pantalla-servidor.mjs: de punta a punta con Playwright (ver herramientas/LEEME.md)
+  herramientas/         pantalla-servidor.mjs: de punta a punta con Playwright; docker-prueba.mjs: la imagen con
+                        compose (ver herramientas/LEEME.md)
   dist/app/             app compilada (no va al repo)
+Dockerfile              la imagen (paso 5.3); docker/: entrypoint.sh, talaia (la orden dentro), compose.yaml
+.github/workflows/      ci.yml (pruebas, compilar, imagen amd64+arm64 y docker-prueba.mjs) y release.yml (imagen a ghcr.io)
 ```
 
 El motor recibe el objeto de estado `S` (ver `estadoInicial()`) y ganchos; la app le añade a `S` lo de pantalla.
@@ -266,7 +269,7 @@ con Tasmota/ESPHome, Zigbee por zigbee2mqtt, ESPHome, Home Assistant…).
   (Releases; desde esta sesión no se pueden subir etiquetas) y eso publica la imagen. Por partes: 5.1) nombres
   internos (hecho, 23 oct. 2026: `INSTALADOR=4`, probado en un contenedor desde una instalación de Vigía hecha con el
   instalador 3); 5.2) usuarios del broker por seguridad dinámica (hecho, 23 oct. 2026: `INSTALADOR=5`); 5.3) imagen
-  Docker, compose y GitHub Actions; 5.4) documentación en inglés (y español) → 2.0.
+  Docker, compose y GitHub Actions (hecho, 23 oct. 2026); 5.4) documentación en inglés (y español) → 2.0.
 - Broker por seguridad dinámica (5.2): Talaia es el cliente admin «talaia» de su Mosquitto (contraseña al azar en
   SQLite, «mosquitto») y le manda órdenes por `$CONTROL/dynamic-security/v1` (crear, cambiar contraseña, quitar,
   listar); Mosquitto guarda los usuarios en `/var/lib/mosquitto/talaia-dynamic-security.json` (suyo, 600). Los
@@ -277,6 +280,24 @@ con Tasmota/ESPHome, Zigbee por zigbee2mqtt, ESPHome, Home Assistant…).
   instalador quita `talaia-mosquitto.path/.service`, `/etc/mosquitto/talaia.passwd` y `<datos>/mosquitto/`; si el
   Mosquitto no trae el plugin o tiene otra configuración (listener, plugin, allow_anonymous…), no lo toca. En las
   pruebas, Mosquitto como root necesita `user root` (si no, no puede leer el fichero).
+- Docker (5.3, 23 oct. 2026): imagen `ghcr.io/dani-nros/talaia-hub` (amd64 y arm64; 32 bits, con el instalador) desde
+  `node:24-bookworm-slim`; la etapa de compilar corre en la arquitectura de quien compila (serialport trae sus binarios
+  para todas) y la imagen solo lleva el servidor, el núcleo, `dist/app` y las dependencias del servidor. Talaia corre
+  como `talaia` (uid 4404, como su puerto; Mosquitto usa 1883). El contenedor arranca como root en
+  `docker/entrypoint.sh`: deja `/data` del servicio (750), con `TALAIA_BROKER` y `/broker` montado escribe la
+  configuración de Mosquitto (cada vez) y su primer fichero de usuarios (`talaia --broker-inicial`, si no está), todo
+  de 1883, y pasa a `talaia` con `setpriv`, también en los grupos de los puertos serie que tenga (así vale aunque el
+  equipo llame de otra forma al grupo). Configuración por variables en inglés (`TALAIA_RECEIVER`, `TALAIA_BROKER`,
+  `TALAIA_WEB_PORT`, `TALAIA_DATA`, `TALAIA_RETENTION_DAYS`, `TALAIA_LOG_LEVEL`: `desdeEntorno` en config.js), que
+  mandan sobre `/data/config.json`. Con `TALAIA_DOCKER` (lo pone la imagen) no dice sus IP (las de dentro no valen) y
+  la entrada da las órdenes con `docker compose exec talaia talaia …`. `talaia --salud` es la comprobación de salud.
+  `listarPuertos` salta los tty de /sys que no están en /dev (en un contenedor, /sys ve todos). `compose.yaml`: Talaia
+  y `eclipse-mosquitto:2` con un volumen compartido (`/broker` en Talaia, `/mosquitto/data` en Mosquitto), Mosquitto
+  espera a que Talaia esté sana. Se quitó `mosquitto.fichero` del 5.2 (lo hace el entrypoint). GitHub Actions: `ci.yml`
+  en cada push; `release.yml` al publicar una versión en GitHub (etiqueta `vX.Y.Z` igual a `codigo/package.json`):
+  pasa ci.yml y sube la imagen con las etiquetas X.Y.Z, X.Y, X y latest. El primer paquete en ghcr.io sale privado:
+  hay que hacerlo público una vez en sus ajustes. Desde esta sesión no se puede bajar nada de Docker Hub: la imagen se
+  prueba en GitHub Actions (y aquí, simulando el contenedor sin Docker).
 - Orden (1 y 2, hechos): 1) nombre y política de idioma; 2) congelar la webapp y reorganizar el repositorio;
   3) rediseño con los dos idiomas; 4) usuarios; 5) Docker y documentación en inglés → **2.0**. Las
   **automatizaciones** («si… entonces…», centradas en la malla, con la fase 6 de control desde la malla dentro) →

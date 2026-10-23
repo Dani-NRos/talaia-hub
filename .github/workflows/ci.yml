@@ -1,0 +1,75 @@
+# On every push: the tests (Node 22 and 24, with a real Mosquitto), the screen's build, and the Docker image, built
+# for amd64 and arm64 and tried end to end with docker/compose.yaml. The release workflow runs this first too.
+name: CI
+
+on:
+  push:
+  pull_request:
+  workflow_call:
+
+permissions:
+  contents: read
+
+jobs:
+  tests:
+    runs-on: ubuntu-latest
+    strategy:
+      matrix:
+        node: [22, 24]
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/setup-node@v7
+        with:
+          node-version: ${{ matrix.node }}
+          cache: npm
+          cache-dependency-path: codigo/package-lock.json
+      - name: Mosquitto, for the tests of this machine's broker
+        run: |
+          sudo apt-get update -q
+          sudo apt-get install -y -q mosquitto
+          sudo systemctl stop mosquitto || true
+      - run: npm ci --no-audit --no-fund
+        working-directory: codigo
+      - run: npm test
+        working-directory: codigo
+      - run: npm run build
+        working-directory: codigo
+
+  docker:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/setup-node@v7
+        with:
+          node-version: 24
+          cache: npm
+          cache-dependency-path: codigo/package-lock.json
+      - name: What the end-to-end test needs (the simulated node, MQTT)
+        run: npm ci --no-audit --no-fund
+        working-directory: codigo
+      - uses: docker/setup-qemu-action@v4
+      - uses: docker/setup-buildx-action@v4
+      - name: Image for amd64
+        uses: docker/build-push-action@v7
+        with:
+          context: .
+          platforms: linux/amd64
+          load: true
+          tags: talaia-hub:prueba
+          cache-from: type=gha
+          cache-to: type=gha,mode=max
+      - name: End to end with compose (Talaia, its Mosquitto and a simulated node)
+        run: node codigo/herramientas/docker-prueba.mjs talaia-hub:prueba
+      - name: Image for arm64
+        uses: docker/build-push-action@v7
+        with:
+          context: .
+          platforms: linux/arm64
+          load: true
+          tags: talaia-hub:prueba-arm64
+          cache-from: type=gha
+      - name: The arm64 image starts and loads its serial port library
+        run: |
+          docker run --rm --platform linux/arm64 talaia-hub:prueba-arm64 --version
+          docker run --rm --platform linux/arm64 --entrypoint node -w /opt/talaia/servidor talaia-hub:prueba-arm64 \
+            -e "require('@serialport/bindings-cpp'); console.log('serialport: ok')"

@@ -6,6 +6,8 @@ import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
 import http from "node:http";
+import net from "node:net";
+import { spawn } from "node:child_process";
 import { crearTalaia } from "../src/talaia.js";
 import { crearWeb } from "../src/web.js";
 import { comprobar } from "../src/config.js";
@@ -283,4 +285,16 @@ test("CSV de un histórico grande: por bloques, sin perder ni repetir filas, y s
   const valores = lineas.map((l) => Number(l.split(";")[4])).sort((a, b) => a - b);
   assert.deepEqual(valores, filas.map((f) => f.v));
   assert.ok(vueltas > 1, "el servidor siguió atendiendo mientras exportaba");
+});
+
+test("talaia --salud: 0 if the screen answers on its port (Docker's health check), 1 if not", async (t) => {
+  const { puerto } = await montar(t);
+  const main = new URL("../src/main.js", import.meta.url).pathname;
+  const salud = (p) => new Promise((resolve) => {
+    const h = spawn(process.execPath, [main, "--config", "/no-hay.json", "--salud"], { env: { ...process.env, TALAIA_WEB_PORT: String(p) }, stdio: "ignore" });
+    h.on("exit", resolve);
+  });
+  assert.equal(await salud(puerto), 0);
+  const libre = await new Promise((r) => { const s = net.createServer().listen(0, "127.0.0.1", () => { const p = s.address().port; s.close(() => r(p)); }); });
+  assert.equal(await salud(libre), 1);
 });
