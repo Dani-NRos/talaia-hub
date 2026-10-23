@@ -207,8 +207,7 @@ con Tasmota/ESPHome, Zigbee por zigbee2mqtt, ESPHome, Home Assistant…).
 - Paso 2 hecho (22 oct. 2026): `main` es la app ligera congelada (con aviso en su README), `version-1.20` guarda la
   1.20 y `mapa` ya no lleva los ficheros compilados de la app ligera ni sus herramientas. Con el nombre, `mapa` pasó a
   `talaia-hub` (22 oct. 2026) con su historia; el instalador descarga de aquí.
-- **Paso 3, rediseño** (Dani, 22 oct. 2026), en la rama **`rediseno`** (main sigue estable en el BMAX; Dani prueba
-  con `--rama rediseno` y vuelve a main cuando quiera; al acabar, pasa a main). Barra, **solo iconos** y en este orden
+- **Paso 3, rediseño** (Dani, 22 oct. 2026), hecho en la rama `rediseno` y pasado a `main` el 23 oct. 2026. Barra, **solo iconos** y en este orden
   (Dani, 22 oct. 2026): Tablero, Mapa, **Nodos** (la lista de toda la malla con su buscador), **Automatizaciones**
   («Llega en la 2.1»), Alarmas; y Ajustes. El nombre de la sección va en la barra de arriba (y en el título y la
   etiqueta de cada icono). En el ordenador, todo en la barra lateral (Ajustes abajo); en el móvil, cinco en la barra
