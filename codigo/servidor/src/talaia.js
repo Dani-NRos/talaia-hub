@@ -32,7 +32,13 @@ export async function crearTalaia(config, registro, opts = {}) {
   /* ── estado guardado ── */
   S.settings = { ...S.settings, retentionDays: config.retencionDias, ...almacen.leer("settings", {}) };
   // What the server writes (log, mesh alerts, Home Assistant, replies, the journal), in its language.
-  if (!LANGUAGES.includes(S.settings.language)) S.settings.language = "es";
+  // Without one: a new installation (nothing of the mesh saved yet), the one it's given (the machine's); one of
+  // before 3.4, Spanish, as it was then.
+  if (!LANGUAGES.includes(S.settings.language)) {
+    const nueva = almacen.leer("nodes", null) == null && almacen.leer("cfg", null) == null;
+    S.settings.language = nueva && LANGUAGES.includes(opts.idiomaNuevo) ? opts.idiomaNuevo : "es";
+    almacen.guardar("settings", { ...almacen.leer("settings", {}), language: S.settings.language });
+  }
   setLanguage(S.settings.language);
   S.cfg = almacen.leer("cfg", { watched: {} }) || { watched: {} };
   if (!S.cfg.watched) S.cfg.watched = {};

@@ -44,7 +44,7 @@ if (inicial.status !== 0) { console.error(inicial.stderr); process.exit(1); }
 fs.writeFileSync(DYNSEC, inicial.stdout, { mode: 0o600 });
 let serverLog = "";
 function arrancarServidor() {
-  const p = spawn(process.execPath, [`${REPO}/servidor/src/main.js`, "--config", cfgFile], { env: { ...process.env, TZ: "Europe/Madrid" } });
+  const p = spawn(process.execPath, [`${REPO}/servidor/src/main.js`, "--config", cfgFile], { env: { ...process.env, TZ: "Europe/Madrid", LANG: "es_ES.UTF-8" } });
   p.stdout.on("data", (d) => { serverLog += d; });
   p.stderr.on("data", (d) => { serverLog += d; });
   return p;

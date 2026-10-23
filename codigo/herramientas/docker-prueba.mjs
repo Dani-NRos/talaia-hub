@@ -73,7 +73,7 @@ try {
   });
   await paso("la pantalla dice los comandos de Docker y el primer usuario se crea con el código de `talaia --codigo`", async () => {
     igual((await api("/api/sesion")).j, { ok: false, primero: true, docker: true }, "sesión");
-    const codigo = /: (\S+)$/.exec(enTalaia("talaia", "--codigo"))?.[1];
+    const codigo = /: (\S+)$/.exec(enTalaia("talaia", "--code"))?.[1]; // in English: the container has no LANG
     if (!codigo) throw new Error("sin código");
     const r = await api("/api/primero", { codigo, nombre: "Prueba", clave: "clave-de-prueba-1" });
     igual(r.status, 200, "primero");
@@ -109,9 +109,10 @@ try {
     if (!(await entra("shelly", "clave-del-shelly"))) throw new Error("el Shelly no entra tras reiniciar");
     igual(enTalaia("sha256sum", "/broker/mosquitto.conf"), antes, "la configuración de Mosquitto");
   });
-  await paso("en el diario: nada de «no deja gestionar sus usuarios» ni errores", async () => {
+  await paso("en el diario (en inglés: sin LANG, una instalación nueva empieza así): ni errores ni el broker sin gestionar", async () => {
+    if (!/Talaia Hub .* · configuration: /.test(compose("logs", "--no-color", "talaia"))) throw new Error("el diario no está en inglés");
     const diario = compose("logs", "--no-color", "talaia");
-    if (/no deja gestionar| ERROR: |Excepción/.test(diario)) throw new Error(diario);
+    if (/doesn't let its users be managed| ERROR: |Uncaught exception/.test(diario)) throw new Error(diario);
   });
 } finally {
   if (fallos) {

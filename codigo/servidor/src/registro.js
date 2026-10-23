@@ -1,8 +1,14 @@
 // Registro del servidor: una línea por suceso en la salida estándar. Con systemd va al diario
 // (journalctl -u talaia), que ya pone la hora; fuera de systemd se añade aquí.
 
+import { getLanguage } from "@talaia/nucleo/idioma.js";
+
 const NIVELES = { depurar: 10, info: 20, aviso: 30, error: 40 };
-const ETIQUETA = { depurar: "depurar", info: "info", aviso: "AVISO", error: "ERROR" };
+// Outside systemd (Docker, by hand), each line says its level, in the server's language.
+const ETIQUETA = {
+  es: { depurar: "depurar", info: "info", aviso: "AVISO", error: "ERROR" },
+  en: { depurar: "debug", info: "info", aviso: "WARN", error: "ERROR" },
+};
 // systemd pone JOURNAL_STREAM cuando la salida va al diario.
 const CON_HORA = !process.env.JOURNAL_STREAM;
 // Prioridad para el diario (formato <n> de sd-daemon): 7 depurar, 6 info, 4 aviso, 3 error.
@@ -19,7 +25,7 @@ export function crearRegistro({ nivel = "info", salida = null } = {}) {
   const min = NIVELES[nivel] ?? NIVELES.info;
   const escribir = (n, msg) => {
     if (NIVELES[n] < min) return;
-    const linea = CON_HORA ? `${hora()} ${ETIQUETA[n]}: ${msg}` : `<${PRIO[n]}>${msg}`;
+    const linea = CON_HORA ? `${hora()} ${(ETIQUETA[getLanguage()] || ETIQUETA.es)[n]}: ${msg}` : `<${PRIO[n]}>${msg}`;
     if (salida) salida.push({ nivel: n, msg });
     else (n === "error" || n === "aviso" ? process.stderr : process.stdout).write(linea + "\n");
   };

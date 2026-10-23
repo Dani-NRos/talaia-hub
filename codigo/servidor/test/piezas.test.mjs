@@ -6,11 +6,12 @@ import os from "node:os";
 import path from "node:path";
 import { Duplex } from "node:stream";
 import { listarPuertos, elegirPuerto } from "../src/puertos.js";
-import { abrirAlmacen, rutaAlmacen } from "../src/almacen.js";
-import { comprobar, ErrorConfig, leerConfig, desdeEntorno } from "../src/config.js";
+import { abrirAlmacen, rutaAlmacen, leerGuardado } from "../src/almacen.js";
+import { comprobar, ErrorConfig, leerConfig, desdeEntorno, idiomaDelEntorno } from "../src/config.js";
 import { EnlaceFlujo } from "../src/enlace.js";
 import { clasificar } from "../src/receptor.js";
 import { LinkError } from "@talaia/nucleo/receptor-base.js";
+import { setLanguage } from "@talaia/nucleo/idioma.js";
 
 /* ── puertos ── */
 function sysFalso() {
@@ -103,9 +104,9 @@ test("configuración: valores por defecto y errores claros", () => {
   assert.equal(c.web.puerto, 4404);
   assert.equal(c.retencionDias, 365); // todos los nodos, un año
   assert.deepEqual(comprobar({ receptor: { tipo: "tcp", host: "nodo.local" } }).receptor, { tipo: "tcp", puerto: 4403, host: "nodo.local" });
-  assert.throws(() => comprobar({ receptor: { tipo: "tcp" } }), (e) => e instanceof ErrorConfig && /falta "host"/.test(e.message));
-  assert.throws(() => comprobar({ receptor: { tipo: "bluetooth" } }), /"usb" o "tcp"/);
-  assert.throws(() => comprobar({ receptor: { puerto: "COM3" } }), /"auto", una ruta/);
+  assert.throws(() => comprobar({ receptor: { tipo: "tcp" } }), (e) => e instanceof ErrorConfig && /falta «host»/.test(e.message));
+  assert.throws(() => comprobar({ receptor: { tipo: "bluetooth" } }), /«usb» o «tcp»/);
+  assert.throws(() => comprobar({ receptor: { puerto: "COM3" } }), /«auto», una ruta/);
   assert.throws(() => comprobar({ web: { puerto: 99999 } }), /web.puerto/);
 });
 
@@ -142,6 +143,46 @@ test("fallos: qué decir según el caso", () => {
   assert.equal(clasificar(new LinkError("open", Object.assign(new Error("connect ECONNREFUSED"), { code: "ECONNREFUSED" })), "tcp"), "red");
   assert.equal(clasificar(new LinkError("unplugged", null, "no hay ningún nodo enchufado"), "serial"), "unplugged");
   assert.equal(clasificar(new LinkError("config", null, "el nodo dejó de mandar datos"), "serial"), "noapi");
+});
+
+test("configuración: las claves también en inglés; los errores, en el idioma del servidor", () => {
+  const c = comprobar({ receiver: { type: "tcp", host: "192.168.1.60", port: 4500 }, web: { port: 4405, listen: "127.0.0.1" }, data: "/srv/talaia", retentionDays: 30, logLevel: "debug", broker: { port: 1884 } });
+  assert.deepEqual(c.receptor, { tipo: "tcp", puerto: 4500, host: "192.168.1.60" });
+  assert.deepEqual(c.web, { puerto: 4405, escuchar: "127.0.0.1" });
+  assert.deepEqual([c.datos, c.retencionDias, c.registro], ["/srv/talaia", 30, "depurar"]);
+  assert.deepEqual(c.mosquitto, { puerto: 1884, host: "127.0.0.1" });
+  // The Spanish key wins if both are there.
+  assert.equal(comprobar({ datos: "/a", data: "/b" }).datos, "/a");
+  setLanguage("en");
+  try {
+    assert.throws(() => comprobar({ receiver: { type: "tcp" } }), /the TCP receiver needs a “host”/);
+    assert.throws(() => desdeEntorno({ TALAIA_WEB_PORT: "x" }), /TALAIA_WEB_PORT has to be a number/);
+  } finally {
+    setLanguage("es");
+  }
+});
+
+test("idioma de la terminal: por LANG (es también para ca, eu y gl), nada si no dice ninguno", () => {
+  assert.equal(idiomaDelEntorno({ LANG: "es_ES.UTF-8" }), "es");
+  assert.equal(idiomaDelEntorno({ LANG: "ca_ES.UTF-8" }), "es");
+  assert.equal(idiomaDelEntorno({ LANG: "en_GB.UTF-8" }), "en");
+  assert.equal(idiomaDelEntorno({ LANG: "de_DE.UTF-8" }), "en");
+  assert.equal(idiomaDelEntorno({ LANG: "es_ES.UTF-8", LC_ALL: "en_US.UTF-8" }), "en");
+  assert.equal(idiomaDelEntorno({ LANG: "estonian" }), "en"); // not «es»
+  assert.equal(idiomaDelEntorno({ LANG: "C.UTF-8" }), null);
+  assert.equal(idiomaDelEntorno({ LANG: "POSIX" }), null);
+  assert.equal(idiomaDelEntorno({}), null);
+});
+
+test("almacén: leer un valor sin abrirlo para escribir", () => {
+  const ruta = path.join(fs.mkdtempSync(path.join(os.tmpdir(), "alm-")), "talaia.db");
+  assert.equal(leerGuardado(ruta, "settings"), null);
+  assert.equal(fs.existsSync(ruta), false, "no file is made");
+  const a = abrirAlmacen(ruta);
+  a.guardar("settings", { language: "en" });
+  assert.deepEqual(leerGuardado(ruta, "settings"), { language: "en" });
+  assert.equal(leerGuardado(ruta, "otra"), null);
+  a.cerrar();
 });
 
 /* ── enlace ── */

@@ -19,6 +19,21 @@ export function rutaAlmacen(datos, { mover = false } = {}) {
   return nueva;
 }
 
+/** One value of the saved state, read without opening the store to write (null if there's no file or no value). */
+export function leerGuardado(ruta, clave) {
+  if (!fs.existsSync(ruta)) return null;
+  let db = null;
+  try {
+    db = new DatabaseSync(ruta, { readOnly: true });
+    const r = db.prepare("SELECT valor FROM estado WHERE clave = ?").get(clave);
+    return r ? JSON.parse(r.valor) : null;
+  } catch {
+    return null;
+  } finally {
+    try { db?.close(); } catch { /* already closed */ }
+  }
+}
+
 /** ruta: fichero de la base de datos, o ":memory:" para pruebas. */
 export function abrirAlmacen(ruta) {
   if (ruta !== ":memory:") fs.mkdirSync(path.dirname(ruta), { recursive: true });
