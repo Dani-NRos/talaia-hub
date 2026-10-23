@@ -12,7 +12,7 @@ permissions:
 
 jobs:
   tests:
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     strategy:
       fail-fast: false
       matrix:
@@ -35,22 +35,23 @@ jobs:
           for f in $perfiles; do sudo apparmor_parser -R "$f" || true; done
       - run: npm ci --no-audit --no-fund
         working-directory: codigo
-      - run: npm test
-        working-directory: codigo
-      - name: What failed, as annotations on the run
-        if: failure()
+      - name: Tests (what fails also goes to the run as an annotation)
         working-directory: codigo
         run: |
+          fallo=0
           for w in nucleo app servidor; do
-            (cd "$w" && node --test --test-force-exit --test-reporter=tap test/*.test.mjs > "/tmp/$w.tap" 2>&1) && continue
+            (cd "$w" && node --test --test-force-exit --test-reporter=spec --test-reporter-destination=stdout \
+              --test-reporter=tap --test-reporter-destination="/tmp/$w.tap" test/*.test.mjs) && continue
+            fallo=1
             msg="$(grep -E -A25 '^ *not ok' "/tmp/$w.tap" | head -c 6000 | sed -e 's/%/%25/g' -e 's/\r/%0D/g' | awk 'BEGIN{ORS="%0A"} {print}')"
             echo "::error title=Tests of ${w} (Node ${{ matrix.node }})::${msg}"
           done
+          exit $fallo
       - run: npm run build
         working-directory: codigo
 
   docker:
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     steps:
       - uses: actions/checkout@v7
       - uses: actions/setup-node@v7
