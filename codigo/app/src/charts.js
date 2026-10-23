@@ -2,8 +2,8 @@
 // as a time bar instead of a line.
 import { t, locale } from "./i18n.js";
 import { esc } from "./ui.js";
-import { metricMeta, fmtNum, fmtLimit } from "@vigia/nucleo/metrics.js";
-import { MIN, HOUR, DAY, isNum, hhmm, dShort, dur, stamp } from "@vigia/nucleo/textos.js";
+import { metricMeta, fmtNum, fmtLimit } from "@talaia/nucleo/metrics.js";
+import { MIN, HOUR, DAY, isNum, hhmm, dShort, dur, stamp } from "@talaia/nucleo/textos.js";
 
 const WEEKDAY = new Map();
 const weekday = (d) => {

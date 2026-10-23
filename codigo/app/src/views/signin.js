@@ -7,13 +7,14 @@ import { logoSVG } from "../logo.js";
 
 const gate = () => $("#gate");
 let first = false;
+let docker = false; // the server runs in Docker: its commands are «docker compose exec talaia talaia …»
 
 /** Asks the server who this screen is: { ok, nombre, sesion } | { ok: false, primero } | null (no answer). */
 export async function whoAmI() {
   try {
     const r = await fetch("api/sesion", { cache: "no-store" });
     const j = await r.json().catch(() => ({}));
-    if (r.status === 401) return { ok: false, primero: !!j.primero };
+    if (r.status === 401) { docker = !!j.docker; return { ok: false, primero: !!j.primero }; }
     return r.ok ? j : null;
   } catch {
     return null;
@@ -41,7 +42,7 @@ export function showGate(primero, { ended = false, onLang = () => {} } = {}) {
       </div>
       <p class="form-err" id="gErr" role="alert" hidden></p>
       <button type="submit" class="btn primary gate-go">${esc(t(first ? "gate.create" : "gate.enter"))}</button>
-      <p class="hint gate-help">${esc(t(first ? "gate.firstHelp" : "gate.forgot"))}</p>
+      <p class="hint gate-help">${esc(t(first ? (docker ? "gate.firstHelpDocker" : "gate.firstHelp") : docker ? "gate.forgotDocker" : "gate.forgot"))}</p>
       <div class="gate-lang"><label for="gLang" class="vh">${esc(t("screen.lang"))}</label><select id="gLang" class="inp sel lang">${langs}</select></div>
     </form>`;
   el.querySelector("form").addEventListener("submit", submit);

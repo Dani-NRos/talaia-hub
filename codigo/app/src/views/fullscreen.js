@@ -6,9 +6,9 @@ import { $, $$, esc, setHTML, fitSame, ICON } from "../ui.js";
 import { chartSVG, stateSpans, stateSummary, stateSVG } from "../charts.js";
 import { switchHTML } from "./node-parts.js";
 import { panelState, metaLine, stateRuleText, trendShort, displayName } from "./dashboard.js";
-import { metricMeta, sortMetrics, fmtValue, fmtNum, fmtLimit } from "@vigia/nucleo/metrics.js";
-import { trendKey, estadoKey } from "@vigia/nucleo/motor.js";
-import { HOUR, DAY, isNum, hhmm, ago } from "@vigia/nucleo/textos.js";
+import { metricMeta, sortMetrics, fmtValue, fmtNum, fmtLimit } from "@talaia/nucleo/metrics.js";
+import { trendKey, estadoKey } from "@talaia/nucleo/motor.js";
+import { HOUR, DAY, isNum, hhmm, ago } from "@talaia/nucleo/textos.js";
 
 const RANGES = { "24h": DAY, "7d": 7 * DAY, "30d": 30 * DAY };
 const rangeLabel = (r) => (r === "24h" ? "24 h" : t("sheet.days", { n: r === "7d" ? 7 : 30 }));

@@ -1,6 +1,6 @@
 {
   "name": "talaia-hub",
-  "version": "1.20.0",
+  "version": "2.0.0",
   "private": true,
   "description": "Panel de telemetría y alarmas para nodos Meshtastic, sin internet",
   "license": "GPL-3.0-only",
@@ -11,7 +11,7 @@
     "servidor"
   ],
   "scripts": {
-    "build": "npm run build -w @vigia/app",
+    "build": "npm run build -w @talaia/app",
     "test": "npm test --workspaces --if-present"
   }
 }

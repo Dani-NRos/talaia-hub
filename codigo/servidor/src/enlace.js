@@ -3,9 +3,9 @@
 // entre medias (solo por cable). Cumple el contrato Transport de @meshtastic/core: toDevice, fromDevice, disconnect().
 import net from "node:net";
 import { Types } from "@meshtastic/core";
-import { LinkError } from "@vigia/nucleo/receptor-base.js";
-import { frame, createFramer, createLines, HEARTBEAT, HEARTBEAT_MS, DISCONNECT, wakeBytes } from "@vigia/nucleo/tramas.js";
-import { tx } from "@vigia/nucleo/idioma.js";
+import { LinkError } from "@talaia/nucleo/receptor-base.js";
+import { frame, createFramer, createLines, HEARTBEAT, HEARTBEAT_MS, DISCONNECT, wakeBytes } from "@talaia/nucleo/tramas.js";
+import { tx } from "@talaia/nucleo/idioma.js";
 import "./textos.js";
 
 const ST = Types.DeviceStatusEnum;

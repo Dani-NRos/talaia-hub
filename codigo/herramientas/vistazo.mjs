@@ -31,7 +31,7 @@ const datos = fs.mkdtempSync(path.join(os.tmpdir(), "talaia-vistazo-"));
 const WEB = 40000 + Math.floor(Math.random() * 9000);
 const cfgFile = path.join(datos, "servidor.json");
 fs.writeFileSync(cfgFile, JSON.stringify({ receptor: { tipo: "tcp", host: "127.0.0.1", puerto: tcp }, web: { puerto: WEB }, datos, registro: "aviso" }));
-const srv = spawn(process.execPath, [`${REPO}/servidor/src/main.js`, "--config", cfgFile], { env: { ...process.env, TZ: "Europe/Madrid" }, stdio: "ignore" });
+const srv = spawn(process.execPath, [`${REPO}/servidor/src/main.js`, "--config", cfgFile], { env: { ...process.env, TZ: "Europe/Madrid", LANG: "es_ES.UTF-8" }, stdio: "ignore" });
 const URL0 = `http://127.0.0.1:${WEB}/`;
 for (let i = 0; i < 100; i++) { try { if ((await (await fetch(`${URL0}api/salud`)).json()).receptor === "ready") break; } catch { /* not yet */ } await sleep(100); }
 const browser = await pw.chromium.launch();

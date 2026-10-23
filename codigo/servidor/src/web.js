@@ -1,4 +1,4 @@
-// Servidor web: la app de Vigía (la misma de siempre) y su API, para verla y manejarla desde el móvil o el PC.
+// Servidor web: la app de Talaia (la misma de siempre) y su API, para verla y manejarla desde el móvil o el PC.
 //
 //   GET  /                     la app, que al venir de aquí arranca en modo «Servidor»
 //   GET  /api/eventos          estado al conectar y después solo lo que cambia (server-sent events)
@@ -24,12 +24,12 @@ import net from "node:net";
 import os from "node:os";
 import fs from "node:fs";
 import path from "node:path";
-import { esClaveMqtt } from "@vigia/nucleo/mqtt-datos.js";
-import { ASK_ALL } from "@vigia/nucleo/motor.js";
-import { metricMeta } from "@vigia/nucleo/metrics.js";
+import { esClaveMqtt } from "@talaia/nucleo/mqtt-datos.js";
+import { ASK_ALL } from "@talaia/nucleo/motor.js";
+import { metricMeta } from "@talaia/nucleo/metrics.js";
 import { crearSincro, instantanea } from "./sincro.js";
 import { aparatoDe, llaveDe, SESION_MS } from "./usuarios.js";
-import { tx, getLanguage } from "@vigia/nucleo/idioma.js";
+import { tx, getLanguage } from "@talaia/nucleo/idioma.js";
 import "./textos.js";
 
 const TIPOS = { ".html": "text/html; charset=utf-8", ".js": "text/javascript; charset=utf-8", ".css": "text/css; charset=utf-8",
@@ -49,8 +49,8 @@ const esValor = (v) => v === null || (typeof v === "number" && Number.isFinite(v
 function exigir(cond, que) { if (!cond) throw new ErrorOrden(tx("s.web.badOrder", { what: que })); }
 
 /** Las órdenes que puede mandar una pantalla. Cada una devuelve { ok, toast?, error? }. */
-function crearOrdenes(vigia) {
-  const { motor, acciones } = vigia;
+function crearOrdenes(talaia) {
+  const { motor, acciones } = talaia;
   return {
     ack: ({ key }) => { exigir(typeof key === "string", "key"); motor.ack(key); return { ok: true }; },
     ackAll: () => { motor.ackAll(); return { ok: true }; },
@@ -58,7 +58,7 @@ function crearOrdenes(vigia) {
     vigilar: ({ num }) => {
       exigir(esNodo(num), "num");
       const r = acciones.vigilar(num);
-      r.recientes?.then(() => vigia.eventos.emit("parte", "recent"));
+      r.recientes?.then(() => talaia.eventos.emit("parte", "recent"));
       return { ok: r.ok, toast: r.toast };
     },
     dejar: ({ num }) => { exigir(esNodo(num), "num"); return acciones.dejarDeVigilar(num); },
@@ -74,7 +74,7 @@ function crearOrdenes(vigia) {
     quitarValla: ({ num }) => { exigir(esNodo(num), "num"); return acciones.quitarValla(num); },
     sinSenalDefecto: ({ valor }) => { exigir(esValor(valor), "valor"); return acciones.sinSenalPorDefecto(valor); },
     retencion: ({ dias }) => { exigir(typeof dias === "number", "dias"); const r = acciones.retencion(dias); return { ok: r.ok }; },
-    idioma: ({ idioma }) => { exigir(typeof idioma === "string", "idioma"); return vigia.idioma(idioma); },
+    idioma: ({ idioma }) => { exigir(typeof idioma === "string", "idioma"); return talaia.idioma(idioma); },
     malla: ({ cambio }) => {
       exigir(cambio && typeof cambio === "object", "cambio");
       const ks = Object.keys(cambio);
@@ -84,7 +84,7 @@ function crearOrdenes(vigia) {
     },
     pruebaMalla: () => acciones.pruebaMalla(),
     borrarHistorico: () => acciones.borrarHistorico(),
-    reconectar: () => { vigia.receptor.retryNow(); return { ok: true }; },
+    reconectar: () => { talaia.receptor.retryNow(); return { ok: true }; },
     broker: async ({ id, cambio }) => {
       exigir(id == null || typeof id === "string", "id");
       exigir(cambio && typeof cambio === "object" && !Array.isArray(cambio), "cambio");
@@ -92,23 +92,23 @@ function crearOrdenes(vigia) {
       for (const k of ["nombre", "url", "usuario"]) if (k in cambio) exigir(typeof cambio[k] === "string", k);
       if ("clave" in cambio) exigir(cambio.clave === null || typeof cambio.clave === "string", "clave");
       if ("activado" in cambio) exigir(typeof cambio.activado === "boolean", "activado");
-      return vigia.mqtt.configurarBroker(id ?? null, cambio);
+      return talaia.mqtt.configurarBroker(id ?? null, cambio);
     },
-    quitarBroker: ({ id }) => { exigir(typeof id === "string", "id"); return vigia.mqtt.quitarBroker(id); },
+    quitarBroker: ({ id }) => { exigir(typeof id === "string", "id"); return talaia.mqtt.quitarBroker(id); },
     homeAssistant: ({ cambio }) => {
       exigir(cambio && typeof cambio === "object" && !Array.isArray(cambio), "cambio");
       exigir(Object.keys(cambio).every((k) => ["activado", "broker", "base", "prefijo"].includes(k)), "cambio");
       if ("activado" in cambio) exigir(typeof cambio.activado === "boolean", "activado");
       if ("broker" in cambio) exigir(cambio.broker === null || typeof cambio.broker === "string", "broker");
       for (const k of ["base", "prefijo"]) if (k in cambio) exigir(typeof cambio[k] === "string", k);
-      return vigia.mqtt.configurarHA(cambio);
+      return talaia.mqtt.configurarHA(cambio);
     },
-    usuarioBroker: ({ nombre, clave }) => { exigir(typeof nombre === "string" && typeof clave === "string", "usuario"); return vigia.mqtt.ponerUsuario(nombre, clave); },
-    quitarUsuarioBroker: ({ nombre }) => { exigir(typeof nombre === "string", "nombre"); return vigia.mqtt.quitarUsuario(nombre); },
-    crearPanel: ({ nombre, tipo }) => { exigir(typeof nombre === "string" && typeof tipo === "string", "panel"); return vigia.paneles.crearPanel({ nombre, tipo }); },
-    quitarPanel: ({ num }) => { exigir(esPanel(num), "num"); return vigia.paneles.quitarPanel(num); },
-    renombrar: ({ num, nombre }) => { exigir(esPanel(num), "num"); exigir(typeof nombre === "string", "nombre"); return vigia.paneles.renombrar(num, nombre); },
-    tipoPanel: ({ num, tipo }) => { exigir(esPanel(num), "num"); exigir(typeof tipo === "string", "tipo"); return vigia.paneles.tipoPanel(num, tipo); },
+    usuarioBroker: ({ nombre, clave }) => { exigir(typeof nombre === "string" && typeof clave === "string", "usuario"); return talaia.mqtt.ponerUsuario(nombre, clave); },
+    quitarUsuarioBroker: ({ nombre }) => { exigir(typeof nombre === "string", "nombre"); return talaia.mqtt.quitarUsuario(nombre); },
+    crearPanel: ({ nombre, tipo }) => { exigir(typeof nombre === "string" && typeof tipo === "string", "panel"); return talaia.paneles.crearPanel({ nombre, tipo }); },
+    quitarPanel: ({ num }) => { exigir(esPanel(num), "num"); return talaia.paneles.quitarPanel(num); },
+    renombrar: ({ num, nombre }) => { exigir(esPanel(num), "num"); exigir(typeof nombre === "string", "nombre"); return talaia.paneles.renombrar(num, nombre); },
+    tipoPanel: ({ num, tipo }) => { exigir(esPanel(num), "num"); exigir(typeof tipo === "string", "tipo"); return talaia.paneles.tipoPanel(num, tipo); },
     datosPanel: ({ num, datos, conexion }) => {
       exigir(esPanel(num), "num");
       exigir(Array.isArray(datos) && datos.length <= 40, "datos");
@@ -127,11 +127,11 @@ function crearOrdenes(vigia) {
         for (const k of ["broker", "tema", "campo"]) if (k in conexion) exigir(typeof conexion[k] === "string", `conexion.${k}`);
         if ("avisar" in conexion) exigir(typeof conexion.avisar === "boolean", "conexion.avisar");
       }
-      return vigia.paneles.guardarDatos(num, datos, conexion);
+      return talaia.paneles.guardarDatos(num, datos, conexion);
     },
     mandar: ({ num, clave, v }) => {
       exigir(esPanel(num), "num"); exigir(typeof clave === "string" && /^mq\d+$/.test(clave), "clave"); exigir(v === 0 || v === 1, "v");
-      return vigia.paneles.mandar(num, clave, v);
+      return talaia.paneles.mandar(num, clave, v);
     },
     alarmaEstado: ({ num, metrica, cuando, minutos }) => {
       exigir(esPanel(num), "num"); exigir(esMetrica(metrica), "metrica");
@@ -143,29 +143,30 @@ function crearOrdenes(vigia) {
       exigir(Object.keys(cambio).every((k) => ["activado", "cada", "canal", "saltos"].includes(k)), "cambio");
       if ("activado" in cambio) exigir(typeof cambio.activado === "boolean", "activado");
       for (const k of ["cada", "canal", "saltos"]) if (k in cambio) exigir(cambio[k] === null || Number.isInteger(cambio[k]), k);
-      return vigia.paneles.configurarMalla(cambio);
+      return talaia.paneles.configurarMalla(cambio);
     },
-    buscarTemas: () => vigia.paneles.buscarTemas(),
-    enviarMalla: () => vigia.paneles.enviarAhora(),
+    buscarTemas: () => talaia.paneles.buscarTemas(),
+    enviarMalla: () => talaia.paneles.enviarAhora(),
 
     /* ── users: everyone can do everything (one kind of user) ── */
-    crearUsuario: ({ nombre, clave }, quien) => { exigir(typeof nombre === "string" && typeof clave === "string", "usuario"); return vigia.usuarios.crear(nombre, clave, { por: quien.nombre }); },
+    crearUsuario: ({ nombre, clave }, quien) => { exigir(typeof nombre === "string" && typeof clave === "string", "usuario"); return talaia.usuarios.crear(nombre, clave, { por: quien.nombre }); },
     claveUsuario: ({ nombre, clave, actual }, quien) => {
       exigir(typeof nombre === "string" && typeof clave === "string", "usuario"); exigir(actual == null || typeof actual === "string", "actual");
       const propia = llaveDe(nombre) === quien.llave; // one's own needs the current one; it keeps this session
-      return vigia.usuarios.cambiarClave(nombre, clave, { actual, propia, menos: propia ? quien.id : null, por: quien.nombre });
+      return talaia.usuarios.cambiarClave(nombre, clave, { actual, propia, menos: propia ? quien.id : null, por: quien.nombre });
     },
-    quitarUsuario: ({ nombre }, quien) => { exigir(typeof nombre === "string", "nombre"); return vigia.usuarios.quitar(nombre, { yo: quien.llave, por: quien.nombre }); },
+    quitarUsuario: ({ nombre }, quien) => { exigir(typeof nombre === "string", "nombre"); return talaia.usuarios.quitar(nombre, { yo: quien.llave, por: quien.nombre }); },
     cerrarSesiones: ({ nombre }, quien) => {
       exigir(typeof nombre === "string", "nombre");
-      return vigia.usuarios.cerrarSesiones(nombre, { menos: llaveDe(nombre) === quien.llave ? quien.id : null });
+      return talaia.usuarios.cerrarSesiones(nombre, { menos: llaveDe(nombre) === quien.llave ? quien.id : null });
     },
-    cerrarSesion: ({ id }) => { exigir(typeof id === "string", "id"); return vigia.usuarios.cerrarUna(id); },
+    cerrarSesion: ({ id }) => { exigir(typeof id === "string", "id"); return talaia.usuarios.cerrarUna(id); },
   };
 }
 
-/** Direcciones IPv4 de la red de casa, para decir dónde abrir la app. */
+/** Direcciones IPv4 de la red de casa, para decir dónde abrir la app (in a container, Docker's own: none). */
 export function direcciones(puerto) {
+  if (process.env.TALAIA_DOCKER) return [];
   const out = [];
   for (const lista of Object.values(os.networkInterfaces())) {
     for (const d of lista || []) if (d.family === "IPv4" && !d.internal) out.push(`http://${d.address}:${puerto}`);
@@ -174,14 +175,14 @@ export function direcciones(puerto) {
 }
 
 /**
- * vigia: lo de crearVigia. opts: { appDir } carpeta de la app compilada (por defecto, codigo/dist/app).
+ * talaia: lo de crearTalaia. opts: { appDir } carpeta de la app compilada (por defecto, codigo/dist/app).
  */
-export function crearWeb(vigia, config, registro, opts = {}) {
-  const { S, eventos } = vigia;
+export function crearWeb(talaia, config, registro, opts = {}) {
+  const { S, eventos } = talaia;
   const appDir = opts.appDir || config.web.app || path.resolve(path.dirname(new URL(import.meta.url).pathname), "../../dist/app");
   const nombres = new Set((config.web.nombres || []).map((n) => String(n).toLowerCase()));
-  const ordenes = crearOrdenes(vigia);
-  const { usuarios } = vigia;
+  const ordenes = crearOrdenes(talaia);
+  const { usuarios } = talaia;
   const clientes = new Map(); // open screens (server-sent events) → their session
   let avisadoFunnel = false;
 
@@ -206,7 +207,7 @@ export function crearWeb(vigia, config, registro, opts = {}) {
     diag: () => sincro.marcar("diag"),
     filas: (rows) => sincro.filas(rows),
     sesionesCerradas: (ids) => cortar(ids),
-    alarma: (al) => emitir("alarma", { al, titulo: vigia.motor.alarmTitle(al), detalle: vigia.motor.alarmDetail(al) }),
+    alarma: (al) => emitir("alarma", { al, titulo: talaia.motor.alarmTitle(al), detalle: talaia.motor.alarmDetail(al) }),
   };
   for (const [ev, f] of Object.entries(escuchas)) eventos.on(ev, f);
   // Cada 25 s algo por cada conexión abierta: los intermediarios no la cortan y se nota si la pantalla se fue. And
@@ -342,8 +343,8 @@ export function crearWeb(vigia, config, registro, opts = {}) {
     const fecha = new Date().toISOString().slice(0, 10);
     const es = getLanguage() === "es", sep = es ? ";" : ",", dec = (v) => (es ? String(v).replace(".", ",") : String(v));
     res.writeHead(200, { "content-type": "text/csv; charset=utf-8", "content-disposition": `attachment; filename="talaia-${fecha}.csv"` });
-    const nombre = (n) => `"${vigia.motor.nodeName(n).replaceAll('"', "'")}"`;
-    const bloque = vigia.almacen.db.prepare("SELECT nodo, metrica, t, v FROM lecturas WHERE (t, nodo, metrica) > (?, ?, ?) ORDER BY t, nodo, metrica LIMIT ?");
+    const nombre = (n) => `"${talaia.motor.nodeName(n).replaceAll('"', "'")}"`;
+    const bloque = talaia.almacen.db.prepare("SELECT nodo, metrica, t, v FROM lecturas WHERE (t, nodo, metrica) > (?, ?, ?) ORDER BY t, nodo, metrica LIMIT ?");
     let cortado = false;
     req.on("close", () => { cortado = true; });
     let txt = `\ufeff${tx("s.csv.head").split(",").join(sep)}\n`;
@@ -380,12 +381,6 @@ export function crearWeb(vigia, config, registro, opts = {}) {
       return json(res, 404, { error: tx("s.web.notFound") });
     }
     const tipo = TIPOS[path.extname(f)] || "application/octet-stream";
-    if (rel === "/index.html") {
-      // Marca para que la app arranque en modo «Servidor».
-      const html = fs.readFileSync(f, "utf8").replace("<head>", "<head>\n<script>window.__VIGIA_SERVIDOR = true;</script>");
-      res.writeHead(200, { "content-type": tipo, "cache-control": "no-cache" });
-      return res.end(html);
-    }
     res.writeHead(200, { "content-type": tipo, "cache-control": "no-cache" });
     fs.createReadStream(f).pipe(res);
   }
@@ -412,7 +407,7 @@ export function crearWeb(vigia, config, registro, opts = {}) {
         return json(res, 200, { ok: true, receptor: S.link.state, nodos: S.nodes.size, alarmas: S.active.size, lecturas: await S.store.count() });
       }
       if (p === "/api/sesion" && req.method === "GET") {
-        if (!quien) return json(res, 401, { ok: false, primero: !usuarios.hay() });
+        if (!quien) return json(res, 401, { ok: false, primero: !usuarios.hay(), ...(process.env.TALAIA_DOCKER ? { docker: true } : {}) });
         renovar(req, res);
         return json(res, 200, { ok: true, nombre: quien.nombre, sesion: quien.id.slice(0, 12) });
       }

@@ -11,13 +11,14 @@ import { displayName } from "./dashboard.js";
 import { brokerLabel } from "./panel-config.js";
 import { usersTab, usersClick } from "./users.js";
 import { unlockAudio, beep, applyWake, notificationState } from "../alerts.js";
-import { channelWhy } from "@vigia/nucleo/canales.js";
-import { hexId, MESH_HOURLY } from "@vigia/nucleo/motor.js";
-import { PRESET_NAME } from "@vigia/nucleo/route.js";
-import { fmtNum } from "@vigia/nucleo/metrics.js";
-import { hhmm, stamp } from "@vigia/nucleo/textos.js";
+import { channelWhy } from "@talaia/nucleo/canales.js";
+import { hexId, MESH_HOURLY } from "@talaia/nucleo/motor.js";
+import { PRESET_NAME } from "@talaia/nucleo/route.js";
+import { fmtNum } from "@talaia/nucleo/metrics.js";
+import { hhmm, stamp } from "@talaia/nucleo/textos.js";
 
-export const APP_VERSION = "1.20.0";
+/* global __APP_VERSION__ */
+export const APP_VERSION = typeof __APP_VERSION__ === "string" ? __APP_VERSION__ : "dev"; // build.mjs puts it in
 const REPO_URL = "https://github.com/Dani-NRos/talaia-hub";
 const ISSUES_URL = `${REPO_URL}/issues`;
 export const TILE_CACHE = "teselas-osm"; // the same name as in sw.js
@@ -373,7 +374,7 @@ function systemTab() {
     </section>
     <section class="blk about"><h3>${esc(t("sys.about"))}</h3>
       <p><strong>Talaia ${APP_VERSION}</strong>. ${esc(t("sys.aboutText"))}</p>
-      <div class="btns"><a class="btn ghost" href="${REPO_URL}" target="_blank" rel="noopener">${esc(t("sys.code"))}</a><a class="btn ghost" href="${ISSUES_URL}" target="_blank" rel="noopener">${esc(t("sys.issues"))}</a></div>
+      <div class="btns"><a class="btn ghost" href="${REPO_URL}/blob/main/docs/${getLang() === "es" ? "guide.es.md" : "guide.md"}" target="_blank" rel="noopener">${esc(t("sys.guide"))}</a><a class="btn ghost" href="${REPO_URL}" target="_blank" rel="noopener">${esc(t("sys.code"))}</a><a class="btn ghost" href="${ISSUES_URL}" target="_blank" rel="noopener">${esc(t("sys.issues"))}</a></div>
       <p class="hint">${esc(t("sys.linksHint"))}</p>
       <p class="hint">${esc(t("sys.license"))}</p>
     </section>`;

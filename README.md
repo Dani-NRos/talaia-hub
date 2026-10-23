@@ -1,36 +1,53 @@
 # Talaia Hub
 
-24/7 monitoring of [Meshtastic](https://meshtastic.org) mesh networks and MQTT devices (Shelly, Tasmota, ESPHome,
-zigbee2mqtt…) on a small Linux computer at home: a mini PC, a Raspberry Pi 4/5 or a Pi Zero 2 W. Dashboards, alarms,
-a year of history in SQLite, switches you can control, Home Assistant over MQTT and access from outside your home with
-Tailscale. Everything stays on your own machine.
+*[Español](README.es.md)*
 
-**Under development towards version 2.0.** Up to version 1.20 it was called *Vigía servidor* and it still shows that
-name. The redesign, the English interface, user accounts and Docker are on the way. Today the interface and the
-documentation are only in Spanish.
+24/7 watch over a [Meshtastic](https://meshtastic.org) mesh and MQTT devices (Shelly, Tasmota, ESPHome, zigbee2mqtt…)
+from a small Linux computer at home: a mini PC, a Raspberry Pi 4/5 or a Pi Zero 2 W. Everything stays on your own
+machine; it works without internet.
 
-- **Install the development version** (Ubuntu, Debian, Raspberry Pi OS):
-  `wget -qO- https://raw.githubusercontent.com/Dani-NRos/talaia-hub/main/codigo/servidor/instalar.sh | sudo bash`
-- **How to set it up and use it**: [`codigo/servidor`](codigo/servidor/README.md) (in Spanish).
-- **Stable version (1.20)**: Vigía servidor, installed from [vigia-mesh](https://github.com/Dani-NRos/vigia-mesh).
-- **The light app** (Bluetooth or USB cable, nothing to install), frozen at 1.20:
+- **Dashboard** with a panel for each node or device you watch: readings, charts, battery, ON/OFF states and switches.
+- **Alarms**: thresholds, fast changes, an anti-theft fence, no signal, a door open for too long… They sound and notify
+  on every screen that's open, and the server can send them over the mesh itself, to a private channel or a node.
+- **A year of history** in SQLite, with charts and CSV export.
+- **The whole mesh**: map, list with search, routes, requests to nodes (telemetry, position, node info, traceroute).
+- **MQTT**: its own Mosquitto broker with users managed from the screen, other brokers at the same time, and data from
+  any device as panels. A weather station's values can go out over the mesh as the receiver's telemetry.
+- **Home Assistant** over MQTT with discovery: the watched nodes, their alarms and an *Acknowledge* button.
+- **Users and passwords**, a screen in English and Spanish, light and dark themes, installable as an app, and access
+  from outside your home with Tailscale.
+
+**Version 2.0.** Up to 1.20 it was called *Vigía servidor*; an installation of it moves to Talaia by itself, with its
+data.
+
+## Install
+
+On Ubuntu, Debian or Raspberry Pi OS, with the node plugged in by USB:
+
+```
+wget -qO- https://raw.githubusercontent.com/Dani-NRos/talaia-hub/main/codigo/servidor/instalar.sh | sudo bash
+```
+
+With a node over the network, add `-s -- --tcp 192.168.1.60` after `bash`. When it finishes, it says where to open the
+screen (`http://<IP>:4404`) and the code to create the first user.
+
+**With Docker** (amd64 and arm64), Talaia and its own Mosquitto:
+
+```
+wget https://raw.githubusercontent.com/Dani-NRos/talaia-hub/main/docker/compose.yaml
+docker compose up -d
+docker compose exec talaia talaia --code
+```
+
+## Documentation
+
+- **[User guide](docs/guide.md)**: installing, Docker, configuration, the screen, Tailscale, MQTT, Home Assistant,
+  panels and data to the mesh.
+- **[Changes](CHANGELOG.md)** in each version.
+- **The light app** (Bluetooth or USB cable, nothing to install, in Spanish), frozen at 1.20:
   https://dani-nros.github.io/vigia-mesh/
+
+Problems and suggestions: [issues](https://github.com/Dani-NRos/talaia-hub/issues). The screen's
+*Settings → Receiver → Connection diagnostics* can be copied into one.
 
 License: [GPL-3.0](LICENSE).
-
-## En español
-
-Talaia Hub vigila 24/7 una malla [Meshtastic](https://meshtastic.org) y dispositivos MQTT (Shelly, Tasmota, ESPHome,
-zigbee2mqtt…) desde un ordenador pequeño con Linux en casa: un mini PC, una Raspberry Pi 4/5 o una Pi Zero 2 W.
-Paneles, alarmas, un año de histórico en SQLite, interruptores que se manejan desde la pantalla, Home Assistant por
-MQTT y acceso desde fuera de casa con Tailscale. Todo se queda en tu equipo.
-
-**En desarrollo hacia la versión 2.0.** Hasta la 1.20 se llamaba *Vigía servidor*, y la pantalla aún dice ese nombre.
-Llegarán el rediseño, la versión en inglés, los usuarios con contraseña y Docker.
-
-- **Instalar la versión en desarrollo** (Ubuntu, Debian, Raspberry Pi OS): el mismo comando de arriba. Si ya tienes
-  Vigía servidor, se instala encima y conserva los datos y la configuración.
-- **Cómo configurarlo y usarlo**: [`codigo/servidor`](codigo/servidor/README.md).
-- **Versión estable (1.20)**: Vigía servidor, que se instala desde [vigia-mesh](https://github.com/Dani-NRos/vigia-mesh).
-- **La app ligera** (Bluetooth o cable USB, sin instalar nada), congelada en la 1.20:
-  https://dani-nros.github.io/vigia-mesh/

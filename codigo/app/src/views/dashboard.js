@@ -4,9 +4,9 @@ import { ctx } from "../ctx.js";
 import { t } from "../i18n.js";
 import { $, $$, esc, setHTML, fitSame, LS, ICON } from "../ui.js";
 import { requestBlock, positionBlock, switchHTML } from "./node-parts.js";
-import { metricMeta, sortMetrics, fmtValue, fmtNum, fmtLimit } from "@vigia/nucleo/metrics.js";
-import { seriesKey, trendKey, estadoKey } from "@vigia/nucleo/motor.js";
-import { MIN, hhmm, ago, stamp, dur, isNum, hoursText } from "@vigia/nucleo/textos.js";
+import { metricMeta, sortMetrics, fmtValue, fmtNum, fmtLimit } from "@talaia/nucleo/metrics.js";
+import { seriesKey, trendKey, estadoKey } from "@talaia/nucleo/motor.js";
+import { MIN, hhmm, ago, stamp, dur, isNum, hoursText } from "@talaia/nucleo/textos.js";
 
 /** The name shown: the one given here, or Meshtastic's. */
 export const displayName = (n) => n?.alias || n?.long || "";
@@ -90,7 +90,7 @@ function troubleHTML() {
 /* ── cards ── */
 
 // Collapsed cards and chosen order: saved on this device (apart from the alarms, which are the server's).
-export function saveCardUi() { LS.set("vigia.cards", ctx.S.ui); }
+export function saveCardUi() { LS.set("talaia.cards", ctx.S.ui); }
 
 /** Watched panels in the chosen order; those without a place yet go last, by name. */
 export function watchedOrder() {

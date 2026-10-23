@@ -1,18 +1,18 @@
 [Unit]
-Description=Vigía servidor (telemetría y alarmas Meshtastic)
+Description=Talaia Hub (Meshtastic and MQTT telemetry and alarms)
 Documentation=https://github.com/Dani-NRos/talaia-hub
 After=network-online.target mosquitto.service
 Wants=network-online.target
 
 [Service]
 Type=simple
-User=vigia
-Group=vigia
+User=talaia
+Group=talaia
 SupplementaryGroups=dialout
-ExecStart=/opt/vigia/node/bin/node /opt/vigia/actual/servidor/src/main.js --config /etc/vigia/servidor.json
-WorkingDirectory=/var/lib/vigia
-# /var/lib/vigia, del usuario vigia: base de datos y estado.
-StateDirectory=vigia
+ExecStart=/opt/talaia/node/bin/node /opt/talaia/actual/servidor/src/main.js --config /etc/talaia/config.json
+WorkingDirectory=/var/lib/talaia
+# /var/lib/talaia, del usuario talaia: base de datos y estado.
+StateDirectory=talaia
 StateDirectoryMode=0750
 Environment=NODE_ENV=production
 # Si falla, vuelve a arrancar a los 5 s. Con la configuración mal escrita (salida 2) no insiste: hay que corregirla.

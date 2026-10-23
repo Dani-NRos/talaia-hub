@@ -1,11 +1,10 @@
 // El servidor por dentro: el motor del núcleo (el mismo que la app) conectado al receptor y a SQLite.
 // Funciona 24/7: alarmas, histórico y registro aunque no haya nadie mirando.
-import path from "node:path";
 import { EventEmitter } from "node:events";
-import { crearMotor, estadoInicial, INFO_SUPPRESS } from "@vigia/nucleo/motor.js";
-import { crearAcciones } from "@vigia/nucleo/acciones.js";
-import { HOUR, DAY } from "@vigia/nucleo/textos.js";
-import { abrirAlmacen } from "./almacen.js";
+import { crearMotor, estadoInicial, INFO_SUPPRESS } from "@talaia/nucleo/motor.js";
+import { crearAcciones } from "@talaia/nucleo/acciones.js";
+import { HOUR, DAY } from "@talaia/nucleo/textos.js";
+import { abrirAlmacen, rutaAlmacen } from "./almacen.js";
 import { ReceptorNodo, consejo } from "./receptor.js";
 import { describirReceptor } from "./config.js";
 import os from "node:os";
@@ -14,7 +13,7 @@ import { crearSalidaHA } from "./homeassistant.js";
 import { crearPaneles, migrarEstacion } from "./paneles.js";
 import { crearBrokerLocal } from "./mosquitto.js";
 import { crearUsuarios } from "./usuarios.js";
-import { tx, setLanguage, localeOf, LANGUAGES } from "@vigia/nucleo/idioma.js";
+import { tx, setLanguage, localeOf, LANGUAGES } from "@talaia/nucleo/idioma.js";
 import "./textos.js";
 
 const GUARDAR_NODOS_MS = 30000; // la lista de nodos (cientos) se guarda como mucho cada 30 s
@@ -24,8 +23,8 @@ const DIAG_MAX = 200;
  * config: la de config.js. registro: el de registro.js.
  * opts: { almacen, receptorOpts } para las pruebas (almacén en memoria, enlace simulado).
  */
-export async function crearVigia(config, registro, opts = {}) {
-  const almacen = opts.almacen || abrirAlmacen(path.join(config.datos, "vigia.db"));
+export async function crearTalaia(config, registro, opts = {}) {
+  const almacen = opts.almacen || abrirAlmacen(rutaAlmacen(config.datos, { mover: true }));
   const eventos = new EventEmitter();
   const S = estadoInicial();
   S.diag = [];
@@ -33,7 +32,13 @@ export async function crearVigia(config, registro, opts = {}) {
   /* ── estado guardado ── */
   S.settings = { ...S.settings, retentionDays: config.retencionDias, ...almacen.leer("settings", {}) };
   // What the server writes (log, mesh alerts, Home Assistant, replies, the journal), in its language.
-  if (!LANGUAGES.includes(S.settings.language)) S.settings.language = "es";
+  // Without one: a new installation (nothing of the mesh saved yet), the one it's given (the machine's); one of
+  // before 3.4, Spanish, as it was then.
+  if (!LANGUAGES.includes(S.settings.language)) {
+    const nueva = almacen.leer("nodes", null) == null && almacen.leer("cfg", null) == null;
+    S.settings.language = nueva && LANGUAGES.includes(opts.idiomaNuevo) ? opts.idiomaNuevo : "es";
+    almacen.guardar("settings", { ...almacen.leer("settings", {}), language: S.settings.language });
+  }
   setLanguage(S.settings.language);
   S.cfg = almacen.leer("cfg", { watched: {} }) || { watched: {} };
   if (!S.cfg.watched) S.cfg.watched = {};
@@ -73,7 +78,7 @@ export async function crearVigia(config, registro, opts = {}) {
     my: () => almacen.guardar("my", S.myNode),
     settings: () => almacen.guardar("settings", { defaultOfflineMin: S.settings.defaultOfflineMin, retentionDays: S.settings.retentionDays, mesh: S.settings.mesh, language: S.settings.language }),
   };
-  // Lo que entra en el registro de Vigía (alarmas, Enterado, peticiones, avisos) va también al del sistema.
+  // Lo que entra en el registro de Talaia (alarmas, Enterado, peticiones, avisos) va también al del sistema.
   let ultimo = S.log[0] || null;
   function contarRegistro() {
     const nuevas = [];
@@ -181,7 +186,7 @@ export async function crearVigia(config, registro, opts = {}) {
   let mqtt = null;
   const paneles = crearPaneles({ S, motor, eventos, almacen, registro, receptor: () => receptor, brokers: () => mqtt?.brokers() || [] });
   mqtt = await crearServicioMqtt({ S, motor, eventos, almacen, registro }, {
-    crearSalidaHA, clienteId: `vigia-servidor-${os.hostname()}`, enganches: [paneles.enganchar], local, usos: paneles.usos,
+    crearSalidaHA, clienteId: `talaia-${os.hostname()}`, enganches: [paneles.enganchar, ...(local ? [local.enganchar] : [])], local, usos: paneles.usos,
   });
 
   /* ── tareas periódicas ── */

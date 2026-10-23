@@ -4,7 +4,7 @@
 import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
-import { spawn } from "node:child_process";
+import { spawn, spawnSync } from "node:child_process";
 import { createRequire } from "node:module";
 import { fileURLToPath } from "node:url";
 const REPO = fileURLToPath(new URL("..", import.meta.url)).replace(/\/$/, ""); // codigo/
@@ -29,15 +29,22 @@ const log = (...a) => console.log(...a);
 
 const nodo = new NodoFalso();
 const tcp = await nodo.escucharTcp();
-const datos = fs.mkdtempSync(path.join(os.tmpdir(), "vigia-"));
+const datos = fs.mkdtempSync(path.join(os.tmpdir(), "talaia-"));
 const WEB = 40000 + Math.floor(Math.random() * 9000);
 const cfgFile = path.join(datos, "servidor.json");
-// El broker de este equipo: un Mosquitto de verdad (hace falta tenerlo instalado), como el que pone el instalador.
+// The broker of this machine: a real Mosquitto with the dynamic security plugin (it has to be installed), as the
+// installer leaves it, with its first users file made by `talaia --broker-inicial`.
 const MQ_LOCAL = 41000 + Math.floor(Math.random() * 9000);
+const DYNSEC = path.join(datos, "dynamic-security.json");
+const PLUGIN = (spawnSync("sh", ["-c", "find /usr/lib /usr/local/lib -name mosquitto_dynamic_security.so 2>/dev/null | head -1"]).stdout || "").toString().trim();
+if (!PLUGIN) { console.error("Hace falta Mosquitto instalado, con su plugin de seguridad dinámica (apt install mosquitto)."); process.exit(1); }
 fs.writeFileSync(cfgFile, JSON.stringify({ receptor: { tipo: "tcp", host: "127.0.0.1", puerto: tcp }, web: { puerto: WEB }, datos, registro: "info", mosquitto: { puerto: MQ_LOCAL } }));
+const inicial = spawnSync(process.execPath, [`${REPO}/servidor/src/main.js`, "--config", cfgFile, "--broker-inicial"], { encoding: "utf8" });
+if (inicial.status !== 0) { console.error(inicial.stderr); process.exit(1); }
+fs.writeFileSync(DYNSEC, inicial.stdout, { mode: 0o600 });
 let serverLog = "";
 function arrancarServidor() {
-  const p = spawn(process.execPath, [`${REPO}/servidor/src/main.js`, "--config", cfgFile], { env: { ...process.env, TZ: "Europe/Madrid" } });
+  const p = spawn(process.execPath, [`${REPO}/servidor/src/main.js`, "--config", cfgFile], { env: { ...process.env, TZ: "Europe/Madrid", LANG: "es_ES.UTF-8" } });
   p.stdout.on("data", (d) => { serverLog += d; });
   p.stderr.on("data", (d) => { serverLog += d; });
   return p;
@@ -46,13 +53,9 @@ let srv = arrancarServidor();
 const URL0 = `http://${process.argv[3] || "127.0.0.1"}:${WEB}/`;
 for (let i = 0; i < 100; i++) { try { const r = await fetch(`${URL0}api/salud`); if ((await r.json()).receptor === "ready") break; } catch { /* aún no */ } await sleep(100); }
 log("salud:", await (await fetch(`${URL0}api/salud`)).text());
-// Mosquitto lee los usuarios que escribe Vigía; en el BMAX los copia y lo recarga vigia-mosquitto.path, aquí esto.
-const PASSWD = path.join(datos, "mosquitto", "passwd");
-for (let i = 0; i < 50 && !fs.existsSync(PASSWD); i++) await sleep(100);
-fs.writeFileSync(path.join(datos, "mosquitto.conf"), `listener ${MQ_LOCAL} 127.0.0.1\nallow_anonymous false\npassword_file ${PASSWD}\npersistence false\nuser ${os.userInfo().username}\n`);
+fs.writeFileSync(path.join(datos, "mosquitto.conf"), `listener ${MQ_LOCAL} 127.0.0.1\nallow_anonymous false\nplugin ${PLUGIN}\nplugin_opt_config_file ${DYNSEC}\npersistence false\nuser ${os.userInfo().username}\n`);
 const mosquitto = spawn("mosquitto", ["-c", path.join(datos, "mosquitto.conf")], { stdio: "ignore" });
 mosquitto.on("error", () => { console.error("Hace falta Mosquitto instalado (apt install mosquitto)."); process.exit(1); });
-fs.watchFile(PASSWD, { interval: 200 }, () => mosquitto.kill("SIGHUP"));
 
 const browser = await pw.chromium.launch();
 const errores = [];
@@ -552,7 +555,7 @@ await paso("encender y apagar un Shelly desde la tarjeta del móvil: propone el 
   if ((await fila(pc, i, "ordenTema").inputValue()) !== "shellyplug01/command/switch:0" || (await fila(pc, i, "ordenOn").inputValue()) !== "on") throw new Error("no propone el tema de las órdenes del Shelly");
   await fotoApartado(pc, "#datBox", "datos-orden");
   await pc.click("[data-dat-save]");
-  // Al guardar, Vigía le pide el estado (solo información) y el Shelly contesta: Apagado.
+  // Al guardar, Talaia le pide el estado (solo información) y el Shelly contesta: Apagado.
   await esperarTexto(pc, /Apagado · ahora mismo/, "el estado pedido al guardar");
   if (!recibidas.includes("shellyplug01/command/switch:0 status_update") || output) throw new Error(`le ha mandado: ${recibidas}`);
   await pc.keyboard.press("Escape");
@@ -663,7 +666,6 @@ await foto(pc, "pc-final");
 fs.writeFileSync(path.join(out, "servidor.log"), serverLog);
 fs.writeFileSync(path.join(out, "errores.txt"), errores.join("\n"));
 await browser.close();
-fs.unwatchFile(PASSWD);
 mosquitto.kill();
 await ha.endAsync();
 broker.close();

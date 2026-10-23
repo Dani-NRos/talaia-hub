@@ -11,7 +11,7 @@
 //    motor sabe desde cuándo está cada uno («desde») para avisar de «abierta más de 10 min».
 //  - Un panel sin nodo puede tener un tema de conexión (el LWT de Tasmota, el «online» de Shelly…): «Sin conexión» en
 //    el panel al momento y, si se pide, su alarma.
-//  - Un estado con «orden» se enciende y apaga desde Vigía (sin confirmación, como decidió Dani): se publica el mensaje
+//  - Un estado con «orden» se enciende y apaga desde Talaia (sin confirmación, como decidió Dani): se publica el mensaje
 //    en su tema y se espera a que el tema de estado diga que ha cambiado (si en 10 s no lo dice, «no ha contestado»).
 //  - Los Shelly no dejan su estado guardado en el broker: al conectar con él se les pide (status_update / update).
 //
@@ -23,11 +23,11 @@ import {
   comprobarDatos, comprobarMalla, comprobarConexion, leerValor, leerEstado, pareceEstado, pareceConexion, convertir,
   unidades, textoValores, textoDato, proximoEnvio, metasDe, nombreDato, esEstado, pedirEstadoShelly, TIPOS_PANEL,
   MALLA_DEFECTO, TIPOS,
-} from "@vigia/nucleo/mqtt-datos.js";
-import { registrarMetricas } from "@vigia/nucleo/metrics.js";
-import { RE, trendKey, conexionKey } from "@vigia/nucleo/motor.js";
-import { hhmm } from "@vigia/nucleo/textos.js";
-import { tx } from "@vigia/nucleo/idioma.js";
+} from "@talaia/nucleo/mqtt-datos.js";
+import { registrarMetricas } from "@talaia/nucleo/metrics.js";
+import { RE, trendKey, conexionKey } from "@talaia/nucleo/motor.js";
+import { hhmm } from "@talaia/nucleo/textos.js";
+import { tx } from "@talaia/nucleo/idioma.js";
 import "./textos.js";
 
 const BUSCAR_MS = 3000; // al buscar temas, cuánto se escucha cada broker
@@ -98,11 +98,11 @@ export function migrarEstacion({ almacen, S, registro }) {
 }
 
 /**
- * vigia: { S, motor, eventos, almacen, registro, receptor: () => el receptor actual, brokers: () => [{ id, nombre }] }.
+ * talaia: { S, motor, eventos, almacen, registro, receptor: () => el receptor actual, brokers: () => [{ id, nombre }] }.
  */
 export function crearPaneles({ S, motor, eventos, almacen, registro, receptor, brokers = () => [] }) {
   let cfg = { ...VACIO(), ...(almacen.leer("paneles", null) || {}) };
-  const valores = new Map(); // clave → { v, t, b?, u? } | { nulo, t } | { error, t }; v ya en la unidad de Vigía
+  const valores = new Map(); // clave → { v, t, b?, u? } | { nulo, t } | { error, t }; v ya en la unidad de Talaia
   const porClave = new Map(); // clave → { num, d }
   const conexiones = new Map(); // id del broker → su conexión
   const quitar = new Map(); // id del broker → cómo quitar sus suscripciones
@@ -137,7 +137,7 @@ export function crearPaneles({ S, motor, eventos, almacen, registro, receptor, b
     for (const k of [...valores.keys()]) if (!porClave.has(k)) valores.delete(k);
   }
 
-  /** Lo que no puede venir de MQTT: lo que publica el propio Vigía (haría un bucle malla → MQTT → malla). */
+  /** Lo que no puede venir de MQTT: lo que publica el propio Talaia (haría un bucle malla → MQTT → malla). */
   function temaProhibido(tema) {
     const base = S.mqtt?.ha?.base || "vigia";
     if (tema === base || tema.startsWith(`${base}/`) || tema.split("/").some((p) => p.startsWith("vigia_"))) {
@@ -482,7 +482,7 @@ export function crearPaneles({ S, motor, eventos, almacen, registro, receptor, b
       contar();
       return { ok: true, toast: tx("s.pan.removed", { name: p.nombre }) };
     },
-    /** El nombre del panel en Vigía. Vacío, en el de un nodo, vuelve a su nombre de Meshtastic. */
+    /** El nombre del panel en Talaia. Vacío, en el de un nodo, vuelve a su nombre de Meshtastic. */
     renombrar(num, nombre) {
       nombre = nombreOk(nombre);
       if (nombre.length > 40) return { ok: false, error: tx("s.pan.nameLong") };

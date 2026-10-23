@@ -14,8 +14,8 @@ import crypto from "node:crypto";
 import fs from "node:fs";
 import path from "node:path";
 import { promisify } from "node:util";
-import { HOUR, DAY } from "@vigia/nucleo/textos.js";
-import { tx } from "@vigia/nucleo/idioma.js";
+import { HOUR, DAY } from "@talaia/nucleo/textos.js";
+import { tx } from "@talaia/nucleo/idioma.js";
 import "./textos.js";
 
 const scrypt = promisify(crypto.scrypt);
@@ -322,7 +322,7 @@ export function crearUsuarios({ almacen, datos = null, registro = null, apuntar 
     salir(id) { if (id) cerrarIds([id]); },
 
     /**
-     * From the terminal (sudo vigia-servidor --clave NAME): sets the password, creating the user if it isn't there,
+     * From the terminal (sudo talaia --clave NAME): sets the password, creating the user if it isn't there,
      * and ends their sessions. Without checking the current one: whoever is root on the machine can anyway.
      */
     async ponerDesdeTerminal(nombre, clave) {

@@ -1,9 +1,0 @@
-# Copia a Mosquitto los usuarios que gestiona Vigía y lo recarga (no corta a quien ya está conectado).
-[Unit]
-Description=Vigía: pasa a Mosquitto los usuarios del broker
-After=mosquitto.service
-
-[Service]
-Type=oneshot
-ExecStart=install -o mosquitto -g mosquitto -m 600 /var/lib/vigia/mosquitto/passwd /etc/mosquitto/vigia.passwd
-ExecStart=systemctl reload-or-restart mosquitto.service

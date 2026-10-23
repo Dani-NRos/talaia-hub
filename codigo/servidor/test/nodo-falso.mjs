@@ -4,7 +4,7 @@
 import net from "node:net";
 import { create, toBinary, fromBinary } from "@bufbuild/protobuf";
 import { Protobuf } from "@meshtastic/core";
-import { createFramer, frame } from "@vigia/nucleo/tramas.js";
+import { createFramer, frame } from "@talaia/nucleo/tramas.js";
 
 const M = Protobuf.Mesh, PORT = Protobuf.Portnums.PortNum, TEL = Protobuf.Telemetry, CH = Protobuf.Channel, CFG = Protobuf.Config;
 export { PORT };
@@ -42,10 +42,10 @@ export class NodoFalso {
     flujo.on("error", () => {});
   }
 
-  /** Servidor TCP en un puerto libre de localhost. */
-  async escucharTcp() {
+  /** Servidor TCP en un puerto libre de localhost (o de «host»: 0.0.0.0 para un contenedor). */
+  async escucharTcp(host = "127.0.0.1") {
     this.tcp = net.createServer((s) => { this.cerrarFlujo(); this.atender(s); });
-    await new Promise((r) => this.tcp.listen(0, "127.0.0.1", r));
+    await new Promise((r) => this.tcp.listen(0, host, r));
     return this.tcp.address().port;
   }
 

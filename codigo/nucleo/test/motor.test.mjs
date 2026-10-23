@@ -9,6 +9,9 @@ import { registrarMetricas } from "../src/metrics.js";
 import { metaDato } from "../src/mqtt-datos.js";
 import { setLanguage } from "../src/idioma.js";
 
+// The alerts carry the local time («· 09:00»): these tests are written for Spain's, whatever the machine's (CI is UTC).
+process.env.TZ = "Europe/Madrid";
+
 const PORT = Protobuf.Portnums.PortNum;
 const T0 = Date.UTC(2026, 9, 18, 7, 0, 0); // 09:00 en Madrid
 const MIN = 60000, HOUR = 60 * MIN;

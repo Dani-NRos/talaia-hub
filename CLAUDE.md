@@ -5,11 +5,12 @@ Zero 2 W) de nodos Meshtastic y dispositivos MQTT, con histórico en SQLite, Hom
 con Tailscale. Dentro de la app se llama solo **«Talaia»**. Este repositorio (`talaia-hub`, rama `main`) es el de la
 **versión 2.0** (plan abajo); trae la historia de la rama `mapa` de `vigia-mesh`.
 
-Lo que se ve ya dice Talaia (la app, los avisos por la malla «⚠ Talaia: …», los nombres en Home Assistant «Talaia ·
-Caseta», el CSV `talaia-fecha.csv`). Hasta que se cambien (Docker, ver el plan), los nombres de dentro siguen siendo de
-Vigía: paquetes `@vigia/*`, servicio `vigia-servidor`, `/opt/vigia`, `/etc/vigia`, `/var/lib/vigia`, usuario `vigia`,
-y los identificadores y temas `vigia…` de Home Assistant (cambiarlos sin migrar duplicaría los dispositivos en HA y
-perdería su histórico).
+Todo dice ya Talaia, también por dentro (paso 5.1, 23 oct. 2026): paquetes `@talaia/*`, servicio `talaia`, orden
+`talaia`, `/opt/talaia`, `/etc/talaia/config.json`, `/var/lib/talaia` (base `talaia.db`), usuario `talaia`. El
+instalador pasa solo una instalación de Vigía a esos nombres (`desde_vigia` en `instalar.sh`) y el servidor renombra
+`vigia.db` a `talaia.db` al arrancar (`rutaAlmacen`). **Se quedan con «vigia»**, a propósito: los identificadores y
+temas de Home Assistant (`vigia_…`, `vigia/…`; cambiarlos sin migrar duplicaría los dispositivos en HA y perdería su
+histórico).
 
 El repositorio `vigia-mesh` sigue aparte:
 - `main`: la **app ligera** (PWA de Bluetooth y cable) **congelada en la 1.20**, publicada en GitHub Pages
@@ -33,7 +34,7 @@ El repositorio `vigia-mesh` sigue aparte:
 
 ```
 codigo/                 raíz de npm workspaces: npm install, npm test, npm run build
-  nucleo/               lógica sin pantalla, la usan la app y el servidor (@vigia/nucleo)
+  nucleo/               lógica sin pantalla, la usan la app y el servidor (@talaia/nucleo)
     src/motor.js        nodos, lecturas, alarmas, peticiones, traceroute, avisos por la malla, lo que llega del receptor
     src/acciones.js     lo que cambia el usuario (vigilar, límites, valla, ajustes…): igual en la app y el servidor
     src/receptor-base.js  ciclo de conexión, lectura inicial, reintentos y peticiones con id (app y servidor)
@@ -48,7 +49,7 @@ codigo/                 raíz de npm workspaces: npm install, npm test, npm run 
     src/mqtt-datos.js   datos MQTT: tipos y unidades, qué parece cada tema, leer el valor de un JSON, comprobar la
                         configuración (también lo que puede salir a la malla); metrics.js registra sus métricas
     src/metrics.js trend.js delivery.js route.js geo.js pb.js
-  app/                  la PWA (@vigia/app)
+  app/                  la PWA (@talaia/app)
     src/app.js          pantalla; crea el motor con ganchos (redibujar, sonar…) solo para mostrar: el estado llega
                         del servidor por SSE y lo que se pulsa va a él como orden por POST (src/remoto.js). En
                         localStorage, solo lo de cada aparato (sonido, pantalla encendida, tarjetas, buscador, mapa,
@@ -76,8 +77,9 @@ codigo/                 raíz de npm workspaces: npm install, npm test, npm run 
                         en build.mjs
     src/map.js mapdata.js meshsearch.js remoto.js
     index.src.html build.mjs pwa/ (manifiesto, iconos y sw.js: la pantalla del servidor se instala como app)
-  servidor/             Vigía servidor (@vigia/servidor), Node ≥ 22.13
-    src/main.js         arranque (systemd o a mano); src/vigia.js: motor + receptor + SQLite + tareas periódicas
+  servidor/             el servidor (@talaia/servidor), Node ≥ 22.13
+    src/main.js         arranque (systemd o a mano) y la orden `talaia`; src/talaia.js: motor + receptor + SQLite +
+                        tareas periódicas
     src/receptor.js enlace.js puertos.js   nodo por USB (serialport, con binarios: no compila) o TCP 4403
     src/almacen.js      SQLite (node:sqlite): lecturas y el estado que la app guarda en localStorage
     src/textos.js       los textos del servidor en español e inglés (claves «s.*»: s.j.* el diario, s.log.* el
@@ -88,19 +90,23 @@ codigo/                 raíz de npm workspaces: npm install, npm test, npm run 
                         intentos fallidos que frenan; desde la terminal: --clave, --usuarios, --codigo (main.js)
     src/mqtt.js         MQTT (MQTT.js): varios brokers a la vez (una conexión cada uno), configurados en Ajustes y
                         guardados en SQLite; reconexión; testamento solo en el de Home Assistant; migra lo de la 1.16
-    src/mosquitto.js    el broker de este equipo: usuarios (cifrado de mosquitto_passwd: $7$, PBKDF2-SHA512) que Vigía
-                        escribe en <datos>/mosquitto/passwd; vigia-mosquitto.path (root) los pasa a Mosquitto y recarga
+    src/mosquitto.js    el broker de este equipo: sus usuarios, por el plugin de seguridad dinámica de Mosquitto
+                        ($CONTROL/dynamic-security/v1, como su cliente admin «talaia»); el primer fichero, ficheroInicial
     src/homeassistant.js  salida a Home Assistant por MQTT con autodescubrimiento (los temas, arriba del fichero)
     src/paneles.js      paneles: nombres, paneles sin nodo (números negativos: -1, -2…), datos MQTT de cada panel
                         (claves «mq1», «mq2»…: lecturas, alarmas e histórico como una métrica más; una lectura por
                         minuto) y lo del receptor que sale a la malla como su telemetría; migra la estación de la 1.16
                         (lo común con la pantalla, en nucleo/src/mqtt-datos.js)
-    instalar.sh sistema/  instalador (Node propio en /opt/vigia, Mosquitto por apt), servicios systemd, regla de udev
+    instalar.sh sistema/  instalador (Node propio en /opt/talaia, Mosquitto por apt), servicios systemd, regla de udev
     test/nodo-falso.mjs nodo Meshtastic simulado (protobuf de verdad) por TCP o puerto virtual
     test/mqtt.test.mjs paneles.test.mjs  con un broker en memoria (aedes) y un «Home Assistant» de mentira
     test/mosquitto.test.mjs  con un Mosquitto de verdad si está instalado (apt install mosquitto)
-  herramientas/         pantalla-servidor.mjs: de punta a punta con Playwright (ver herramientas/LEEME.md)
+  herramientas/         pantalla-servidor.mjs: de punta a punta con Playwright; docker-prueba.mjs: la imagen con
+                        compose (ver herramientas/LEEME.md); pantalla-servidor y vistazo, con LANG=es_ES
   dist/app/             app compilada (no va al repo)
+Dockerfile              la imagen (paso 5.3); docker/: entrypoint.sh, talaia (la orden dentro), compose.yaml
+.github/workflows/      ci.yml (pruebas, compilar, imagen amd64+arm64 y docker-prueba.mjs) y release.yml (imagen a ghcr.io)
+docs/                   guide.md (inglés) y guide.es.md: el manual de uso (README.md / README.es.md, CHANGELOG.md)
 ```
 
 El motor recibe el objeto de estado `S` (ver `estadoInicial()`) y ganchos; la app le añade a `S` lo de pantalla.
@@ -225,8 +231,8 @@ con Tasmota/ESPHome, Zigbee por zigbee2mqtt, ESPHome, Home Assistant…).
   defecto) y vale para todo lo que escribe el servidor: el registro (Alarmas → Registro), los avisos y resultados por
   la malla, los nombres en Home Assistant (al cambiarlo se le vuelven a anunciar; los `unique_id`, temas y tipos de
   evento no cambian), lo que contesta a las órdenes, el diario (journalctl) y el CSV (en español, «;» y coma decimal;
-  en inglés, «,» y punto). Lo que ya está en el registro se queda en el idioma en que se escribió. Siguen en español
-  hasta el paso 5 (Docker): las líneas de main.js antes de arrancar y los errores de configuración (config.js).
+  en inglés, «,» y punto). Lo que ya está en el registro se queda en el idioma en que se escribió. Desde el 5.4,
+  también las líneas de main.js antes de arrancar y los errores de configuración (ver «Paso 5.4»).
   servidor/test/textos.test.mjs comprueba que cada clave que se pide con tx() está en los dos idiomas con los mismos
   huecos.
 - Estilo (3.2): arena y verde bosque de día, «guardia nocturna» (fondo casi negro verdoso, texto color arena) de
@@ -247,16 +253,76 @@ con Tasmota/ESPHome, Zigbee por zigbee2mqtt, ESPHome, Home Assistant…).
 - **Paso 4, usuarios** (Dani, 23 oct. 2026), hecho en la rama `usuarios` y pasado a `main` el 23 oct. 2026: usuario y contraseña **siempre**, también en casa; **un solo tipo de usuario** (todos pueden todo,
   también usuarios; la tabla guarda un `rol`, todos «admin», por si llegan tipos); el **primer usuario se crea en la
   pantalla con un código** (8 letras, en `<datos>/primer-usuario.txt` hasta entonces; lo dicen el diario, el
-  instalador y `sudo vigia-servidor --codigo`); **sesión de 30 días sin usarla**, renovada con el uso (cookie
+  instalador y `sudo talaia --codigo`); **sesión de 30 días sin usarla**, renovada con el uso (cookie
   `talaia_sesion` HttpOnly, SameSite=Lax, Secure por `*.ts.net`; en la base, solo su SHA-256; las pantallas piden
   `/api/sesion` cada 6 h). Contraseñas con scrypt (N=16384), de 10 a 200 caracteres y no iguales al nombre. Cinco
   fallos libres por nombre y después esperas que doblan (hasta 15 min); 50 fallos en un minuto, esperan todos. No se
   puede quitar uno a sí mismo; la propia contraseña pide la actual y deja abierta esta sesión; la de otro cierra todas
   las suyas. Al cerrarse una sesión, sus pantallas abiertas (SSE) se cortan y vuelven a «Entra». El registro lleva
   quién (`by`) en lo que hace una persona (tipo info y ack; no en alarmas que saltan o se resuelven), y apunta las
-  entradas y los cambios de usuarios. El instalador (`INSTALADOR=3`) enseña el código y `vigia-servidor` corre como
-  `vigia` con sudo (lo que escribe en los datos sigue siendo del servicio). El service worker ya no guarda nada de
+  entradas y los cambios de usuarios. El instalador (`INSTALADOR=3`) enseña el código y la orden de la terminal corre
+  como el usuario del servicio con sudo (lo que escribe en los datos sigue siendo del servicio). El service worker ya no guarda nada de
   `/api/`.
+- **Paso 5, Docker y documentación** (Dani, 23 oct. 2026), hecho en la rama `paso5` y pasado a `main` el 24 oct. 2026:
+  **Docker además del instalador** (el instalador sigue siendo la vía para Pi y BMAX; Docker, para quien ya lo usa);
+  los usuarios del broker pasan al **plugin de seguridad dinámica de Mosquitto** (sirve para los dos y quita el apaño
+  de systemd); los **nombres internos pasan a Talaia** (con migración); **Dani crea cada versión en GitHub**
+  (Releases; desde esta sesión no se pueden subir etiquetas) y eso publica la imagen. Por partes: 5.1) nombres
+  internos (hecho, 23 oct. 2026: `INSTALADOR=4`, probado en un contenedor desde una instalación de Vigía hecha con el
+  instalador 3); 5.2) usuarios del broker por seguridad dinámica (hecho, 23 oct. 2026: `INSTALADOR=5`); 5.3) imagen
+  Docker, compose y GitHub Actions (hecho, 23 oct. 2026); 5.4) documentación en inglés (y español) → 2.0 (hecho,
+  23 oct. 2026). La versión `v2.0.0` la crea Dani en GitHub desde `main`.
+- **Paso 5.4** (Dani, 23 oct. 2026: «también terminal»): documentación en `docs/guide.md` (inglés) y
+  `docs/guide.es.md`, `README.md` (inglés) y `README.es.md`, `CHANGELOG.md` (en inglés); `codigo/servidor/README.md`
+  solo apunta al manual. La pantalla enlaza el manual de su idioma en *Ajustes → Sistema → Acerca de*. Lo que escribe
+  la orden `talaia` va en el idioma de la terminal (`idiomaDelEntorno`: LANG, español también para ca/eu/gl) o, si no
+  dice ninguno (Docker), en el del servidor guardado (`leerGuardado`, sin abrir la base para escribir) y si no, inglés;
+  el servicio escribe desde la primera línea en el del servidor. Una instalación nueva (sin `nodes` ni `cfg` guardados:
+  el instalador ya puede haber creado la base para el broker) empieza en el idioma del equipo (`idiomaNuevo`); una de
+  antes sin idioma guardado, en español, y se guarda. Cada opción tiene nombre en inglés (`--ports`, `--password`,
+  `--users`, `--code`, `--broker-init`, `--health`; el instalador: `--port`, `--reconfigure`, `--branch`,
+  `--uninstall`, `--delete-data`, `--local-code`, `--local-node`, `--no-mosquitto`, `--no-systemd`, `--lang`), las de
+  español siguen valiendo. `talaia --code` sale con 0 (el código), 3 (ya hay usuarios) o 4 (aún no hay): el
+  instalador lo lee así y no por las palabras. `config.json` admite las claves en inglés (`receiver.type/port`,
+  `web.port/listen`, `data`, `retentionDays`, `logLevel` con debug/info/warn/error, `broker.port/host`; si están las
+  dos, manda la española) y el instalador (`INSTALADOR=6`) escribe uno nuevo con las de su idioma. Las etiquetas de
+  nivel del diario fuera de systemd (Docker) van en el idioma del servidor (`WARN`/`AVISO`). La versión de la pantalla
+  sale de `app/package.json` al compilar (`__APP_VERSION__`). Todo a 2.0.0.
+- Broker por seguridad dinámica (5.2): Talaia es el cliente admin «talaia» de su Mosquitto (contraseña al azar en
+  SQLite, «mosquitto») y le manda órdenes por `$CONTROL/dynamic-security/v1` (crear, cambiar contraseña, quitar,
+  listar); Mosquitto guarda los usuarios en `/var/lib/mosquitto/talaia-dynamic-security.json` (suyo, 600). Los
+  dispositivos tienen el rol `talaia-dispositivos`: todo menos los temas que empiezan por «$». El primer fichero lo hace
+  Talaia (`ficheroInicial`): el instalador con `talaia --broker-inicial` si no existe (nunca lo pisa), y con Docker el
+  entrypoint de la imagen, con la misma orden. Lleva los usuarios de antes (los hashes `$7$` que
+  guardaba SQLite valen tal cual) y, cuando Talaia ve que Mosquitto los tiene, borra esa copia de SQLite. El
+  instalador quita `talaia-mosquitto.path/.service`, `/etc/mosquitto/talaia.passwd` y `<datos>/mosquitto/`; si el
+  Mosquitto no trae el plugin o tiene otra configuración (listener, plugin, allow_anonymous…), no lo toca. En las
+  pruebas, Mosquitto como root necesita `user root` (si no, no puede leer el fichero).
+- Docker (5.3, 23 oct. 2026): imagen `ghcr.io/dani-nros/talaia-hub` (amd64 y arm64; 32 bits, con el instalador) desde
+  `node:24-bookworm-slim`; la etapa de compilar corre en la arquitectura de quien compila (serialport trae sus binarios
+  para todas) y la imagen solo lleva el servidor, el núcleo, `dist/app` y las dependencias del servidor. Talaia corre
+  como `talaia` (uid 4404, como su puerto; Mosquitto usa 1883). El contenedor arranca como root en
+  `docker/entrypoint.sh`: deja `/data` del servicio (750), con `TALAIA_BROKER` y `/broker` montado escribe la
+  configuración de Mosquitto (cada vez) y su primer fichero de usuarios (`talaia --broker-inicial`, si no está), todo
+  de 1883, y pasa a `talaia` con `setpriv`, también en los grupos de los puertos serie que tenga (así vale aunque el
+  equipo llame de otra forma al grupo). Configuración por variables en inglés (`TALAIA_RECEIVER`, `TALAIA_BROKER`,
+  `TALAIA_WEB_PORT`, `TALAIA_DATA`, `TALAIA_RETENTION_DAYS`, `TALAIA_LOG_LEVEL`: `desdeEntorno` en config.js), que
+  mandan sobre `/data/config.json`. Con `TALAIA_DOCKER` (lo pone la imagen) no dice sus IP (las de dentro no valen) y
+  la entrada da las órdenes con `docker compose exec talaia talaia …`. `talaia --salud` es la comprobación de salud.
+  `listarPuertos` salta los tty de /sys que no están en /dev (en un contenedor, /sys ve todos). `compose.yaml`: Talaia
+  y `eclipse-mosquitto:2` con un volumen compartido (`/broker` en Talaia, `/mosquitto/data` en Mosquitto), Mosquitto
+  espera a que Talaia esté sana. Se quitó `mosquitto.fichero` del 5.2 (lo hace el entrypoint). GitHub Actions: `ci.yml`
+  en cada push; `release.yml` al publicar una versión en GitHub (etiqueta `vX.Y.Z` igual a `codigo/package.json`):
+  pasa ci.yml y sube la imagen con las etiquetas X.Y.Z, X.Y, X y latest. El primer paquete en ghcr.io sale privado:
+  hay que hacerlo público una vez en sus ajustes. Desde esta sesión no se puede bajar nada de Docker Hub: la imagen se
+  prueba en GitHub Actions (y aquí, simulando el contenedor sin Docker).
+- Lo aprendido con GitHub Actions (23 oct. 2026): desde esta sesión no se pueden leer los registros de los trabajos
+  (el proxy no deja bajarlos), pero sí sus anotaciones por la API (`check-runs/<id>/annotations`): por eso ci.yml pasa
+  lo que falla a una anotación (`::error`). El AppArmor de Ubuntu 24.04 (`/etc/apparmor.d/mosquitto`) deja a Mosquitto
+  solo en sus carpetas: en el ejecutor se quita antes de las pruebas (sus ficheros van a /tmp); en una instalación
+  real no molesta, los usuarios del broker están en /var/lib/mosquitto. GitHub va en UTC: las pruebas que dependen de
+  la hora la fijan ellas (`process.env.TZ`). Corre en `ubuntu-24.04`, no `ubuntu-latest` (pasa a 26.04). Una vez falló
+  una prueba con Node 24 que al repetirla pasó; no se ha vuelto a ver (si vuelve, la anotación dirá cuál).
 - Orden (1 y 2, hechos): 1) nombre y política de idioma; 2) congelar la webapp y reorganizar el repositorio;
   3) rediseño con los dos idiomas; 4) usuarios; 5) Docker y documentación en inglés → **2.0**. Las
   **automatizaciones** («si… entonces…», centradas en la malla, con la fase 6 de control desde la malla dentro) →
@@ -264,10 +330,12 @@ con Tasmota/ESPHome, Zigbee por zigbee2mqtt, ESPHome, Home Assistant…).
 
 ## Publicar
 
-- **Desarrollo de la 2.0** en `main` de `talaia-hub`. Dani lo prueba instalando desde aquí (se instala encima de lo
-  que haya: mismo servicio, mismos datos):
+- **Desarrollo** en `main` de `talaia-hub` (cada paso, en su rama hasta que Dani lo prueba). Dani lo prueba instalando
+  desde aquí (se instala encima de lo que haya: mismo servicio, mismos datos):
   `wget -qO- https://raw.githubusercontent.com/Dani-NRos/talaia-hub/main/codigo/servidor/instalar.sh | sudo bash`
-  Hasta la 2.0, la versión estable del servidor es la 1.20 (instalador de `main` de `vigia-mesh`).
+- **Versiones**: subir la de los cuatro `package.json` (y `npm install --package-lock-only`), apuntarla en
+  `CHANGELOG.md` y, ya en `main`, Dani crea la versión en GitHub (etiqueta `vX.Y.Z`): `release.yml` pasa las pruebas y
+  publica la imagen. La primera vez, el paquete de ghcr.io sale privado: hacerlo público en sus ajustes.
 - **`INSTALADOR=` en `instalar.sh`**: subirlo cada vez que cambia lo que hace el instalador. Si el programa descargado
   trae uno más nuevo, el instalador que corre sigue con ese (`--programa`), pero eso solo lo hacen los de la 2 en adelante.
 - **Arreglos en la app ligera** (repositorio `vigia-mesh`): rama desde `main`, compilar, copia en `beta/` sin `sw.js`

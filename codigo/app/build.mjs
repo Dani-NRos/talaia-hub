@@ -27,6 +27,8 @@ const res = await build({
   },
   // The core's engine decodes protobuf with @meshtastic/core, which expects a bit of Node.
   banner: { js: 'var process = globalThis.process || { env: {}, cwd: function () { return ""; } };' },
+  // The version, from package.json (one place: the release checks it's the tag's).
+  define: { __APP_VERSION__: JSON.stringify(JSON.parse(fs.readFileSync(path.join(root, "package.json"), "utf8")).version) },
   logLevel: "warning",
 });
 const js = res.outputFiles[0].text.replace(/<\/script/gi, "<\\/script");

@@ -6,7 +6,7 @@ import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
 import { spawn, spawnSync } from "node:child_process";
-import { crearVigia } from "../src/vigia.js";
+import { crearTalaia } from "../src/talaia.js";
 import { comprobar } from "../src/config.js";
 import { crearRegistro } from "../src/registro.js";
 import { abrirAlmacen } from "../src/almacen.js";
@@ -44,10 +44,10 @@ async function puertoVirtual(t, nodo) {
 test("por cable: conecta, lee la configuración y guarda lecturas", { skip: !hayPython && "sin python3" }, async (t) => {
   const nodo = new NodoFalso();
   const ruta = await puertoVirtual(t, nodo);
-  const datos = fs.mkdtempSync(path.join(os.tmpdir(), "vigia-"));
+  const datos = fs.mkdtempSync(path.join(os.tmpdir(), "talaia-"));
   const config = comprobar({ receptor: { tipo: "usb", puerto: ruta }, datos });
   const salida = [];
-  const v = await crearVigia(config, crearRegistro({ nivel: "depurar", salida }), { almacen: abrirAlmacen(":memory:") });
+  const v = await crearTalaia(config, crearRegistro({ nivel: "depurar", salida }), { almacen: abrirAlmacen(":memory:") });
   t.after(async () => { await v.detener(); await nodo.cerrar(); });
   v.arrancar();
   await hasta(() => v.S.link.state === "ready", 8000, "receptor listo por cable");

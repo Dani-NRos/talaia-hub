@@ -17,6 +17,11 @@ Necesitan Playwright con Chromium (no va en el repo: se busca en `PLAYWRIGHT_DIR
   `full` (el sensor y el receptor a pantalla completa, comprobando que ninguna lectura se sale de su casilla) y
   `signin` (crear el primer usuario y entrar). Entra con el código que el servidor deja en su carpeta de datos.
 - **`iconos.mjs`**: dibuja los iconos de la app (`app/pwa/icon-*.png`) con la torre de `app/src/logo.js`.
+- **`docker-prueba.mjs [imagen]`**: la imagen de Docker de punta a punta con `docker/compose.yaml` (Talaia y su
+  Mosquitto) y un nodo simulado por la red: salud, receptor listo, el primer usuario con el código de
+  `talaia --codigo`, un usuario del broker que deja entrar a un «Shelly», de quién es cada fichero, la zona horaria y
+  que todo sigue tras reiniciar. La pasa GitHub Actions (`.github/workflows/ci.yml`); a mano, con Docker y
+  `npm ci`: `docker build -t talaia-hub:prueba .` y `node codigo/herramientas/docker-prueba.mjs talaia-hub:prueba`.
 
 Las herramientas de la app ligera (capturas antes/después y nodo por cable simulado) siguen en la rama `main`, con
 la app congelada en la 1.20.

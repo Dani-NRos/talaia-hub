@@ -1,4 +1,4 @@
-// Datos que llegan por MQTT a los paneles (Vigía servidor): una estación meteorológica de Home Assistant, un Shelly, un
+// Datos que llegan por MQTT a los paneles (Talaia): una estación meteorológica de Home Assistant, un Shelly, un
 // sensor de zigbee2mqtt… Cada dato es de un panel (el de un nodo Meshtastic o uno sin nodo), tiene su nombre y su tipo,
 // y se guarda como una lectura más de ese panel con su propia clave («mq3»): gráficas, alarmas e histórico como las de
 // un nodo. Los del panel del receptor pueden salir además a la malla como telemetría suya («Mandar a la malla»).
@@ -13,7 +13,7 @@ import { fmtNum } from "./metrics.js";
 import { getLanguage, tx } from "./idioma.js";
 
 /**
- * Tipos de dato. La unidad es la de Vigía (y la de Meshtastic, si sale a la malla); «otras», las que se convierten.
+ * Tipos de dato. La unidad es la de Talaia (y la de Meshtastic, si sale a la malla); «otras», las que se convierten.
  * malla: el tipo es un campo de la telemetría de ambiente de Meshtastic (con el mismo nombre) y puede salir por ella.
  * rango: valores posibles, ya convertidos: lo de fuera suele ser una unidad equivocada (Pa por hPa…).
  */
@@ -51,7 +51,7 @@ for (const t of Object.values(TIPOS)) {
 export const LISTA_TIPOS = Object.keys(TIPOS);
 export const tipoMalla = (t) => !!TIPOS[t]?.malla;
 export const esEstado = (t) => !!TIPOS[t]?.binario;
-/** Unidades en que puede llegar un tipo: la primera es la de Vigía. «otro»: ninguna fija (la escribe el usuario). */
+/** Unidades en que puede llegar un tipo: la primera es la de Talaia. «otro»: ninguna fija (la escribe el usuario). */
 export const unidades = (t) => (t === "otro" ? [] : [TIPOS[t].unit, ...Object.keys(TIPOS[t].otras || {})]);
 
 /** Cómo se llaman los dos estados (ON, OFF) de un dato ON/OFF. */
@@ -154,7 +154,7 @@ export function adivinarEstado(tema, campo = "") {
 }
 
 /**
- * Para un estado que se va a poder encender y apagar desde Vigía: el tema y los mensajes de las órdenes que suele
+ * Para un estado que se va a poder encender y apagar desde Talaia: el tema y los mensajes de las órdenes que suele
  * usar ese dispositivo, sacados de su tema de estado. null si no se sabe (se escriben a mano).
  *  Shelly Plus/Pro/Gen3: …/status/switch:0 (o …/events/rpc, params.switch:0.output) → …/command/switch:0, on / off
  *  Shelly de primera generación: shellies/…/relay/0 → shellies/…/relay/0/command, on / off
@@ -271,7 +271,7 @@ export function textoValor(tipo, v, unidad = null) {
 /** El valor de un dato, para los textos: «21,4 °C» o, si es un estado, «Abierta». */
 export const textoDato = (d, v) => (esEstado(d.tipo) ? textoEstado(d.nombres, v) : textoValor(d.tipo, v, d.unidad));
 
-/** Pasa un valor a la unidad de Vigía y comprueba que sea posible. Devuelve { v } o { error }. */
+/** Pasa un valor a la unidad de Talaia y comprueba que sea posible. Devuelve { v } o { error }. */
 export function convertir(tipo, unidad, v) {
   const t = TIPOS[tipo] || TIPOS.otro;
   const f = t.otras?.[unidad];
@@ -316,7 +316,7 @@ export function comprobarMalla(dada, antes = MALLA_DEFECTO) {
 
 /**
  * Comprueba los datos MQTT de un panel. Devuelve { datos } o { error } con el motivo en español.
- * opts: temaProhibido(tema) → texto si no vale (lo que publica el propio Vigía, para no hacer un bucle);
+ * opts: temaProhibido(tema) → texto si no vale (lo que publica el propio Talaia, para no hacer un bucle);
  *       brokers: ids de los brokers que hay (null: no se comprueba); receptor: es el panel del receptor (malla).
  */
 export function comprobarDatos(lista, { temaProhibido = () => null, brokers = null, receptor = false } = {}) {
@@ -350,7 +350,7 @@ export function comprobarDatos(lista, { temaProhibido = () => null, brokers = nu
       const nombres = d.nombres ?? "encendido";
       if (!NOMBRES_ESTADO[nombres]) return { error: tx("md.stateNames", { name: visto }) };
       Object.assign(extra, { nombres, invertir: !!d.invertir });
-      if (d.orden != null) { // encender y apagar desde Vigía
+      if (d.orden != null) { // encender y apagar desde Talaia
         const o = d.orden;
         if (typeof o !== "object") return { error: tx("md.list") };
         const ot = String(o.tema ?? "").trim(), on = String(o.on ?? ""), off = String(o.off ?? "");

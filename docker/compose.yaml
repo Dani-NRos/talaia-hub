@@ -1,0 +1,45 @@
+# Talaia Hub with Docker: the server and its own MQTT broker (Mosquitto), whose users Talaia manages.
+#
+#   docker compose up -d
+#   docker compose exec talaia talaia --codigo     the code to create the first user on the screen
+#   docker compose logs -f talaia                  what it's doing
+#   docker compose pull && docker compose up -d    to update
+#
+# The screen: http://<this machine's IP>:4404 · for your devices (Shelly, Tasmota…): mqtt://<this machine's IP>:1883
+name: talaia
+
+services:
+  talaia:
+    image: ghcr.io/dani-nros/talaia-hub:2
+    restart: unless-stopped
+    ports:
+      - "4404:4404"
+    environment:
+      TZ: Europe/Madrid
+      # The Meshtastic node: «usb» (the device below) or over the network: «tcp:192.168.1.60».
+      TALAIA_RECEIVER: usb
+      # This machine's broker: the «mosquitto» service below. Without it: «off» (and remove that service).
+      TALAIA_BROKER: mosquitto
+    devices:
+      # The node by USB, with the same name on both sides (ls /dev/ttyACM* /dev/ttyUSB*). Over the network, remove this.
+      - /dev/ttyACM0:/dev/ttyACM0
+    volumes:
+      - talaia-data:/data
+      - broker-data:/broker
+
+  mosquitto:
+    image: eclipse-mosquitto:2
+    restart: unless-stopped
+    # Talaia writes this configuration and the broker's first users file in the volume both share.
+    command: mosquitto -c /mosquitto/data/mosquitto.conf
+    ports:
+      - "1883:1883"
+    volumes:
+      - broker-data:/mosquitto/data
+    depends_on:
+      talaia:
+        condition: service_healthy
+
+volumes:
+  talaia-data:
+  broker-data:

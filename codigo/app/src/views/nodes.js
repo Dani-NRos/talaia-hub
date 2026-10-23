@@ -5,15 +5,15 @@ import { t } from "../i18n.js";
 import { $, esc, setHTML, LS } from "../ui.js";
 import { searchNodes, highlight, tokens, FILTERS, SORTS } from "../meshsearch.js";
 import { metaLine, displayName } from "./dashboard.js";
-import { hexId } from "@vigia/nucleo/motor.js";
-import { fmtNum } from "@vigia/nucleo/metrics.js";
-import { fmtDist } from "@vigia/nucleo/geo.js";
-import { isNum } from "@vigia/nucleo/textos.js";
+import { hexId } from "@talaia/nucleo/motor.js";
+import { fmtNum } from "@talaia/nucleo/metrics.js";
+import { fmtDist } from "@talaia/nucleo/geo.js";
+import { isNum } from "@talaia/nucleo/textos.js";
 
 const PAGE = 50;
 const markHTML = (text, words) => highlight(text, words).map((p) => (p.hit ? `<mark>${esc(p.text)}</mark>` : esc(p.text))).join("");
 
-export function saveNodesView() { LS.set("vigia.meshView", ctx.S.meshView); }
+export function saveNodesView() { LS.set("talaia.meshView", ctx.S.meshView); }
 
 function renderTools() {
   const { S } = ctx;

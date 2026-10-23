@@ -2,7 +2,7 @@
 // Texts are looked up by key; a value can be a string with {placeholders} or a function of the values.
 // Sections move here as they are rewritten (step 3.3): until then, their texts are still in app.js, in Spanish.
 
-import { setLanguage } from "@vigia/nucleo/idioma.js";
+import { setLanguage } from "@talaia/nucleo/idioma.js";
 
 const STORE_KEY = "talaia.lang";
 
@@ -88,8 +88,10 @@ const es = {
   "gate.pass2": "Otra vez",
   "gate.enter": "Entrar",
   "gate.create": "Crear y entrar",
-  "gate.forgot": "¿No la recuerdas? Otro usuario te puede poner una nueva. Si no hay nadie más, en el equipo: sudo vigia-servidor --clave TU_NOMBRE",
-  "gate.firstHelp": "Si no tienes el código, en el equipo: sudo vigia-servidor --codigo. Al menos 10 caracteres de contraseña; una frase sirve.",
+  "gate.forgot": "¿No la recuerdas? Otro usuario te puede poner una nueva. Si no hay nadie más, en el equipo: sudo talaia --clave TU_NOMBRE",
+  "gate.firstHelp": "Si no tienes el código, en el equipo: sudo talaia --codigo. Al menos 10 caracteres de contraseña; una frase sirve.",
+  "gate.forgotDocker": "¿No la recuerdas? Otro usuario te puede poner una nueva. Si no hay nadie más, en el equipo: docker compose exec talaia talaia --clave TU_NOMBRE",
+  "gate.firstHelpDocker": "Si no tienes el código, en el equipo: docker compose exec talaia talaia --codigo. Al menos 10 caracteres de contraseña; una frase sirve.",
   "gate.missing": "Rellena todos los campos.",
   "gate.mismatch": "Las dos contraseñas no coinciden.",
   "gate.failed": "No se ha podido.",
@@ -191,7 +193,7 @@ const es = {
   "set.ha.base": "Tema base",
   "set.ha.prefix": "Prefijo de Home Assistant",
   "set.ha.topicsHint": "Normalmente no hay que tocarlos. Talaia publica en «vigia/…» y Home Assistant busca lo que se le anuncia en «homeassistant/…».",
-  "set.ha.hint": "En Home Assistant aparecen solos «Vigía servidor» y un dispositivo por cada nodo vigilado («Vigía · nombre»): sus lecturas, un sensor por cada alarma que le pongas, un botón de «Enterado» y un evento por cada alarma para notificar al móvil. Si el servidor se apaga, Home Assistant lo marca como no disponible.",
+  "set.ha.hint": "En Home Assistant aparecen solos «Talaia» y un dispositivo por cada nodo vigilado («Talaia · nombre»): sus lecturas, un sensor por cada alarma que le pongas, un botón de «Enterado» y un evento por cada alarma para notificar al móvil. Si el servidor se apaga, Home Assistant lo marca como no disponible.",
   "rx.title": "Estado",
   "rx.noServer": "Sin conexión con el servidor de Talaia. Esta pantalla lo vuelve a intentar sola.",
   "rx.viaNet": "por la red",
@@ -244,6 +246,7 @@ const es = {
   "sys.wipeArm": "Toca otra vez para borrar",
   "sys.about": "Acerca de",
   "sys.aboutText": "Vigilancia de una malla Meshtastic y de dispositivos MQTT, en tu red. Antes, Vigía. Hecho por Dani-NRos.",
+  "sys.guide": "Manual de uso",
   "sys.code": "Código en GitHub",
   "sys.issues": "Avisos y sugerencias",
   "sys.linksHint": "Para abrir los enlaces hace falta internet. Si algo falla o echas algo en falta, cuéntalo en los avisos de GitHub.",
@@ -621,7 +624,7 @@ const es = {
   "pc.data.save": "Guardar los datos",
   "pc.ha.title": "Cómo sacar los datos de Home Assistant",
   "pc.ha.lead": "Home Assistant no publica por MQTT sus sensores por su cuenta. Añade esto a configuration.yaml con los tuyos y reinícialo:",
-  "pc.ha.after": "Cada sensor sale en «ha_estados/sensor/…/state» (y su unidad, en «…/unit_of_measurement»). Pulsa «Buscar temas» y elígelos. No incluyas los sensores «Vigía · …»: Talaia los rechaza, porque volvería a recibir lo que ya publica él.",
+  "pc.ha.after": "Cada sensor sale en «ha_estados/sensor/…/state» (y su unidad, en «…/unit_of_measurement»). Pulsa «Buscar temas» y elígelos. No incluyas los sensores «Talaia · …»: Talaia los rechaza, porque volvería a recibir lo que ya publica él.",
   "pc.saveFailed": "No se pudo guardar.",
   "pc.findFailed": "No se pudo buscar.",
   "pc.used.state": "Añadido como estado «{on} / {off}». Cámbialo en su fila si no es así.",
@@ -748,8 +751,10 @@ const en = {
   "gate.pass2": "Again",
   "gate.enter": "Sign in",
   "gate.create": "Create and sign in",
-  "gate.forgot": "Forgotten it? Another user can give you a new one. If there's nobody else, on the server itself: sudo vigia-servidor --clave YOUR_NAME",
-  "gate.firstHelp": "If you don't have the code, on the server itself: sudo vigia-servidor --codigo. At least 10 characters of password; a phrase will do.",
+  "gate.forgot": "Forgotten it? Another user can give you a new one. If there's nobody else, on the server itself: sudo talaia --password YOUR_NAME",
+  "gate.firstHelp": "If you don't have the code, on the server itself: sudo talaia --code. At least 10 characters of password; a phrase will do.",
+  "gate.forgotDocker": "Forgotten it? Another user can give you a new one. If there's nobody else, on the server itself: docker compose exec talaia talaia --password YOUR_NAME",
+  "gate.firstHelpDocker": "If you don't have the code, on the server itself: docker compose exec talaia talaia --code. At least 10 characters of password; a phrase will do.",
   "gate.missing": "Fill in every field.",
   "gate.mismatch": "The two passwords don't match.",
   "gate.failed": "It didn't work.",
@@ -851,7 +856,7 @@ const en = {
   "set.ha.base": "Base topic",
   "set.ha.prefix": "Home Assistant prefix",
   "set.ha.topicsHint": "Usually there's no need to touch them. Talaia publishes on “vigia/…” and Home Assistant looks for what is announced to it on “homeassistant/…”.",
-  "set.ha.hint": "“Vigía servidor” and one device for each watched node (“Vigía · name”) appear in Home Assistant by themselves: its readings, a sensor for each alarm you set, a button to acknowledge and an event for each alarm to notify your phone. If the server goes off, Home Assistant marks it as unavailable.",
+  "set.ha.hint": "“Talaia” and one device for each watched node (“Talaia · name”) appear in Home Assistant by themselves: its readings, a sensor for each alarm you set, a button to acknowledge and an event for each alarm to notify your phone. If the server goes off, Home Assistant marks it as unavailable.",
   "rx.title": "Status",
   "rx.noServer": "No connection to the Talaia server. This screen keeps trying by itself.",
   "rx.viaNet": "over the network",
@@ -904,6 +909,7 @@ const en = {
   "sys.wipeArm": "Tap again to delete",
   "sys.about": "About",
   "sys.aboutText": "Watching over a Meshtastic mesh and MQTT devices, on your network. Formerly Vigía. Made by Dani-NRos.",
+  "sys.guide": "User guide",
   "sys.code": "Code on GitHub",
   "sys.issues": "Issues and suggestions",
   "sys.linksHint": "The links need internet. If something fails or you miss something, say so in the GitHub issues.",
@@ -1268,7 +1274,7 @@ const en = {
   "pc.data.save": "Save the data",
   "pc.ha.title": "Getting the data out of Home Assistant",
   "pc.ha.lead": "Home Assistant doesn't publish its sensors over MQTT by itself. Add this to configuration.yaml with yours and restart it:",
-  "pc.ha.after": "Each sensor comes out on “ha_estados/sensor/…/state” (and its unit, on “…/unit_of_measurement”). Press “Find topics” and pick them. Don't include the “Vigía · …” sensors: Talaia rejects them, because it would get back what it publishes itself.",
+  "pc.ha.after": "Each sensor comes out on “ha_estados/sensor/…/state” (and its unit, on “…/unit_of_measurement”). Press “Find topics” and pick them. Don't include the “Talaia · …” sensors: Talaia rejects them, because it would get back what it publishes itself.",
   "pc.saveFailed": "Couldn't save.",
   "pc.findFailed": "Couldn't search.",
   "pc.used.state": "Added as a state “{on} / {off}”. Change it in its row if that's wrong.",

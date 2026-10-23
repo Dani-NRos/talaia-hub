@@ -1,8 +1,8 @@
-import { registrarMetricas } from "@vigia/nucleo/metrics.js";
+import { registrarMetricas } from "@talaia/nucleo/metrics.js";
 import { createMapView } from "./map.js";
 import { ctx } from "./ctx.js";
 import { sparkHTML, sparkStateHTML } from "./charts.js";
-import { $, esc, setHTML, LS, ICON } from "./ui.js";
+import { $, esc, setHTML, LS, ICON, renameStored } from "./ui.js";
 import { refreshPosition, copyText, patchSwitches, setFence, setFenceRadius, removeFence, toggleSwitch } from "./views/node-parts.js";
 import { renderNodes, onNodesQuery, saveNodesView } from "./views/nodes.js";
 import { renderLog } from "./views/alarms.js";
@@ -10,7 +10,7 @@ import { boardHTML, renderCards, toggleCard, toggleAllCards, moveCard, watchCard
 import { openSheet, onSheetClose, renderSheet, drawCharts, refreshSheetLive, refreshRequests, patchRequestStatus, legHops, setSheetRange, resizeSheet, trendFormFill, addTrend, removeTrend, saveStateAlarm, saveRuleFromInput, watch, unwatch, isSheetOpen } from "./views/sheet.js";
 import { patchPanels, data, meshOut, newPanelSheet, createPanel } from "./views/panel-config.js";
 import { openFull, closeFull, refreshFull, setFullRange, resizeFull } from "./views/fullscreen.js";
-import { loraSf } from "@vigia/nucleo/route.js";
+import { loraSf } from "@talaia/nucleo/route.js";
 import { FILTERS } from "./meshsearch.js";
 import { conectarServidor, crearStoreRemoto } from "./remoto.js";
 import { whoAmI, showGate } from "./views/signin.js";
@@ -18,9 +18,9 @@ import { t as tr, getLang } from "./i18n.js";
 import { initShell, go, isView, setAlarms, relabel } from "./shell.js";
 import { initSettings, openSettings, enterSettings, renderSettings, patchSettings, patchMeshLast, pushDiag } from "./views/settings.js";
 import { initAlerts, fireAlarm, applyWake, setServiceWorker } from "./alerts.js";
-import { HOUR, ago, stamp } from "@vigia/nucleo/textos.js";
-import { metasDe } from "@vigia/nucleo/mqtt-datos.js";
-import { crearMotor, estadoInicial, askKey, seriesKey } from "@vigia/nucleo/motor.js";
+import { HOUR, ago, stamp } from "@talaia/nucleo/textos.js";
+import { metasDe } from "@talaia/nucleo/mqtt-datos.js";
+import { crearMotor, estadoInicial, askKey, seriesKey } from "@talaia/nucleo/motor.js";
 
 /* ───────────── estado ───────────── */
 const DEFAULT_SETTINGS = { sound: true, wake: false, retentionDays: 30, defaultOfflineMin: 75, mesh: null };
@@ -68,7 +68,7 @@ const orden = (datos) => servidor.orden(datos);
 Object.assign(ctx, { S, motor, orden, toast: (m) => toast(m), render: () => render(), sparkHTML, sparkStateHTML });
 
 /* ───────────── persistencia: solo lo de este aparato ───────────── */
-function saveSettings() { LS.set("vigia.settings", S.settings); }
+function saveSettings() { LS.set("talaia.settings", S.settings); }
 
 function showErr(el, msg) { el.textContent = msg; el.hidden = false; }
 
@@ -157,8 +157,8 @@ function enterMap() {
       esc, ago, stamp,
       sf: () => loraSf(S.lora),
       hopName, legHops,
-      load: () => LS.get("vigia.map", {}),
-      save: (v) => LS.set("vigia.map", v),
+      load: () => LS.get("talaia.map", {}),
+      save: (v) => LS.set("talaia.map", v),
     });
   }
   const w = mapWanted || { focus: null, route: null };
@@ -433,9 +433,10 @@ async function boot() {
     saveDeviceSettings: saveSettings,
   });
   initShell({ enter: enterView, leave: leaveView });
-  S.settings = { ...DEFAULT_SETTINGS, ...LS.get("vigia.settings", {}) };
-  S.ui = { collapsed: {}, order: [], ...(LS.get("vigia.cards", {}) || {}) };
-  S.meshView = { filters: [], sort: "auto", ...(LS.get("vigia.meshView", {}) || {}) };
+  renameStored(["settings", "cards", "meshView", "map"].map((k) => [`vigia.${k}`, `talaia.${k}`]));
+  S.settings = { ...DEFAULT_SETTINGS, ...LS.get("talaia.settings", {}) };
+  S.ui = { collapsed: {}, order: [], ...(LS.get("talaia.cards", {}) || {}) };
+  S.meshView = { filters: [], sort: "auto", ...(LS.get("talaia.meshView", {}) || {}) };
   S.link = { state: "connecting", extra: null };
   watchCardsWidth();
   render();

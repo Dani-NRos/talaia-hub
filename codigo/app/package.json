@@ -1,6 +1,6 @@
 {
-  "name": "@vigia/app",
-  "version": "1.20.0",
+  "name": "@talaia/app",
+  "version": "2.0.0",
   "private": true,
   "description": "The screen of Talaia Hub, served by the server (PWA)",
   "license": "GPL-3.0-only",
@@ -12,7 +12,7 @@
   "dependencies": {
     "@fontsource-variable/overpass": "5.3.0",
     "@fontsource-variable/overpass-mono": "5.3.0",
-    "@vigia/nucleo": "*",
+    "@talaia/nucleo": "*",
     "esbuild": "^0.28.2",
     "leaflet": "^1.9.4"
   }

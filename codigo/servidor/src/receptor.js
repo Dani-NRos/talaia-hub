@@ -2,10 +2,10 @@
 // está en el núcleo; aquí, cómo se abre cada enlace y qué decir cuando falla.
 import { create, toBinary } from "@bufbuild/protobuf";
 import { Protobuf } from "@meshtastic/core";
-import { ReceptorBase, LinkError } from "@vigia/nucleo/receptor-base.js";
+import { ReceptorBase, LinkError } from "@talaia/nucleo/receptor-base.js";
 import { EnlaceFlujo, abrirSerie, abrirTcp } from "./enlace.js";
 import { listarPuertos, elegirPuerto, describirPuerto } from "./puertos.js";
-import { tx } from "@vigia/nucleo/idioma.js";
+import { tx } from "@talaia/nucleo/idioma.js";
 import "./textos.js";
 
 /**

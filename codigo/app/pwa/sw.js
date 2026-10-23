@@ -1,13 +1,13 @@
-// Vigía Mesh: guarda la app en el móvil para que abra sin internet.
-const CACHE = "vigia-__VERSION__";
+// Talaia: keeps the app on the phone so it opens without internet.
+const CACHE = "talaia-__VERSION__";
 const SHELL = ["./", "./index.html", "./manifest.webmanifest", "./icon-192.png", "./icon-512.png", "./icon-maskable-512.png"];
 
-// Fondo del mapa (teselas de OpenStreetMap). Caché aparte, sin «vigia-» en el nombre: al actualizar la app
+// Fondo del mapa (teselas de OpenStreetMap). Caché aparte, sin «talaia-» en el nombre: al actualizar la app
 // se borran las cachés viejas de la app, y las teselas tienen que sobrevivir a eso.
 const TILES = "teselas-osm";
 const TILE_MAX = 2000; // ≈ 40 MB; al pasarse se borran las más antiguas
 const TILE_FRESH_MS = 7 * 24 * 3600 * 1000; // más viejas que esto se renuevan en segundo plano si hay red
-const STAMP = "x-vigia-guardada";
+const STAMP = "x-talaia-guardada";
 // Tesela transparente de 1×1 px: sin red ni copia, el mapa enseña su color de fondo en vez de una imagen rota.
 const BLANK = Uint8Array.from(atob("iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mNkYAAAAAYAAjCB0C8AAAAASUVORK5CYII="), (c) => c.charCodeAt(0));
 let tilePuts = 0;
@@ -52,7 +52,7 @@ self.addEventListener("install", (e) => {
 });
 
 self.addEventListener("activate", (e) => {
-  e.waitUntil(caches.keys().then((keys) => Promise.all(keys.filter((k) => k.startsWith("vigia-") && k !== CACHE).map((k) => caches.delete(k))))
+  e.waitUntil(caches.keys().then((keys) => Promise.all(keys.filter((k) => (k.startsWith("talaia-") || k.startsWith("vigia-")) && k !== CACHE).map((k) => caches.delete(k))))
     .then(() => trimTiles()).catch(() => {}).then(() => self.clients.claim()));
 });
 

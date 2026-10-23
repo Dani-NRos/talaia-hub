@@ -3,8 +3,8 @@
 // tumba el proceso entero.
 import fs from "node:fs";
 import path from "node:path";
-import { USB_VENDORS } from "@vigia/nucleo/tramas.js";
-import { tx } from "@vigia/nucleo/idioma.js";
+import { USB_VENDORS } from "@talaia/nucleo/tramas.js";
+import { tx } from "@talaia/nucleo/idioma.js";
 import "./textos.js";
 
 const hex4 = (n) => n.toString(16).padStart(4, "0");
@@ -30,6 +30,8 @@ export function listarPuertos({ sys = "/sys", dev = "/dev" } = {}) {
   const out = [];
   for (const n of nombres.sort((a, b) => a.localeCompare(b, "en", { numeric: true }))) {
     // El dispositivo USB es el primer antecesor con idVendor (el tty cuelga de la interfaz, y esta del aparato).
+    // In a container /sys shows every port of the machine, but /dev only those passed to it.
+    if (!fs.existsSync(path.join(dev, n))) continue;
     let d;
     try { d = fs.realpathSync(path.join(base, n, "device")); } catch { continue; }
     let usb = null;
