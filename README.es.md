@@ -20,8 +20,6 @@ queda en tu equipo y funciona sin internet.
 - **Usuarios y contraseñas**, la pantalla en español e inglés, tema claro y oscuro, instalable como app y acceso desde
   fuera de casa con Tailscale.
 
-**Versión 2.0.** Hasta la 1.20 se llamaba *Vigía servidor*; una instalación de Vigía pasa sola a Talaia, con sus datos.
-
 ## Instalar
 
 En Ubuntu, Debian o Raspberry Pi OS, con el nodo enchufado por USB:
@@ -46,8 +44,6 @@ docker compose exec talaia talaia --codigo
 - **[Manual de uso](docs/guide.es.md)**: instalar, Docker, configuración, la pantalla, Tailscale, MQTT, Home
   Assistant, paneles y datos a la malla.
 - **[Cambios](CHANGELOG.md)** de cada versión (en inglés).
-- **La app ligera** (Bluetooth o cable USB, sin instalar nada), congelada en la 1.20:
-  https://dani-nros.github.io/vigia-mesh/
 
 Problemas y sugerencias: [issues](https://github.com/Dani-NRos/talaia-hub/issues). El *diagnóstico de conexión* de la
 pantalla (*Ajustes → Receptor*) se puede copiar en uno.

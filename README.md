@@ -17,9 +17,6 @@ machine; it works without internet.
 - **Users and passwords**, a screen in English and Spanish, light and dark themes, installable as an app, and access
   from outside your home with Tailscale.
 
-**Version 2.0.** Up to 1.20 it was called *Vigía servidor*; an installation of it moves to Talaia by itself, with its
-data.
-
 ## Install
 
 On Ubuntu, Debian or Raspberry Pi OS, with the node plugged in by USB:
@@ -44,8 +41,6 @@ docker compose exec talaia talaia --code
 - **[User guide](docs/guide.md)**: installing, Docker, configuration, the screen, Tailscale, MQTT, Home Assistant,
   panels and data to the mesh.
 - **[Changes](CHANGELOG.md)** in each version.
-- **The light app** (Bluetooth or USB cable, nothing to install, in Spanish), frozen at 1.20:
-  https://dani-nros.github.io/vigia-mesh/
 
 Problems and suggestions: [issues](https://github.com/Dani-NRos/talaia-hub/issues). The screen's
 *Settings → Receiver → Connection diagnostics* can be copied into one.
