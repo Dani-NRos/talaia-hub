@@ -28,6 +28,7 @@ import { registrarMetricas } from "@talaia/nucleo/metrics.js";
 import { RE, trendKey, conexionKey } from "@talaia/nucleo/motor.js";
 import { hhmm } from "@talaia/nucleo/textos.js";
 import { tx } from "@talaia/nucleo/idioma.js";
+import { prefijoIds } from "./homeassistant.js";
 import "./textos.js";
 
 const BUSCAR_MS = 3000; // al buscar temas, cuánto se escucha cada broker
@@ -139,8 +140,8 @@ export function crearPaneles({ S, motor, eventos, almacen, registro, receptor, b
 
   /** Lo que no puede venir de MQTT: lo que publica el propio Talaia (haría un bucle malla → MQTT → malla). */
   function temaProhibido(tema) {
-    const base = S.mqtt?.ha?.base || "vigia";
-    if (tema === base || tema.startsWith(`${base}/`) || tema.split("/").some((p) => p.startsWith("vigia_"))) {
+    const base = S.mqtt?.ha?.base || "talaia";
+    if (tema === base || tema.startsWith(`${base}/`) || tema.split("/").some((p) => p.startsWith(`${prefijoIds(base)}_`))) {
       return tx("s.pan.ownTopic");
     }
     return null;

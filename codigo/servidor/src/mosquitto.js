@@ -65,7 +65,7 @@ export function ficheroInicial(guardado) {
 /** Why a new user isn't valid (or null if it is). */
 export function comprobarUsuario(nombre, clave) {
   if (!NOMBRE_OK.test(String(nombre || ""))) return tx("s.mq.badUser");
-  if (nombre === USUARIO_INTERNO || nombre === "vigia-servidor") return tx("s.mq.internal", { name: nombre });
+  if (nombre === USUARIO_INTERNO) return tx("s.mq.internal", { name: nombre });
   if (clave != null && String(clave).length < CLAVE_MIN) return tx("s.mq.passShort", { n: CLAVE_MIN });
   if (clave != null && /[\r\n]/.test(clave)) return tx("s.mq.passLines");
   return null;

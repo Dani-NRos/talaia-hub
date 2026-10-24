@@ -14,7 +14,7 @@ export const BROKER_LOCAL = "local";
 /** La configuración que se guarda (en SQLite, clave «mqtt»). */
 export const MQTT_DEFECTO = {
   brokers: [], // [{ id, nombre, url, usuario, clave, activado }]
-  ha: { activado: false, broker: null, base: "vigia", prefijo: "homeassistant" }, // salida a Home Assistant
+  ha: { activado: false, broker: null, base: "talaia", prefijo: "homeassistant" }, // salida a Home Assistant
 };
 
 const TEMA_OK = /^[A-Za-z0-9_-]+(\/[A-Za-z0-9_-]+)*$/;
@@ -28,6 +28,7 @@ export function migrarMqtt(c) {
   const b = c.url ? [{ id: "b1", nombre: "Home Assistant", url: c.url, usuario: c.usuario || "", clave: c.clave || "", activado: !!c.activado }] : [];
   return {
     brokers: b,
+    // Those versions published on «vigia/…»: the same base, so Home Assistant keeps the same devices.
     ha: { activado: !!(c.activado && c.url && (c.ha?.activado ?? true)), broker: b[0]?.id ?? null, base: c.base || "vigia", prefijo: c.ha?.prefijo || "homeassistant" },
   };
 }

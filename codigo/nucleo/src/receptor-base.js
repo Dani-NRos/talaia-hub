@@ -19,7 +19,7 @@ import { fmtNum } from "./metrics.js";
 
 const ST = Types.DeviceStatusEnum;
 export const BACKOFF_S = [2, 5, 10, 20, 30, 60];
-const TT = (typeof window !== "undefined" && window.__VIGIA_BLE_TIMEOUTS) || {};
+const TT = (typeof window !== "undefined" && window.__TALAIA_BLE_TIMEOUTS) || {};
 export const CFG_IDLE_MS = TT.config || 30000; // sin ningún paquete durante la lectura inicial
 export const CFG_MAX_MS = 180000; // lectura inicial completa, aunque lleguen paquetes
 

@@ -12,7 +12,6 @@ navegador, aunque no haya ningún móvil ni ordenador mirando.
 - [La pantalla](#la-pantalla) · [Desde fuera de casa (Tailscale)](#desde-fuera-de-casa-tailscale)
 - [Avisos por la malla](#avisos-por-la-malla) · [MQTT](#mqtt) · [Home Assistant](#home-assistant)
 - [Paneles y datos por MQTT](#paneles-y-datos-por-mqtt) · [A la malla (el panel del receptor)](#a-la-malla-el-panel-del-receptor)
-- [Si vienes de Vigía servidor](#si-vienes-de-vigía-servidor)
 
 ## Qué hace falta
 
@@ -294,8 +293,7 @@ una salida más.
 **Avisar al móvil con la app de Home Assistant.** Cada alarma que salta, se resuelve o se da por vista llega como
 evento, con `event_type` *alarma*, *resuelta* o *vista*, y en sus atributos `texto`, `detalle`, `nodo` e `id`. La
 entidad es *Alarmas* en el dispositivo *Talaia*: `event.talaia_alarmas` (`event.talaia_alarms` si el servidor estaba
-en inglés al crearla; `event.vigia_servidor_alarmas` en una instalación que viene de Vigía). Una automatización (en
-YAML; cambia `mobile_app_mi_movil` por tu móvil y la entidad por la tuya):
+en inglés al crearla). Una automatización (en YAML; cambia `mobile_app_mi_movil` por tu móvil y la entidad por la tuya):
 
 ```yaml
 alias: Talaia → móvil
@@ -316,17 +314,17 @@ actions:
 **Temas** (por si los usas desde otro programa; el tema base se cambia en *Ajustes → MQTT → Home Assistant → Temas*):
 
 ```
-vigia/estado                     online / offline (retenido; offline también si el servidor se cae)
-vigia/servidor/estado            JSON: receptor, sin_atender, activas, oidos, aviso (retenido)
-vigia/servidor/evento            JSON por cada alarma, resuelta o vista (no retenido)
-vigia/servidor/enterado_todas    ← cualquier mensaje: «Enterado» a todas
-vigia/nodo/<id>/estado           JSON: m (lecturas), oido, saltos, snr, a (alarmas ON/OFF), d (su detalle) (retenido)
-vigia/nodo/<id>/enterado         ← el nombre de la alarma (como temperature_alta): «Enterado» a esa
-homeassistant/…/vigia_…/config   autodescubrimiento de Home Assistant (retenido)
+talaia/estado                    online / offline (retenido; offline también si el servidor se cae)
+talaia/servidor/estado           JSON: receptor, sin_atender, activas, oidos, aviso (retenido)
+talaia/servidor/evento           JSON por cada alarma, resuelta o vista (no retenido)
+talaia/servidor/enterado_todas   ← cualquier mensaje: «Enterado» a todas
+talaia/nodo/<id>/estado          JSON: m (lecturas), oido, saltos, snr, a (alarmas ON/OFF), d (su detalle) (retenido)
+talaia/nodo/<id>/enterado        ← el nombre de la alarma (como temperature_alta): «Enterado» a esa
+homeassistant/…/talaia_…/config  autodescubrimiento de Home Assistant (retenido)
 ```
 
-`<id>` es el número del nodo en hexadecimal, sin `!` (como `3c6e19a2`). Los temas y los identificadores siguen
-diciendo `vigia`, como en las versiones de antes, para que Home Assistant no duplique los dispositivos.
+`<id>` es el número del nodo en hexadecimal, sin `!` (como `3c6e19a2`). Los identificadores en Home Assistant empiezan
+por el tema base (`talaia_…`): si lo cambias, Home Assistant ve dispositivos nuevos y los de antes se quitan.
 
 Cualquier usuario de la pantalla puede cambiar a qué broker se conecta el servidor o apagar MQTT, pero no ver la
 contraseña guardada.
@@ -434,20 +432,3 @@ mqtt_statestream:
 Con `publish_attributes: true` sale también la unidad de cada uno y Talaia la elige sola. Cada uno sale en
 `ha_estados/sensor/estacion_temperatura/state` (retenido: Talaia lo tiene nada más conectar). No incluyas los sensores
 «Talaia · …»: Talaia rechaza sus propios temas para no volver a recibir lo que ya publica él.
-
-## Si vienes de Vigía servidor
-
-Hasta la 1.20, Talaia se llamaba *Vigía servidor*. Al actualizar con el instalador (la misma orden de
-[Instalar](#instalar)), una instalación de Vigía pasa sola a los nombres nuevos, con sus datos y su configuración:
-servicio y orden `talaia` (antes `vigia-servidor`), `/etc/talaia/config.json`, `/var/lib/talaia` (la base de datos
-pasa a `talaia.db`) y el usuario `talaia`.
-
-- **Home Assistant** no cambia: sus dispositivos, entidades y temas siguen siendo los mismos.
-- **Los usuarios del broker** pasan al plugin de seguridad dinámica de Mosquitto con las mismas contraseñas: no hay
-  que tocar ningún dispositivo.
-- **La pantalla pide usuario y contraseña**: la primera vez, el primer usuario se crea con el código que dice el
-  instalador.
-- **La estación de la 1.16** (la que estaba en Ajustes) pasó en su día al panel del receptor, con su histórico, su
-  canal y sus saltos.
-- **La app ligera** (por Bluetooth o cable, sin servidor) sigue en https://dani-nros.github.io/vigia-mesh/, congelada
-  en la 1.20.

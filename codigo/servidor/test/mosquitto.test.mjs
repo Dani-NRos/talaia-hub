@@ -154,8 +154,8 @@ test("with a real Mosquitto: the users of before stay, users are added, changed 
   assert.equal((await talaia.mqtt.configurarHA({ activado: true, broker: "local" })).ok, true);
   const visto = new Map();
   shelly.on("message", (tema, c) => visto.set(tema, c.toString()));
-  await shelly.subscribeAsync("vigia/#");
-  await hasta(() => visto.get("vigia/estado") === "online", 15000, "online on the local broker");
+  await shelly.subscribeAsync("talaia/#");
+  await hasta(() => visto.get("talaia/estado") === "online", 15000, "online on the local broker");
   await shelly.endAsync();
   assert.match((await talaia.mqtt.quitarBroker("local")).error, /no se puede quitar/);
 

@@ -190,7 +190,7 @@ function haHTML() {
       <div class="set-row"><label class="sw" for="haOn"><input type="checkbox" id="haOn" ${h.activado ? "checked" : ""}><span class="sw-ui"></span><span>${esc(t("set.ha.on"))}</span></label></div>
       <div class="set-row"><label for="haBroker">${esc(t("set.ha.broker"))}</label><select id="haBroker" class="inp sel">${opts}</select></div>
       <details class="mq-adv"><summary>${esc(t("set.ha.topics"))}</summary><div class="mq-f">
-        <label for="haBase">${esc(t("set.ha.base"))}</label><input id="haBase" class="inp" autocomplete="off" spellcheck="false" value="${esc(h.base || "vigia")}">
+        <label for="haBase">${esc(t("set.ha.base"))}</label><input id="haBase" class="inp" autocomplete="off" spellcheck="false" value="${esc(h.base || "talaia")}">
         <label for="haPref">${esc(t("set.ha.prefix"))}</label><input id="haPref" class="inp" autocomplete="off" spellcheck="false" value="${esc(h.prefijo || "homeassistant")}">
       </div><p class="hint">${esc(t("set.ha.topicsHint"))}</p></details>
       <p class="form-err" id="haErr" role="alert" hidden></p>

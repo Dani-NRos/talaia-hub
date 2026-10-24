@@ -8,9 +8,11 @@ con Tailscale. Dentro de la app se llama solo **«Talaia»**. Este repositorio (
 Todo dice ya Talaia, también por dentro (paso 5.1, 23 oct. 2026): paquetes `@talaia/*`, servicio `talaia`, orden
 `talaia`, `/opt/talaia`, `/etc/talaia/config.json`, `/var/lib/talaia` (base `talaia.db`), usuario `talaia`. El
 instalador pasa solo una instalación de Vigía a esos nombres (`desde_vigia` en `instalar.sh`) y el servidor renombra
-`vigia.db` a `talaia.db` al arrancar (`rutaAlmacen`). **Se quedan con «vigia»**, a propósito: los identificadores y
-temas de Home Assistant (`vigia_…`, `vigia/…`; cambiarlos sin migrar duplicaría los dispositivos en HA y perdería su
-histórico).
+`vigia.db` a `talaia.db` al arrancar (`rutaAlmacen`). Home Assistant (Dani, 24 oct. 2026: «nadie va a venir de
+vigia-server»): tema base `talaia` por defecto y los identificadores salen de él (`prefijoIds`: «talaia» →
+`talaia_servidor`, `talaia_<id>`; «casa/talaia» → `casa_talaia_…`); una instalación que ya tenía guardada la base
+`vigia` la conserva (y sus dispositivos en HA). Cambiar la base retira los de antes. Nada de Vigía en README, manual,
+CHANGELOG ni en la pantalla; queda solo el código de migración, que no se ve.
 
 El repositorio `vigia-mesh` sigue aparte:
 - `main`: la **app ligera** (PWA de Bluetooth y cable) **congelada en la 1.20**, publicada en GitHub Pages

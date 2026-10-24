@@ -152,7 +152,7 @@ test("estados ON/OFF y conexión: un enchufe Tasmota con su LWT y una puerta de 
     { tipo: "estado", nombre: "Enchufe", broker: "b1", tema: "stat/enchufe/POWER" },
     { tipo: "estado", nombre: "Puerta", nombres: "abierta", invertir: true, broker: "b1", tema: "zigbee2mqtt/Puerta", campo: "contact" },
   ];
-  assert.match(paneles.guardarDatos(num, datos, { broker: "b1", tema: "vigia/estado" }).error, /publica Talaia/);
+  assert.match(paneles.guardarDatos(num, datos, { broker: "b1", tema: "talaia/estado" }).error, /publica Talaia/);
   assert.equal(paneles.guardarDatos(num, datos, { broker: "b1", tema: "tele/enchufe/LWT", avisar: true }).ok, true);
   const n = S.nodes.get(num);
   await hasta(() => n.metrics.mq1?.v === 1 && n.metrics.mq2?.v === 0 && n.conectado === false, 3000, "estados y conexión");
@@ -342,22 +342,22 @@ test("panel de un nodo: renombrar, datos MQTT junto a los suyos (sin tocar cuán
   assert.equal(S.nodes.get(CASETA).lastHeard, oido, "un dato MQTT no es oír al nodo por radio");
   // A Home Assistant va lo del nodo, no lo MQTT; y el nombre del dispositivo es el de Talaia.
   const ID = CASETA.toString(16).padStart(8, "0");
-  await hasta(() => ha.visto.get(`homeassistant/sensor/vigia_${ID}/temperature/config`), 5000, "sensor del nodo en HA");
-  await hasta(() => JSON.parse(ha.visto.get(`homeassistant/sensor/vigia_${ID}/temperature/config`)).device.name === "Talaia · Huerto", 5000, "nombre en HA");
+  await hasta(() => ha.visto.get(`homeassistant/sensor/talaia_${ID}/temperature/config`), 5000, "sensor del nodo en HA");
+  await hasta(() => JSON.parse(ha.visto.get(`homeassistant/sensor/talaia_${ID}/temperature/config`)).device.name === "Talaia · Huerto", 5000, "nombre en HA");
   await new Promise((r) => setTimeout(r, 1500));
   assert.ok(![...ha.visto.keys()].some((k) => k.includes("/mq1/")), "el dato MQTT no va a HA");
-  assert.ok(!("mq1" in (JSON.parse(ha.visto.get(`vigia/nodo/${ID}/estado`) || "{}").m || {})));
+  assert.ok(!("mq1" in (JSON.parse(ha.visto.get(`talaia/nodo/${ID}/estado`) || "{}").m || {})));
   // Ni sus alarmas: ni evento, ni en la cuenta de activas, ni «Enterado todas» desde HA las da por vistas.
   const eventos = [];
-  ha.cliente.on("message", (tema, carga) => { if (tema === "vigia/servidor/evento") eventos.push(JSON.parse(carga)); });
+  ha.cliente.on("message", (tema, carga) => { if (tema === "talaia/servidor/evento") eventos.push(JSON.parse(carga)); });
   assert.equal(acciones.ponerLimite(CASETA, "mq1", "max", 18).ok, true);
   assert.equal(acciones.ponerLimite(CASETA, "temperature", "max", 20).ok, true);
   await hasta(() => S.active.has(`${CASETA}|mq1|high`) && S.active.has(`${CASETA}|temperature|high`), 3000, "las dos alarmas");
   await hasta(() => eventos.length >= 1, 3000, "evento de la del nodo");
   await new Promise((r) => setTimeout(r, 1500));
   assert.deepEqual(eventos.map((e) => e.texto), ["Huerto · Temperatura por encima de 20,0 °C"]);
-  assert.equal(JSON.parse(ha.visto.get("vigia/servidor/estado")).activas, 1);
-  await ha.cliente.publishAsync("vigia/servidor/enterado_todas", "PRESS");
+  assert.equal(JSON.parse(ha.visto.get("talaia/servidor/estado")).activas, 1);
+  await ha.cliente.publishAsync("talaia/servidor/enterado_todas", "PRESS");
   await hasta(() => S.active.get(`${CASETA}|temperature|high`).acked, 3000, "vista la del nodo");
   assert.equal(S.active.get(`${CASETA}|mq1|high`).acked, false);
   // Volver a su nombre.
@@ -462,5 +462,5 @@ test("lo que no está al día no sale a la malla; los fallos se cuentan; buscar 
   assert.equal(r.ok, true);
   const vistos = r.temas.map((x) => `${x.broker}|${x.tema}|${x.campo}`);
   assert.ok(vistos.includes("b1|zigbee2mqtt/Estación|humidity"));
-  assert.ok(!vistos.some((v) => v.includes("vigia/")));
+  assert.ok(!vistos.some((v) => v.includes("talaia/")));
 });

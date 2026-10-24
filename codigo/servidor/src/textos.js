@@ -109,7 +109,7 @@ addTexts({
     "s.pan.waitCmd": "Espera: aún no ha contestado a la orden anterior.",
     "s.pan.waitMinute": "Espera un minuto entre envíos a mano.",
     // brokers and Home Assistant settings
-    "s.mqtt.badBase": "El tema base solo puede llevar letras, números, «-», «_» y «/» (por ejemplo, vigia).",
+    "s.mqtt.badBase": "El tema base solo puede llevar letras, números, «-», «_» y «/» (por ejemplo, talaia).",
     "s.mqtt.badPrefix": "El prefijo de Home Assistant solo puede llevar letras, números, «-», «_» y «/» (normalmente, homeassistant).",
     "s.mqtt.badUrl": "No entiendo la dirección del broker. Pon la IP o el nombre, por ejemplo 192.168.1.20 (o 192.168.1.20:1883).",
     "s.mqtt.e.auth": "usuario o contraseña incorrectos, o el broker no deja entrar sin ellos",
@@ -382,7 +382,7 @@ addTexts({
     "s.pan.waitCmd": "Wait: it hasn't answered the previous command yet.",
     "s.pan.waitMinute": "Wait a minute between manual sends.",
     // brokers and Home Assistant settings
-    "s.mqtt.badBase": "The base topic can only have letters, numbers, “-”, “_” and “/” (for example, vigia).",
+    "s.mqtt.badBase": "The base topic can only have letters, numbers, “-”, “_” and “/” (for example, talaia).",
     "s.mqtt.badPrefix": "The Home Assistant prefix can only have letters, numbers, “-”, “_” and “/” (usually, homeassistant).",
     "s.mqtt.badUrl": "I don't understand the broker's address. Enter its IP or name, for example 192.168.1.20 (or 192.168.1.20:1883).",
     "s.mqtt.e.auth": "wrong user or password, or the broker doesn't let anyone in without them",

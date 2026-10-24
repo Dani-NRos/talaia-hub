@@ -240,14 +240,14 @@ await ir(movil, "dashboard");
 
 // Broker MQTT con usuario y contraseña, y un «Home Assistant» que mira lo que se publica y pulsa botones.
 const broker = await Aedes.createBroker();
-broker.authenticate = (c, u, p, cb) => cb(null, u === "vigia" && p?.toString() === "clave-secreta");
+broker.authenticate = (c, u, p, cb) => cb(null, u === "talaia" && p?.toString() === "clave-secreta");
 const srvMqtt = net.createServer(broker.handle);
 await new Promise((r) => srvMqtt.listen(0, "127.0.0.1", r));
 const MQTT_PUERTO = srvMqtt.address().port;
-const ha = await mqttLib.connectAsync(`mqtt://127.0.0.1:${MQTT_PUERTO}`, { username: "vigia", password: "clave-secreta" });
+const ha = await mqttLib.connectAsync(`mqtt://127.0.0.1:${MQTT_PUERTO}`, { username: "talaia", password: "clave-secreta" });
 const visto = new Map();
-const estados = []; // lo que va pasando por vigia/estado (online / offline)
-ha.on("message", (t, c) => { visto.set(t, c.toString()); if (t === "vigia/estado") estados.push(c.toString()); });
+const estados = []; // lo que va pasando por talaia/estado (online / offline)
+ha.on("message", (t, c) => { visto.set(t, c.toString()); if (t === "talaia/estado") estados.push(c.toString()); });
 await ha.subscribeAsync("#");
 const ID = CASETA.toString(16).padStart(8, "0");
 const esperarMqtt = async (f, que, ms = 8000) => { const fin = Date.now() + ms; while (Date.now() < fin) { if (f()) return; await sleep(100); } throw new Error(`MQTT no vio: ${que}`); };
@@ -268,13 +268,13 @@ await paso("MQTT desde Ajustes: añadir el broker de Home Assistant (con contras
   await pc.click("[data-brk-nuevo]");
   await pc.fill("#brkNombre", "Home Assistant");
   await pc.fill("#brkUrl", `127.0.0.1:${MQTT_PUERTO}`);
-  await pc.fill("#brkUser", "vigia");
+  await pc.fill("#brkUser", "talaia");
   await pc.fill("#brkPass", "otra");
   await pc.click("[data-brk-save]");
   await esperarTexto(pc, /Home Assistant[\s\S]*No se puede conectar: usuario o contraseña incorrectos/, "error de contraseña en Ajustes");
   await pc.locator("#mqttBox").screenshot({ path: path.join(out, "mqtt-error.png") });
   await pc.click('[data-brk-edit="b1"]');
-  if ((await pc.inputValue("#brkUser")) !== "vigia" || (await pc.inputValue("#brkPass")) !== "") throw new Error("el editor no trae el usuario o trae la contraseña");
+  if ((await pc.inputValue("#brkUser")) !== "talaia" || (await pc.inputValue("#brkPass")) !== "") throw new Error("el editor no trae el usuario o trae la contraseña");
   await pc.fill("#brkPass", "clave-secreta");
   await pc.click("[data-brk-save]");
   await esperarTexto(pc, /Home Assistant[\s\S]*Conectado desde las/, "Home Assistant conectado");
@@ -282,9 +282,9 @@ await paso("MQTT desde Ajustes: añadir el broker de Home Assistant (con contras
   await pc.check("#haOn", { force: true });
   await pc.selectOption("#haBroker", "b1");
   await pc.click("[data-ha-save]");
-  await esperarMqtt(() => visto.get("vigia/estado") === "online", "online");
-  await esperarMqtt(() => visto.get(`homeassistant/sensor/vigia_${ID}/temperature/config`), "sensor de temperatura");
-  const cfg = JSON.parse(visto.get(`homeassistant/sensor/vigia_${ID}/temperature/config`));
+  await esperarMqtt(() => visto.get("talaia/estado") === "online", "online");
+  await esperarMqtt(() => visto.get(`homeassistant/sensor/talaia_${ID}/temperature/config`), "sensor de temperatura");
+  const cfg = JSON.parse(visto.get(`homeassistant/sensor/talaia_${ID}/temperature/config`));
   if (cfg.device.name !== "Talaia · Caseta huerto") throw new Error(`nombre del dispositivo: ${cfg.device.name}`);
   if (/clave-secreta/.test(await (await api("api/estado")).text())) throw new Error("la contraseña sale en /api/estado");
 });
@@ -321,10 +321,10 @@ await paso("el móvil ve los mismos brokers (sin contraseñas)", async () => {
 });
 
 await paso("Enterado desde Home Assistant queda visto en las pantallas", async () => {
-  await esperarMqtt(() => JSON.parse(visto.get(`vigia/nodo/${ID}/estado`) || "{}").a?.temperature_alta === "ON", "alarma encendida en HA");
-  await ha.publishAsync(`vigia/nodo/${ID}/enterado`, "temperature_alta");
+  await esperarMqtt(() => JSON.parse(visto.get(`talaia/nodo/${ID}/estado`) || "{}").a?.temperature_alta === "ON", "alarma encendida en HA");
+  await ha.publishAsync(`talaia/nodo/${ID}/enterado`, "temperature_alta");
   await esperarTexto(movil, /alarma vista, sigue activa/i, "vista en el móvil");
-  await esperarMqtt(() => JSON.parse(visto.get(`vigia/nodo/${ID}/estado`) || "{}").d?.temperature_alta?.visto === true, "vista en HA");
+  await esperarMqtt(() => JSON.parse(visto.get(`talaia/nodo/${ID}/estado`) || "{}").d?.temperature_alta?.visto === true, "vista en HA");
   const act = (await (await api("api/estado")).json()).active;
   if (!act.some((a) => a.acked)) throw new Error(`en el servidor: ${JSON.stringify(act.map((a) => [a.key, a.acked]))}`);
 });
@@ -436,7 +436,7 @@ await paso("renombrar un nodo desde el móvil: sale con su nombre nuevo en el PC
   await esperarTexto(movil, /Ahora se llama «Huerto»/, "aviso del nombre");
   await movil.keyboard.press("Escape");
   await esperarTexto(pc, /Paneles[\s\S]*Huerto/i, "el nombre nuevo en el PC");
-  await esperarMqtt(() => JSON.parse(visto.get(`homeassistant/sensor/vigia_${ID}/temperature/config`) || "{}").device?.name === "Talaia · Huerto", "dispositivo renombrado en HA");
+  await esperarMqtt(() => JSON.parse(visto.get(`homeassistant/sensor/talaia_${ID}/temperature/config`) || "{}").device?.name === "Talaia · Huerto", "dispositivo renombrado en HA");
 });
 
 await paso("panel nuevo sin nodo (Tasmota): sus datos, una alarma y nada a Home Assistant", async () => {
@@ -467,7 +467,7 @@ await paso("panel nuevo sin nodo (Tasmota): sus datos, una alarma y nada a Home 
   const temas = [...visto.keys()];
   if (temas.some((t) => /mq\d/.test(t))) throw new Error(`a Home Assistant van datos MQTT: ${temas.filter((t) => /mq\d/.test(t))}`);
   if ([...visto.values()].some((c) => c.includes("Enchufe del taller"))) throw new Error("el panel sin nodo (o su alarma) ha ido a Home Assistant");
-  const sv = JSON.parse(visto.get("vigia/servidor/estado"));
+  const sv = JSON.parse(visto.get("talaia/servidor/estado"));
   if (sv.activas !== 1) throw new Error(`Home Assistant cuenta ${sv.activas} alarmas activas, no 1 (la del huerto)`);
 });
 
@@ -524,15 +524,15 @@ await paso("estados ON/OFF y conexión en el panel del enchufe: «Usar», al rev
   await ir(movil, "dashboard");
   await pc.keyboard.press("Escape");
   // A Home Assistant no va nada del panel: solo el texto del último aviso por la malla, que es lo que salió por ella.
-  const fugas = [...visto].filter(([tema, c]) => c.includes("Enchufe del taller") && tema !== "vigia/servidor/estado").map(([tema]) => tema);
+  const fugas = [...visto].filter(([tema, c]) => c.includes("Enchufe del taller") && tema !== "talaia/servidor/estado").map(([tema]) => tema);
   if (fugas.length) throw new Error(`el panel sin nodo (o su alarma) ha ido a Home Assistant: ${fugas}`);
-  const sv = JSON.parse(visto.get("vigia/servidor/estado"));
+  const sv = JSON.parse(visto.get("talaia/servidor/estado"));
   if (JSON.stringify({ ...sv, aviso: null }).includes("Enchufe del taller")) throw new Error("el panel sin nodo está en el estado del servidor");
 });
 
 await paso("encender y apagar un Shelly desde la tarjeta del móvil: propone el tema de las órdenes, espera a que conteste", async () => {
   // Un Shelly Plug de mentira en el broker de Home Assistant: contesta a on/off y a status_update con su estado.
-  const shelly = await mqttLib.connectAsync(`mqtt://127.0.0.1:${MQTT_PUERTO}`, { username: "vigia", password: "clave-secreta" });
+  const shelly = await mqttLib.connectAsync(`mqtt://127.0.0.1:${MQTT_PUERTO}`, { username: "talaia", password: "clave-secreta" });
   let output = false;
   const recibidas = [];
   const publicaEstado = () => shelly.publishAsync("shellyplug01/status/switch:0", JSON.stringify({ id: 0, source: "button", output, apower: output ? 45 : 0 }));
@@ -608,7 +608,7 @@ await paso("quitar el panel del enchufe desde el móvil", async () => {
 });
 await foto(movil, "movil-tras-reinicio");
 await paso("idioma del servidor: en inglés para Home Assistant y lo que contesta; las dos pantallas lo ven; vuelta al español", async () => {
-  const cfgTemp = () => JSON.parse(visto.get(`homeassistant/sensor/vigia_${ID}/temperature/config`) || "{}");
+  const cfgTemp = () => JSON.parse(visto.get(`homeassistant/sensor/talaia_${ID}/temperature/config`) || "{}");
   await ir(pc, "settings/system");
   await ir(movil, "settings/system");
   await pc.selectOption("#srvLang", "en");

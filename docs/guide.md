@@ -12,7 +12,6 @@ even when no phone or computer is looking.
 - [The screen](#the-screen) · [From outside your home (Tailscale)](#from-outside-your-home-tailscale)
 - [Alerts over the mesh](#alerts-over-the-mesh) · [MQTT](#mqtt) · [Home Assistant](#home-assistant)
 - [Panels and MQTT data](#panels-and-mqtt-data) · [To the mesh (the receiver's panel)](#to-the-mesh-the-receivers-panel)
-- [Coming from Vigía servidor](#coming-from-vigía-servidor)
 
 ## What you need
 
@@ -298,8 +297,7 @@ output.
 an event, with `event_type` *alarma* (alarm), *resuelta* (resolved) or *vista* (acknowledged), and in its attributes
 `texto` (text), `detalle` (detail), `nodo` (node) and `id`. These names are the same in both languages. The entity is
 *Alarms* in the *Talaia* device: `event.talaia_alarms` (`event.talaia_alarmas` if the server was in Spanish when it was
-made; `event.vigia_servidor_alarmas` on an installation coming from Vigía). An automation (in YAML; change
-`mobile_app_my_phone` to your phone and the entity to yours):
+made). An automation (in YAML; change `mobile_app_my_phone` to your phone and the entity to yours):
 
 ```yaml
 alias: Talaia → phone
@@ -321,17 +319,18 @@ actions:
 *Settings → MQTT → Home Assistant → Topics*):
 
 ```
-vigia/estado                     online / offline (retained; offline also if the server crashes)
-vigia/servidor/estado            JSON: receptor, sin_atender, activas, oidos, aviso (retained)
-vigia/servidor/evento            JSON for each alarm, resolved or acknowledged (not retained)
-vigia/servidor/enterado_todas    ← any message: acknowledges all
-vigia/nodo/<id>/estado           JSON: m (readings), oido, saltos, snr, a (alarms ON/OFF), d (their detail) (retained)
-vigia/nodo/<id>/enterado         ← the alarm's name (like temperature_alta): acknowledges that one
-homeassistant/…/vigia_…/config   Home Assistant's discovery (retained)
+talaia/estado                    online / offline (retained; offline also if the server crashes)
+talaia/servidor/estado           JSON: receptor, sin_atender, activas, oidos, aviso (retained)
+talaia/servidor/evento           JSON for each alarm, resolved or acknowledged (not retained)
+talaia/servidor/enterado_todas   ← any message: acknowledges all
+talaia/nodo/<id>/estado          JSON: m (readings), oido, saltos, snr, a (alarms ON/OFF), d (their detail) (retained)
+talaia/nodo/<id>/enterado        ← the alarm's name (like temperature_alta): acknowledges that one
+homeassistant/…/talaia_…/config  Home Assistant's discovery (retained)
 ```
 
-`<id>` is the node's number in hexadecimal, without `!` (like `3c6e19a2`). The topics, the ids and the JSON fields
-still say `vigia` and are in Spanish, as in the earlier versions, so that Home Assistant doesn't duplicate the devices.
+`<id>` is the node's number in hexadecimal, without `!` (like `3c6e19a2`). The topics and the JSON fields are in Spanish
+in both languages. The ids in Home Assistant start with the base topic (`talaia_…`): if you change it, Home Assistant
+sees new devices and the old ones are removed.
 
 Any user of the screen can change which broker the server connects to or switch MQTT off, but can't see the saved
 password.
@@ -441,20 +440,3 @@ mqtt_statestream:
 With `publish_attributes: true` each one's unit goes out too and Talaia picks it by itself. Each one goes out on
 `ha_states/sensor/station_temperature/state` (retained: Talaia has it as soon as it connects). Don't include the
 “Talaia · …” sensors: Talaia refuses its own topics so as not to receive again what it publishes.
-
-## Coming from Vigía servidor
-
-Up to 1.20, Talaia was called *Vigía servidor*. When updating with the installer (the same command as in
-[Install](#install)), a Vigía installation moves by itself to the new names, with its data and its configuration: the
-`talaia` service and command (before, `vigia-servidor`), `/etc/talaia/config.json`, `/var/lib/talaia` (the database
-becomes `talaia.db`) and the `talaia` user.
-
-- **Home Assistant** doesn't change: its devices, entities and topics stay the same.
-- **The broker's users** move to Mosquitto's dynamic security plugin with the same passwords: no device needs
-  touching.
-- **The screen asks for a user name and password**: the first time, the first user is made with the code the installer
-  gives.
-- **The 1.16 weather station** (the one that was in Settings) moved at the time to the receiver's panel, with its
-  history, its channel and its hops.
-- **The light app** (by Bluetooth or cable, no server) is still at https://dani-nros.github.io/vigia-mesh/, frozen at
-  1.20 (in Spanish).
