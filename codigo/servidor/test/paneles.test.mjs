@@ -311,9 +311,12 @@ test("al parar, lo que esperaba su minuto se guarda como lectura", async (t) => 
   await hasta(() => S.nodes.get(num).metrics.mq1?.v === 100, 3000, "primer valor");
   await dispositivo.publicar(T_TASMOTA, { ENERGY: { Power: 120 } });
   await hasta(() => S.nodes.get(num).metrics.mq1?.v === 120, 3000, "segundo valor");
-  assert.equal((await S.store.series(num, "mq1", 0)).length, 1);
+  const antes = await S.store.series(num, "mq1", 0);
+  assert.equal(antes.length, 1, JSON.stringify(antes));
   paneles.parar();
-  assert.deepEqual((await S.store.series(num, "mq1", 0)).map((x) => x.v), [100, 120]);
+  // (once on GitHub, with Node 24, only 120 was there: what each one was, to know why if it happens again)
+  const despues = await S.store.series(num, "mq1", 0);
+  assert.deepEqual(despues.map((x) => x.v), [100, 120], JSON.stringify({ antes, despues }));
 });
 
 test("panel de un nodo: renombrar, datos MQTT junto a los suyos (sin tocar cuándo se le oyó) y nada de eso a HA", async (t) => {
