@@ -1,7 +1,8 @@
 // Automations (2.1): «if … then …», run by the server.
 //
 //  - When: a datum of a panel goes above or below a number, or a state becomes ON or OFF (both, optionally, «for at
-//    least N min»); or a time of day, on some days of the week (the server's clock). Only on the crossing: what
+//    least N min»); a time of day, on some days of the week (the server's clock); or a text that arrives as an order
+//    over the mesh (mesh-orders.js, with its answer). Only on the crossing: what
 //    already held when the automation was saved, switched on or the server started doesn't count until it stops
 //    holding (a state «for N min» counts from when it changed, which the server knows).
 //  - Then: steps in order. Turn a switch on or off (optionally «for N min», and then back); wait; a message over the
@@ -22,9 +23,10 @@ import { ASK_ALL } from "@talaia/nucleo/motor.js";
 import { fitBytes } from "@talaia/nucleo/canales.js";
 import { MIN, isNum, hhmm, dur } from "@talaia/nucleo/textos.js";
 import { tx } from "@talaia/nucleo/idioma.js";
+import { normOrder, HELP } from "./mesh-orders.js";
 import "./textos.js";
 
-export const MAX_STEPS = 20, MAX_AUTOMATIONS = 100, NAME_MAX = 40, TEXT_MAX = 200;
+export const MAX_STEPS = 20, MAX_AUTOMATIONS = 100, NAME_MAX = 40, TEXT_MAX = 200, ORDER_MAX = 40;
 export const MAX_FOR = 1440, MAX_WAIT = 86400; // minutes (24 h) and seconds (24 h)
 export const ASKABLE = ["env", "device", "air", "power", "pos"]; // not the node's info (12 h) nor traceroutes
 const TICK = 5000; // times of day and «for N min» are looked at this often
@@ -41,16 +43,17 @@ const pad = (n) => String(n).padStart(2, "0");
 const minuteKey = (t) => { const d = new Date(t); return `${d.getFullYear()}-${d.getMonth() + 1}-${d.getDate()} ${pad(d.getHours())}:${pad(d.getMinutes())}`; };
 
 /**
- * Checks what a screen sends and builds the automation from it (only the known fields). ctx: { S, paneles }.
+ * Checks what a screen sends and builds the automation from it (only the known fields). ctx: { S, paneles,
+ * orderWords } (orderWords(): the switches' words for orders over the mesh, normalised).
  * Returns { auto } or { error } (in the server's language; «Step 2: …» for what is wrong in a step).
  */
-export function checkAutomation(input, { S, paneles }) {
+export function checkAutomation(input, { S, paneles, orderWords = () => new Set() }) {
   const e = (k, v) => ({ error: tx(k, v) });
   if (!input || typeof input !== "object" || Array.isArray(input)) return e("s.auto.e.bad");
   const name = String(input.name ?? "").trim();
   if (!name) return e("s.auto.e.name");
   if (name.length > NAME_MAX) return e("s.auto.e.nameLong", { n: NAME_MAX });
-  const when = checkWhen(input.when, { S, paneles });
+  const when = checkWhen(input.when, { S, paneles, orderWords });
   if (when.error) return when;
   if (!Array.isArray(input.steps) || !input.steps.length) return e("s.auto.e.steps");
   if (input.steps.length > MAX_STEPS) return e("s.auto.e.tooMany", { n: MAX_STEPS });
@@ -78,7 +81,7 @@ function datumKind(S, paneles, num, key) {
 }
 const minutes = (v, max) => (v == null || v === "" ? 0 : Number.isInteger(v) && v >= 0 && v <= max ? v : NaN);
 
-function checkWhen(w, { S, paneles }) {
+function checkWhen(w, { S, paneles, orderWords }) {
   const e = (k, v) => ({ error: tx(k, v) });
   if (!w || typeof w !== "object") return e("s.auto.e.when");
   if (w.type === "value") {
@@ -100,6 +103,15 @@ function checkWhen(w, { S, paneles }) {
     if (!m) return e("s.auto.e.time");
     if (!Array.isArray(w.days) || !w.days.length || !w.days.every((d) => Number.isInteger(d) && d >= 1 && d <= 7)) return e("s.auto.e.days");
     return { when: { type: "time", at: w.at, days: [...new Set(w.days)].sort((a, b) => a - b) } };
+  }
+  if (w.type === "mesh") {
+    const text = String(w.text ?? "").trim(), n = normOrder(text);
+    if (!n) return e("s.auto.e.order");
+    if (text.length > ORDER_MAX) return e("s.auto.e.orderLong", { n: ORDER_MAX });
+    if (HELP.has(n)) return e("s.auto.e.orderHelp", { text });
+    const word = n.split(" ")[0];
+    if (orderWords().has(word)) return e("s.auto.e.orderWord", { word });
+    return { when: { type: "mesh", text } };
   }
   return e("s.auto.e.when");
 }
@@ -150,7 +162,7 @@ function checkStep(s, { S, paneles }) {
  * watched panel has a newer value; it emits «parte» «automations». timing: shorter times for the tests (ms in a
  * minute and in a second, and the other waits).
  */
-export function createAutomations({ S, motor, paneles, almacen, eventos, registro, timing = {} }) {
+export function createAutomations({ S, motor, paneles, almacen, eventos, registro, timing = {}, orderWords = () => new Set() }) {
   const T = { min: MIN, sec: 1000, tick: TICK, afterStart: AFTER_START, retry: BACK_RETRY, ...timing };
   const cfg = almacen.leer("automations", null) || { next: 1, list: [] };
   const run = { runs: {}, backs: {}, last: {}, ...(almacen.leer("automationsRun", null) || {}) };
@@ -394,7 +406,7 @@ export function createAutomations({ S, motor, paneles, almacen, eventos, registr
   return {
     /** Creates (without id) or changes one: { ok, id, toast } or { ok: false, error }. */
     save(input) {
-      const r = checkAutomation(input, { S, paneles });
+      const r = checkAutomation(input, { S, paneles, orderWords });
       if (r.error) return { ok: false, error: r.error };
       const a = r.auto;
       if (a.id != null) {
@@ -474,5 +486,18 @@ export function createAutomations({ S, motor, paneles, almacen, eventos, registr
     /** For the tests: what the clock does every few seconds. */
     tick,
     get list() { return cfg.list; },
+    /** The texts that start automations over the mesh (normalised), on or off. */
+    meshTexts: () => new Set(cfg.list.filter((a) => a.when.type === "mesh").map((a) => normOrder(a.when.text))),
+    /** An order over the mesh with that (normalised) text: the automations it starts, and how each one is. */
+    meshFire(text, who) {
+      const out = [];
+      for (const a of cfg.list) {
+        if (a.when.type !== "mesh" || normOrder(a.when.text) !== text) continue;
+        if (!a.on) { out.push({ name: a.name, state: a.paused ? "paused" : "off" }); continue; }
+        fire(a, { why: tx("s.auto.why.mesh", { text: a.when.text, who }) });
+        out.push({ name: a.name, state: a.on ? "running" : "paused" }); // (the brake may have just paused it)
+      }
+      return out;
+    },
   };
 }

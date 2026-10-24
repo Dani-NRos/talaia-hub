@@ -7,6 +7,8 @@
 //   cambio()            algo ha cambiado: redibujar
 //   lectura(num)        llegaron lecturas de ese nodo
 //   valor(num, clave)   a datum of that node has a newer value (n.metrics[clave]): the server's automations
+//   publicKey(num, key) a node's public key (32 bytes), as its info arrives: the server's orders over the mesh
+//   meshGap             ms between two texts over the mesh (MESH_GAP; shorter in the tests)
 //   posicion(num)       cambió su ubicación o su petición de posición
 //   peticion(num)       cambió una petición a ese nodo (botones y estado)
 //   peticionEstado(num) solo el texto de estado de sus peticiones
@@ -783,7 +785,7 @@ export function crearMotor(S, g = {}) {
         if (Date.now() - it.t > MESH_MAX_AGE) { addLog("info", tx("log.mesh.dropped", { to: it.tg.label })); continue; }
         meshSent.push(Date.now());
         sendMeshOne(it);
-        if (meshQ.length) await new Promise((r) => setTimeout(r, MESH_GAP));
+        if (meshQ.length) await new Promise((r) => setTimeout(r, g.meshGap ?? MESH_GAP));
       }
     } finally {
       meshBusy = false;
@@ -868,6 +870,7 @@ export function crearMotor(S, g = {}) {
     if (u.shortName) n.short = u.shortName;
     if (typeof u.hwModel === "number" && u.hwModel > 0) n.hw = Protobuf.Mesh.HardwareModel?.[u.hwModel] || n.hw;
     if (u.publicKey) n.key = u.publicKey.length === 32;
+    if (u.publicKey?.length === 32) g.publicKey?.(n.num, u.publicKey);
   }
   function pickUser(u) {
     const { id, longName, shortName, macaddr, hwModel, isLicensed, role, publicKey, isUnmessagable } = u;

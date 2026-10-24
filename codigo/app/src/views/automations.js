@@ -1,5 +1,5 @@
 // Automations (2.1): the list («if … then …», on or off, what each one is waiting for, when it last ran) and the
-// editor, in a sheet. The server runs them and checks what is saved (servidor/src/automations.js): here they are
+// editor, in a sheet. «If» a datum or a state, a time of day, or an order over the mesh (Settings → Mesh). The server runs them and checks what is saved (servidor/src/automations.js): here they are
 // only drawn and edited. While one is being edited, the changes are a draft until saved, kept if it is reopened.
 import { ctx } from "../ctx.js";
 import { t, locale, getLang } from "../i18n.js";
@@ -77,6 +77,7 @@ function nodeOptions(sel) {
 /* ── the list ── */
 function whenText(w) {
   if (w.type === "time") return t("au.s.time", { at: w.at, days: daysText(w.days) });
+  if (w.type === "mesh") return t("au.s.mesh", { text: w.text });
   const what = datumName(w.num, w.key), d = w.for ? t("au.s.for", { d: dur(w.for * MIN) }) : "";
   if (w.op === "is") return t("au.s.is", { what, state: stateName(w.key, w.value), for: d });
   return t(w.op === "above" ? "au.s.above" : "au.s.below", { what, limit: fmtLimit(w.key, w.value, true).replace(" ", "\u00a0"), for: d }); // «30,0 °C» on one line
@@ -93,6 +94,7 @@ function problems(a) {
   const s = S(), out = [];
   const w = a.when;
   if (w.type === "value" && (!s.cfg.watched[w.num] || !dataOf(w.num).includes(w.key))) out.push(t("au.p.when"));
+  if (w.type === "mesh" && !s.meshOrders?.on) out.push(t("au.p.meshOff"));
   a.steps.forEach((x, i) => {
     if (x.type === "switch" && !datumOf(x.num, x.key)?.orden) out.push(t("au.p.step", { n: i + 1 }));
     if (x.type === "message" && x.to.channel != null && s.channels.length && !channelOf(x.to.channel)?.private) out.push(t("au.p.channel", { n: i + 1 }));
@@ -141,6 +143,7 @@ export function renderAutomations() {
 function toDraft(a) {
   const w = a.when;
   const when = w.type === "time" ? { type: "time", at: w.at, days: [...w.days] }
+    : w.type === "mesh" ? { type: "mesh", text: w.text }
     : { type: "value", num: w.num, key: w.key, op: w.op, value: w.op === "is" ? w.value : String(w.value).replace(".", locale() === "es-ES" ? "," : "."), for: w.for ? String(w.for) : "" };
   const steps = a.steps.map((s) => {
     if (s.type === "switch") return { type: "switch", ref: `${s.num}|${s.key}`, value: s.value, for: s.for ? String(s.for) : "" };
@@ -170,6 +173,7 @@ function payload(d) {
   const num = (s) => { const v = parseNum(s); return v === null ? null : Number.isNaN(v) ? s : v; };
   const w = d.when;
   const when = w.type === "time" ? { type: "time", at: w.at, days: w.days }
+    : w.type === "mesh" ? { type: "mesh", text: w.text }
     : { type: "value", num: w.num, key: w.key, op: w.op, value: w.op === "is" ? w.value : num(w.value), for: num(w.for) ?? 0 };
   const steps = d.steps.map((s) => {
     if (s.type === "switch") { const [n, k] = s.ref.split("|"); return { type: "switch", num: Number(n), key: k, value: s.value, for: num(s.for) }; }
@@ -218,7 +222,13 @@ function drawEditor() {
 function whenHTML(w) {
   const type = `<div class="set-row"><label for="auType">${esc(t("au.whenType"))}</label><select id="auType" class="inp sel" data-au="whenType">
       <option value="value"${w.type === "value" ? " selected" : ""}>${esc(t("au.w.value"))}</option>
-      <option value="time"${w.type === "time" ? " selected" : ""}>${esc(t("au.w.time"))}</option></select></div>`;
+      <option value="time"${w.type === "time" ? " selected" : ""}>${esc(t("au.w.time"))}</option>
+      <option value="mesh"${w.type === "mesh" ? " selected" : ""}>${esc(t("au.w.mesh"))}</option></select></div>`;
+  if (w.type === "mesh") {
+    const off = !S().meshOrders?.on;
+    return `${type}<div class="au-row"><label for="auOrder">${esc(t("au.order"))}</label><input id="auOrder" class="inp au-order" data-au="order" autocomplete="off" spellcheck="false" maxlength="40" value="${esc(w.text)}" placeholder="${esc(t("au.orderPh"))}"></div>
+      <p class="hint">${esc(t("au.orderHint"))}</p>${off ? `<p class="warn-t">${esc(t("au.p.meshOff"))}</p>` : ""}`;
+  }
   if (w.type === "time") {
     const short = dayNames("narrow"), long = dayNames("long");
     return `${type}<div class="au-row"><label for="auAt">${esc(t("au.at"))}</label><input id="auAt" class="inp au-time" type="time" data-au="at" value="${esc(w.at || "")}" required></div>
@@ -301,6 +311,7 @@ function onEditorInput(ev) {
     else if (k === "value") a.when.value = el.value;
     else if (k === "for") a.when.for = el.value;
     else if (k === "at") a.when.at = el.value;
+    else if (k === "order") a.when.text = el.value;
     return;
   }
   const i = Number(el.dataset.auI), s = a.steps[i];
@@ -316,7 +327,7 @@ function onEditorChange(ev) {
   if (el.dataset.au) {
     const k = el.dataset.au;
     if (k === "on") a.on = el.checked;
-    else if (k === "whenType") a.when = el.value === "time" ? { type: "time", at: "08:00", days: [...ALL_DAYS] } : valueWhen(watchedOrder()[0] ?? null, watchedOrder()[0] != null ? dataOf(watchedOrder()[0])[0] : null);
+    else if (k === "whenType") a.when = el.value === "time" ? { type: "time", at: "08:00", days: [...ALL_DAYS] } : el.value === "mesh" ? { type: "mesh", text: "" } : valueWhen(watchedOrder()[0] ?? null, watchedOrder()[0] != null ? dataOf(watchedOrder()[0])[0] : null);
     else if (k === "whenNum") { const num = el.value === "" ? null : Number(el.value); a.when = valueWhen(num, num != null ? dataOf(num)[0] : null); }
     else if (k === "whenKey") a.when = { ...valueWhen(a.when.num, el.value || null), for: a.when.for };
     else if (k === "op") a.when.op = el.value;

@@ -339,8 +339,21 @@ con Tasmota/ESPHome, Zigbee por zigbee2mqtt, ESPHome, Home Assistant…).
   **Órdenes desde la malla**: interruptores marcados (cada uno con su palabra: `palabra on/off/?`) y las órdenes de las
   automatizaciones; las aceptan mensajes directos cifrados de nodos autorizados (clave comprobada) y, si se elige, un
   canal privado.
-- Por partes: 2.1a) motor y sección Automatizaciones (hecho, 24 oct. 2026, falta que lo pruebe Dani); 2.1b) órdenes
-  desde la malla; 2.1c) documentación en los dos idiomas y 2.1.0.
+- Por partes: 2.1a) motor y sección Automatizaciones (hecho y probado por Dani, 24 oct. 2026); 2.1b) órdenes
+  desde la malla (hecho, 24 oct. 2026, falta que lo pruebe Dani); 2.1c) documentación en los dos idiomas y 2.1.0.
+- Hecho así (2.1b): `servidor/src/mesh-orders.js` (SQLite «meshOrders»: `{ on, nodes: [{ num, key }], channel,
+  words }`; parte «meshOrders»; órdenes `meshOrders`, `meshOrdersNode`, `meshOrdersRemoveNode`), en *Ajustes → Malla →
+  Órdenes por la malla* (`app/src/views/mesh-orders.js`). Mensaje directo con `pkiEncrypted` de un nodo de la lista
+  cuya clave (`publicKey` del paquete, o la que dice el receptor: gancho `publicKey` del motor) es la que se fijó al
+  añadirlo; o cualquiera en el canal privado elegido. Desde la 2.7.15 el firmware ya no deja pasar mensajes directos
+  sin PKI (CVE-2025-53627); los que lleguen se rechazan igual. «palabra on/off/?» (también encender/apagar, 1/0,
+  estado), el texto de una automatización «Si llega «…» por la malla» (`when.type: "mesh"`, coincidencia exacta sin
+  mayúsculas ni acentos) y «ayuda/help/?». Contesta por el mismo camino con `motor.meshSay` (la cola de los avisos):
+  el interruptor cuando el dispositivo lo confirma (`done` de `paneles.mandar`). No se toman como órdenes los nombres
+  de los estados («Encendido») y por el canal no se contesta a lo que no es una orden: dos servidores en un canal no se
+  contestan entre sí. No vale lo que esperaba en el receptor (10 s tras conectar o más de 10 min por su reloj), el
+  mismo paquete dos veces ni más de 20 órdenes en 10 min del mismo. Los rechazos que parecen órdenes van al registro
+  (uno cada 10 min por nodo) y no se contestan.
 - Hecho así (2.1a): `servidor/src/automations.js` (configuración en SQLite «automations», lo pendiente en
   «automationsRun»; parte «automations» para las pantallas; órdenes `automation`, `removeAutomation`, `automationOn`,
   `runAutomation`). Solo cuenta el cruce: lo que ya se cumplía al guardarla, activarla o arrancar no la dispara (un

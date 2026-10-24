@@ -12,6 +12,7 @@ import { crearServicioMqtt, migrar as migrarMqtt } from "./mqtt.js";
 import { crearSalidaHA } from "./homeassistant.js";
 import { crearPaneles, migrarEstacion } from "./paneles.js";
 import { createAutomations } from "./automations.js";
+import { createMeshOrders } from "./mesh-orders.js";
 import { crearBrokerLocal } from "./mosquitto.js";
 import { crearUsuarios } from "./usuarios.js";
 import { tx, setLanguage, localeOf, LANGUAGES } from "@talaia/nucleo/idioma.js";
@@ -22,7 +23,8 @@ const DIAG_MAX = 200;
 
 /**
  * config: la de config.js. registro: el de registro.js.
- * opts: { almacen, receptorOpts, automations } para las pruebas (almacén en memoria, enlace simulado, tiempos cortos).
+ * opts: { almacen, receptorOpts, automations, meshOrders, meshGap } para las pruebas (almacén en memoria, enlace simulado, tiempos
+ * cortos).
  */
 export async function crearTalaia(config, registro, opts = {}) {
   const almacen = opts.almacen || abrirAlmacen(rutaAlmacen(config.datos, { mover: true }));
@@ -90,10 +92,13 @@ export async function crearTalaia(config, registro, opts = {}) {
 
   /* ── motor ── */
   let receptor = null;
+  let meshOrders = null; // orders over the mesh (2.1b), made once the panels and the automations are there
   const motor = crearMotor(S, {
     cambio: () => eventos.emit("cambio"),
     lectura: (num) => eventos.emit("lectura", num),
     valor: (num, k) => eventos.emit("valor", num, k), // the automations
+    publicKey: (num, k) => meshOrders?.publicKey(num, k),
+    meshGap: opts.meshGap,
     posicion: (num) => eventos.emit("posicion", num),
     peticion: (num) => eventos.emit("peticion", num),
     peticionEstado: (num) => eventos.emit("peticion", num),
@@ -148,6 +153,7 @@ export async function crearTalaia(config, registro, opts = {}) {
     onDevice(dev) { S.device = dev; },
     onReady() {
       S.trouble = null;
+      meshOrders?.ready();
       motor.resetClock();
       setTimeout(motor.pumpMesh, 1500);
       avisados = 0;
@@ -178,7 +184,7 @@ export async function crearTalaia(config, registro, opts = {}) {
     onMyNode: (num) => motor.recibir.myNode(num),
     onNodeInfo: (ni) => motor.recibir.nodeInfo(ni),
     onUser: (from, user, meta) => motor.recibir.user(from, user, meta),
-    onPacket: (p) => motor.recibir.packet(p),
+    onPacket: (p) => { motor.recibir.packet(p); meshOrders?.packet(p); },
     onPosition: (p) => motor.recibir.position(p),
     onTelemetry: (p) => motor.recibir.telemetry(p),
   }, config.receptor, opts.receptorOpts);
@@ -192,7 +198,8 @@ export async function crearTalaia(config, registro, opts = {}) {
   });
 
   /* ── automations (2.1): «if … then …» ── */
-  const automations = createAutomations({ S, motor, paneles, almacen, eventos, registro, timing: opts.automations });
+  const automations = createAutomations({ S, motor, paneles, almacen, eventos, registro, timing: opts.automations, orderWords: () => meshOrders?.words() ?? new Set() });
+  meshOrders = createMeshOrders({ S, motor, paneles, automations, almacen, eventos, timing: opts.meshOrders });
 
   /* ── tareas periódicas ── */
   // Sin señal y los estados que tienen que durar un tiempo («abierta más de 10 min»).
@@ -223,7 +230,7 @@ export async function crearTalaia(config, registro, opts = {}) {
   const resumenId = setInterval(resumen, HOUR);
 
   return {
-    S, motor, acciones, almacen, eventos, mqtt, paneles, usuarios, automations,
+    S, motor, acciones, almacen, eventos, mqtt, paneles, usuarios, automations, meshOrders,
     get receptor() { return receptor; },
     /** The server's language: what it writes from now on (what is already in the log stays as it was). */
     idioma(l) {

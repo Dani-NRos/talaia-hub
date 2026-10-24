@@ -233,6 +233,7 @@ export function crearPaneles({ S, motor, eventos, almacen, registro, receptor, b
       ordenes.delete(d.clave);
       motor.addLog("info", tx("s.log.cmdDone", { panel: nombrePanel(num), datum: nombreDato(d), value: textoDato(d, r.v) }), num, o.by ? { by: o.by } : null);
       contar(); // a las pantallas ya, junto con el estado nuevo (sin el segundo de espera de los valores)
+      o.done?.(true);
     } else if (o?.error) ordenes.delete(d.clave); // ya ha dicho algo: fuera el «no ha contestado»
   }
 
@@ -572,10 +573,11 @@ export function crearPaneles({ S, motor, eventos, almacen, registro, receptor, b
     /**
      * Enciende (v = 1) o apaga (v = 0) un dato ON/OFF que tenga orden: publica su mensaje y espera a que su tema de
      * estado diga que ha cambiado. Sin confirmación (decisión de Dani): cualquier usuario puede.
-     * by: who sends it, for the log (an automation; by default, whoever sent the order from a screen). When it can't
-     * be sent, code says why: "gone", "nocmd", "broker" (not connected), "busy" (another one waiting), "publish".
+     * by: who sends it, for the log (an automation; by default, whoever sent the order from a screen). done(ok): when
+     * the device has said it did it (true) or it didn't answer (false). When it can't be sent, code says why: "gone",
+     * "nocmd", "broker" (not connected), "busy" (another one waiting), "publish".
      */
-    async mandar(num, clave, v, { by } = {}) {
+    async mandar(num, clave, v, { by, done } = {}) {
       const d = panel(num)?.datos.find((x) => x.clave === clave);
       if (!S.cfg.watched[num] || !d) return { ok: false, code: "gone", error: tx("s.pan.datumGone") };
       if (!d.orden) return { ok: false, code: "nocmd", error: tx("s.pan.noCmd") };
@@ -586,7 +588,7 @@ export function crearPaneles({ S, motor, eventos, almacen, registro, receptor, b
       if (antes && !antes.error) return { ok: false, code: "busy", error: tx("s.pan.waitCmd") };
       // Pending before publishing: a device on the same broker can answer before the broker acknowledges (qos 1),
       // and its answer has to find the order waiting.
-      const o = { num, v, t: Date.now(), timer: null, by: by ?? S.actor ?? null }; // who sent it, for the log when it answers
+      const o = { num, v, t: Date.now(), timer: null, by: by ?? S.actor ?? null, done }; // who sent it, for the log when it answers
       ordenes.set(clave, o);
       if (!(await con.publicar(d.orden.tema, v ? d.orden.on : d.orden.off, { qos: 1 }))) {
         if (ordenes.get(clave) === o) ordenes.delete(clave);
@@ -598,6 +600,7 @@ export function crearPaneles({ S, motor, eventos, almacen, registro, receptor, b
         ordenes.set(clave, { v, t: o.t, error: tx("s.pan.noAnswer") });
         motor.addLog("info", tx("s.log.cmdNoAnswer", { panel: nombrePanel(num), datum: nombreDato(d), value: textoDato(d, v) }), num, o.by ? { by: o.by } : null);
         contar();
+        o.done?.(false);
       }, ORDEN_MS);
       o.timer.unref?.();
       contar();

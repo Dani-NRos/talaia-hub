@@ -1,8 +1,9 @@
 // Settings, in six parts, each at its own address (#/settings/mesh…): the mesh (no-signal minutes for new nodes,
-// alerts over the mesh), MQTT (brokers, users of this server's broker, Home Assistant), the receiver (connection,
-// radio, channels, diagnostics), the system (server language, history, about), users (views/users.js) and this
-// screen (language, theme, sound, notifications, keeping the screen on, the map saved for offline use). This
-// screen's part belongs to each device; the rest is the server's, the same on every screen.
+// alerts over the mesh, orders over the mesh: views/mesh-orders.js), MQTT (brokers, users of this server's broker,
+// Home Assistant), the receiver (connection, radio, channels, diagnostics), the system (server language, history,
+// about), users (views/users.js) and this screen (language, theme, sound, notifications, keeping the screen on, the
+// map saved for offline use). This screen's part belongs to each device; the rest is the server's, the same on every
+// screen.
 import { ctx } from "../ctx.js";
 import { t, getLang, setLang, locale, LANGS } from "../i18n.js";
 import { $, esc, parseNum } from "../ui.js";
@@ -10,6 +11,7 @@ import { go, getTheme, setTheme } from "../shell.js";
 import { displayName } from "./dashboard.js";
 import { brokerLabel } from "./panel-config.js";
 import { usersTab, usersClick } from "./users.js";
+import { meshOrdersHTML, meshOrdersClick, meshOrdersChange, meshOrdersInput } from "./mesh-orders.js";
 import { unlockAudio, beep, applyWake, notificationState } from "../alerts.js";
 import { channelWhy } from "@talaia/nucleo/canales.js";
 import { hexId, MESH_HOURLY } from "@talaia/nucleo/motor.js";
@@ -76,7 +78,7 @@ export function patchSettings(p) {
   if (tab === "mesh" && "meshLast" in p) patchMeshLast();
   if (tab === "mqtt" && "mqtt" in p) patchMqtt();
   const redraw = {
-    mesh: ["settings", "channels", "myNode"],
+    mesh: ["settings", "channels", "myNode", "meshOrders"],
     mqtt: [],
     receiver: ["link", "trouble", "device", "lora", "channels", "myNode", "myUser"],
     system: ["settings"],
@@ -131,7 +133,8 @@ function meshTab() {
       <div class="btns"><button type="button" class="btn ghost" data-mesh-test>${esc(t("set.mesh.test"))}</button></div>
       <p class="hint" id="meshLast">${meshLastHTML()}</p>
       <p class="hint">${esc(t("set.mesh.hint", { n: MESH_HOURLY }))}</p>
-    </section>`;
+    </section>
+    ${meshOrdersHTML()}`;
 }
 
 /* ── MQTT: brokers, users of this server's broker, Home Assistant ── */
@@ -435,6 +438,7 @@ async function onClick(ev) {
   const ds = b.dataset;
   const { orden, toast } = ctx;
   if (tab === "users" && (await usersClick(b, renderSettings))) return;
+  if (tab === "mesh" && b.closest("#moBox") && (await meshOrdersClick(b, renderSettings))) return;
   if ("brkNuevo" in ds) { brokerEdit = { id: null, nombre: "", url: "", usuario: "", clave: "", activado: true }; renderMqtt(); return $("#brkNombre")?.focus(); }
   if ("brkEdit" in ds) { const x = brokers().find((y) => y.id === ds.brkEdit); if (x) brokerEdit = { id: x.id, nombre: x.nombre, url: x.url, usuario: x.usuario, clave: "", activado: x.activado }; return renderMqtt(); }
   if ("brkCancel" in ds) { brokerEdit = null; return renderMqtt(); }
@@ -481,6 +485,7 @@ async function onChange(ev) {
   const s = S();
   const { orden, toast } = ctx;
   if (el.closest("#mqttBox")) return editMqtt(el);
+  if (el.closest("#moBox")) return meshOrdersChange(el);
   if (el.id === "setLang") {
     setLang(el.value);
     hooks.languageChanged();
@@ -515,4 +520,5 @@ async function onChange(ev) {
 
 function onInput(ev) {
   if (ev.target.closest("#mqttBox")) editMqtt(ev.target);
+  if (ev.target.closest("#moBox")) meshOrdersInput(ev.target);
 }

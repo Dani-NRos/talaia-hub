@@ -367,7 +367,7 @@ function aplicarPartes(p) {
     S.active = new Map(p.active.map((a) => [a.key, a]));
     if (prueba) S.active.set("test", prueba);
   }
-  for (const k of ["log", "channels", "myNode", "myUser", "lora", "traces", "meshLast", "link", "device", "trouble", "diag", "mqtt", "usuarios", "automations"]) if (k in p) S[k] = p[k];
+  for (const k of ["log", "channels", "myNode", "myUser", "lora", "traces", "meshLast", "link", "device", "trouble", "diag", "mqtt", "usuarios", "automations", "meshOrders"]) if (k in p) S[k] = p[k];
   if ("paneles" in p) {
     S.paneles = p.paneles;
     registrarMetricas(metasDe(S.paneles?.paneles)); // los datos MQTT, como métricas con su nombre y su unidad

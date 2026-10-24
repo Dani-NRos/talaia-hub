@@ -150,6 +150,20 @@ function crearOrdenes(talaia) {
     removeAutomation: ({ id }) => { exigir(Number.isInteger(id), "id"); return talaia.automations.remove(id); },
     automationOn: ({ id, on }) => { exigir(Number.isInteger(id), "id"); exigir(typeof on === "boolean", "on"); return talaia.automations.setOn(id, on); },
     runAutomation: ({ id }) => { exigir(Number.isInteger(id), "id"); return talaia.automations.runNow(id); },
+    // Orders over the mesh (mesh-orders.js checks what each part is).
+    meshOrders: ({ cambio }) => {
+      exigir(cambio && typeof cambio === "object" && !Array.isArray(cambio), "cambio");
+      exigir(Object.keys(cambio).length && Object.keys(cambio).every((k) => ["on", "channel", "words"].includes(k)), "cambio");
+      if ("on" in cambio) exigir(typeof cambio.on === "boolean", "on");
+      if ("channel" in cambio) exigir(cambio.channel === null || Number.isInteger(cambio.channel), "channel");
+      if ("words" in cambio) {
+        exigir(cambio.words && typeof cambio.words === "object" && !Array.isArray(cambio.words) && Object.keys(cambio.words).length <= 100, "words");
+        for (const [ref, w] of Object.entries(cambio.words)) exigir(/^-?\d+\|mq\d+$/.test(ref) && typeof w === "string", "words");
+      }
+      return talaia.meshOrders.configure(cambio);
+    },
+    meshOrdersNode: ({ num }) => { exigir(esNodo(num), "num"); return talaia.meshOrders.addNode(num); },
+    meshOrdersRemoveNode: ({ num }) => { exigir(esNodo(num), "num"); return talaia.meshOrders.removeNode(num); },
     buscarTemas: () => talaia.paneles.buscarTemas(),
     enviarMalla: () => talaia.paneles.enviarAhora(),
 
