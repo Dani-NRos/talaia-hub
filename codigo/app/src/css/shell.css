@@ -49,10 +49,6 @@
 .view-narrow { max-width: 760px; margin: 0 auto; }
 
 /* automations: not yet */
-.soon { display: grid; gap: 12px; max-width: 62ch; padding: 22px 24px; border: 1px dashed var(--line); border-radius: var(--r); background: var(--surface); }
-.soon-tag { justify-self: start; padding: 5px 9px; border-radius: 4px; background: var(--surface-2); font: 500 13px/1 var(--f-mono); color: var(--ink-2); }
-.soon p { font-size: 16px; }
-.soon p + p { color: var(--ink-2); font-size: 15px; }
 
 /* this screen: language and theme */
 .set-row .sel.lang, .set-row .sel.theme { min-width: 12em; }

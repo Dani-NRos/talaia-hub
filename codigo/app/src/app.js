@@ -18,6 +18,7 @@ import { t as tr, getLang } from "./i18n.js";
 import { initShell, go, isView, setAlarms, relabel } from "./shell.js";
 import { initSettings, openSettings, enterSettings, renderSettings, patchSettings, patchMeshLast, pushDiag } from "./views/settings.js";
 import { initAlerts, fireAlarm, applyWake, setServiceWorker } from "./alerts.js";
+import { initAutomations, renderAutomations } from "./views/automations.js";
 import { HOUR, ago, stamp } from "@talaia/nucleo/textos.js";
 import { metasDe } from "@talaia/nucleo/mqtt-datos.js";
 import { crearMotor, estadoInicial, askKey, seriesKey } from "@talaia/nucleo/motor.js";
@@ -96,6 +97,7 @@ function render() {
     renderCards();
     renderNodes();
     renderLog();
+    renderAutomations();
     if (isView("map")) mapView?.update();
     if (S.full) refreshFull(null);
     setAlarms(unacked().length);
@@ -164,11 +166,6 @@ function enterMap() {
   const w = mapWanted || { focus: null, route: null };
   mapWanted = null;
   mapView.open(w.focus, w.route);
-}
-
-/** Automations: what they will be, until 2.1. */
-function renderSoon() {
-  $("#soon").innerHTML = `<span class="soon-tag">${esc(tr("auto.soon"))}</span><p>${esc(tr("auto.lead"))}</p><p>${esc(tr("auto.example"))}</p>`;
 }
 
 /* ───────────── Enterado y peticiones: van al servidor ───────────── */
@@ -370,7 +367,7 @@ function aplicarPartes(p) {
     S.active = new Map(p.active.map((a) => [a.key, a]));
     if (prueba) S.active.set("test", prueba);
   }
-  for (const k of ["log", "channels", "myNode", "myUser", "lora", "traces", "meshLast", "link", "device", "trouble", "diag", "mqtt", "usuarios"]) if (k in p) S[k] = p[k];
+  for (const k of ["log", "channels", "myNode", "myUser", "lora", "traces", "meshLast", "link", "device", "trouble", "diag", "mqtt", "usuarios", "automations"]) if (k in p) S[k] = p[k];
   if ("paneles" in p) {
     S.paneles = p.paneles;
     registrarMetricas(metasDe(S.paneles?.paneles)); // los datos MQTT, como métricas con su nombre y su unidad
@@ -407,6 +404,7 @@ function refrescarAbiertos(p) {
 function enterView(view, { sub } = {}) {
   if (view === "map") enterMap();
   else if (view === "settings") enterSettings(sub);
+  else if (view === "automations") renderAutomations();
 }
 function leaveView(view) {
   if (view === "map") mapView?.leave();
@@ -423,12 +421,12 @@ function salida(primero) {
 
 async function boot() {
   document.documentElement.lang = getLang();
-  renderSoon();
+  initAutomations();
   initAlerts();
   initSettings({
     languageChanged() {
       registrarMetricas(metasDe(S.paneles?.paneles)); // names of the MQTT data and of their states, in the new language
-      relabel(); renderSoon(); render();
+      relabel(); render();
     },
     saveDeviceSettings: saveSettings,
   });

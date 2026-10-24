@@ -2,8 +2,8 @@
 // (a watched sensor with an alarm, the receiver, a neighbour). To review the design, not to test behaviour.
 // Usage: npm run build && node herramientas/vistazo.mjs <output folder> [views…] [--en]
 // Views: the sections (Settings, each of its parts), and also "sheet" (the sensor's sheet, whole), "receiver" (the
-// receiver's sheet, with what it sends to the mesh), "full" (the sensor full screen) and "signin" (making the first
-// user, and signing in).
+// receiver's sheet, with what it sends to the mesh), "full" (the sensor full screen), "automation" (the editor of an
+// automation with every kind of step) and "signin" (making the first user, and signing in).
 import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
@@ -16,7 +16,7 @@ const pw = createRequire(process.env.PLAYWRIGHT_DIR || "/opt/npm-tools/node_modu
 const { NodoFalso, ME, CASETA, AVISADO } = await import(`${REPO}/servidor/test/nodo-falso.mjs`);
 
 const args = process.argv.slice(2);
-const ALL = ["dashboard", "alarms", "nodes", "map", "automations", "settings", "sheet", "receiver", "full", "signin"];
+const ALL = ["dashboard", "alarms", "nodes", "map", "automations", "automation", "settings", "sheet", "receiver", "full", "signin"];
 const out = args.find((a) => !a.startsWith("--") && !ALL.includes(a)) || "vistazo";
 const views = args.filter((a) => ALL.includes(a));
 const VIEWS = views.length ? views : ALL;
@@ -71,6 +71,17 @@ nodo.posicion(AVISADO, 39.1388, -0.4189);
 await orden({ orden: "limite", num: CASETA, metrica: "temperature", lado: "max", valor: 30 });
 nodo.ambiente(CASETA, { temperature: 31.4, relativeHumidity: 57 });
 await sleep(800);
+// Two automations: one on a reading, one at a time of day (nothing reaches a real mesh: the node is simulated).
+const es = lang === "es";
+for (const auto of [
+  { name: es ? "Calor en la caseta" : "Hot in the shed", when: { type: "value", num: CASETA, key: "temperature", op: "above", value: 30, for: 10 }, steps: [
+    { type: "message", to: { channel: 1 }, text: es ? "Calor en la caseta: {valor}" : "Hot in the shed: {value}" }, { type: "wait", seconds: 900 }, { type: "ask", num: CASETA, what: "env" }] },
+  { name: es ? "Datos de la mañana" : "Morning data", on: false, when: { type: "time", at: "07:30", days: [1, 2, 3, 4, 5] }, steps: [
+    { type: "ask", num: CASETA, what: "device" }, { type: "message", to: { node: AVISADO }, text: es ? "Buenos días, son las {hora}" : "Good morning, it's {time}" }] },
+]) {
+  const r = await orden({ orden: "automation", auto });
+  if (!r.ok) throw new Error(`automation: ${r.error}`);
+}
 
 /** Readings that don't fit in their box: the figure wider than its box, or sticking out of it. */
 function overflow(page, box, val) {
@@ -111,6 +122,19 @@ for (const size of Object.keys(SIZES)) {
         await sleep(600);
         await page.addStyleTag({ content: "dialog.sheet { max-height: none !important; } .sheet-b { overflow: visible !important; }" });
         await page.locator("#detail").screenshot({ path: file });
+        await page.keyboard.press("Escape");
+        await sleep(200);
+        continue;
+      }
+      if (v === "automation") {
+        await page.evaluate(() => { location.hash = "#/automations"; });
+        await sleep(300);
+        await page.click("[data-au-edit]");
+        await sleep(400);
+        await page.click('[data-au-add="switch"]');
+        await sleep(200);
+        await page.addStyleTag({ content: "dialog.sheet { max-height: none !important; } .sheet-b { overflow: visible !important; }" });
+        await page.locator("#autoEd").screenshot({ path: file });
         await page.keyboard.press("Escape");
         await sleep(200);
         continue;

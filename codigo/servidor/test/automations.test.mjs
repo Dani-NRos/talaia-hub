@@ -10,8 +10,6 @@ import fs from "node:fs";
 import path from "node:path";
 import { Aedes } from "aedes";
 import mqtt from "mqtt";
-import { fromBinary } from "@bufbuild/protobuf";
-import { Protobuf } from "@meshtastic/core";
 import { crearTalaia } from "../src/talaia.js";
 import { comprobar } from "../src/config.js";
 import { crearRegistro } from "../src/registro.js";
