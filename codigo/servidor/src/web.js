@@ -145,6 +145,11 @@ function crearOrdenes(talaia) {
       for (const k of ["cada", "canal", "saltos"]) if (k in cambio) exigir(cambio[k] === null || Number.isInteger(cambio[k]), k);
       return talaia.paneles.configurarMalla(cambio);
     },
+    // Automations: what each one is is checked in automations.js (checkAutomation).
+    automation: ({ auto }) => { exigir(auto && typeof auto === "object" && !Array.isArray(auto), "auto"); return talaia.automations.save(auto); },
+    removeAutomation: ({ id }) => { exigir(Number.isInteger(id), "id"); return talaia.automations.remove(id); },
+    automationOn: ({ id, on }) => { exigir(Number.isInteger(id), "id"); exigir(typeof on === "boolean", "on"); return talaia.automations.setOn(id, on); },
+    runAutomation: ({ id }) => { exigir(Number.isInteger(id), "id"); return talaia.automations.runNow(id); },
     buscarTemas: () => talaia.paneles.buscarTemas(),
     enviarMalla: () => talaia.paneles.enviarAhora(),
 
@@ -307,7 +312,7 @@ export function crearWeb(talaia, config, registro, opts = {}) {
       try { p = f(cuerpo, quien); } finally { S.actor = null; }
       const r = await p;
       sincro.vaciar(); // que las pantallas vean el cambio ya, antes de la respuesta
-      json(res, 200, { ok: !!r?.ok, toast: r?.toast || avisos[0], error: r?.error, ...(r?.radio != null ? { radio: r.radio } : {}), ...(r?.valor != null ? { valor: r.valor } : {}), ...(r?.temas ? { temas: r.temas } : {}), ...(r?.num != null ? { num: r.num } : {}) });
+      json(res, 200, { ok: !!r?.ok, toast: r?.toast || avisos[0], error: r?.error, ...(r?.radio != null ? { radio: r.radio } : {}), ...(r?.valor != null ? { valor: r.valor } : {}), ...(r?.temas ? { temas: r.temas } : {}), ...(r?.num != null ? { num: r.num } : {}), ...(r?.id != null ? { id: r.id } : {}) });
     } catch (e) {
       if (e instanceof ErrorOrden) return json(res, 400, { ok: false, error: e.message });
       registro.error(tx("s.j.orderFail", { what: cuerpo.orden, e: e.stack || e }));

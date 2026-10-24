@@ -6,6 +6,7 @@
 // S es el estado compartido (la app le añade lo suyo de pantalla); ver estadoInicial(). Ganchos, todos opcionales:
 //   cambio()            algo ha cambiado: redibujar
 //   lectura(num)        llegaron lecturas de ese nodo
+//   valor(num, clave)   a datum of that node has a newer value (n.metrics[clave]): the server's automations
 //   posicion(num)       cambió su ubicación o su petición de posición
 //   peticion(num)       cambió una petición a ese nodo (botones y estado)
 //   peticionEstado(num) solo el texto de estado de sus peticiones
@@ -156,6 +157,7 @@ export function crearMotor(S, g = {}) {
   function ingest(num, metrics, t, opts = {}) {
     const n = node(num);
     const rows = [];
+    const newerKeys = [];
     for (const [k, v] of Object.entries(metrics)) {
       const prev = n.metrics[k];
       const newer = !prev || t >= prev.t;
@@ -168,13 +170,14 @@ export function crearMotor(S, g = {}) {
       if (arr.length > 1 && arr[arr.length - 2].t > t) arr.sort((a, b) => a.t - b.t);
       while (arr.length && arr[0].t < Date.now() - 26 * HOUR) arr.shift();
       S.recent.set(key, arr);
-      if (newer) { evalThreshold(num, k, v, t, opts); evalTrend(num, k, opts); evalEstado(num, k, opts); }
+      if (newer) { evalThreshold(num, k, v, t, opts); evalTrend(num, k, opts); evalEstado(num, k, opts); newerKeys.push(k); }
     }
     if (opts.env || opts.kind === "environmentMetrics") n.hasEnv = true;
     if (opts.store !== false) S.store.add(rows);
     if (opts.touch !== false) touch(num, t); // false: no llegó por radio (la estación del servidor)
     saveNodes();
     g.lectura?.(num);
+    if (!opts.replay) for (const k of newerKeys) g.valor?.(num, k); // an old reading (the receiver's copy) is no news
     render();
   }
 
@@ -716,19 +719,27 @@ export function crearMotor(S, g = {}) {
   /** Destinos válidos ahora mismo. Un canal público nunca pasa, aunque se haya guardado antes. */
   function meshTargets(report = false) {
     const cfg = meshCfg();
-    const out = [];
-    if (cfg.channel != null) {
-      const ch = S.channels.find((c) => c.index === cfg.channel);
-      if (ch?.private) out.push({ type: "channel", index: ch.index, label: tx("mesh.channel", { name: ch.name }) });
-      else if (report) addLog("info", ch ? tx("log.mesh.blocked", { name: ch.name, why: channelWhy(ch) }) : tx("log.mesh.noChannel"));
+    return [cfg.channel != null ? meshTarget({ channel: cfg.channel }, report) : null, cfg.node != null ? meshTarget({ node: cfg.node }, report) : null].filter(Boolean);
+  }
+  /**
+   * One target, { channel: index } or { node: num }, if a text can go there now (null if not; with report, the log
+   * says why): a channel only if it's private; a node by a direct message encrypted with its key (or, with a
+   * receiver without keys, through a private channel).
+   */
+  function meshTarget(spec, report = false) {
+    if (spec?.channel != null) {
+      const ch = S.channels.find((c) => c.index === spec.channel);
+      if (ch?.private) return { type: "channel", index: ch.index, label: tx("mesh.channel", { name: ch.name }) };
+      if (report) addLog("info", ch ? tx("log.mesh.blocked", { name: ch.name, why: channelWhy(ch) }) : tx("log.mesh.noChannel"));
+      return null;
     }
-    if (cfg.node != null) {
-      const n = S.nodes.get(cfg.node);
-      if (!S.demo && !receptorUsesPki() && !S.channels.find((c) => c.index === (n?.channel || 0))?.private) {
-        if (report) addLog("info", tx("log.mesh.nodeBlocked", { name: nodeName(cfg.node) }));
-      } else out.push({ type: "node", num: cfg.node, label: nodeName(cfg.node) });
+    if (spec?.node == null) return null;
+    const n = S.nodes.get(spec.node);
+    if (!S.demo && !receptorUsesPki() && !S.channels.find((c) => c.index === (n?.channel || 0))?.private) {
+      if (report) addLog("info", tx("log.mesh.nodeBlocked", { name: nodeName(spec.node) }));
+      return null;
     }
-    return out;
+    return { type: "node", num: spec.node, label: nodeName(spec.node) };
   }
 
   const meshQ = [];
@@ -744,6 +755,17 @@ export function crearMotor(S, g = {}) {
     const text = fitBytes(meshText(kind, al, info));
     for (const tg of targets) meshQ.push({ tg, text, t: Date.now() });
     pumpMesh();
+  }
+  /**
+   * A text of one's own (an automation's, an answer to an order over the mesh) to one target ({ channel } or
+   * { node }), in the same queue as the alerts: 8 s apart, 20 an hour. false if it can't go there (the log says why).
+   */
+  function meshSay(spec, text) {
+    const tg = meshTarget(spec, true);
+    if (!tg) return false;
+    meshQ.push({ tg, text: fitBytes(String(text)), t: Date.now() });
+    pumpMesh();
+    return true;
   }
   async function pumpMesh() {
     if (meshBusy) return;
@@ -977,7 +999,7 @@ export function crearMotor(S, g = {}) {
     canAsk, askVisible, askFailText, receptorUsesPki, keyNeeded, staleKeyFail, ask, finishAsk, resetAsks,
     hopName, legText, resetClock,
     // avisos por la malla
-    setChannel, meshCfg, meshTargets, meshText, meshNotify, pumpMesh,
+    setChannel, meshCfg, meshTargets, meshTarget, meshText, meshNotify, meshSay, pumpMesh,
     // lo que llega del receptor
     recibir,
     // guardar una parte del estado (lo usan las acciones)

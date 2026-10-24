@@ -33,6 +33,7 @@ export const PARTES = {
   mqtt: (S) => S.mqtt ?? null, // configuración (sin contraseña) y estado de la conexión
   paneles: (S) => S.paneles ?? null, // nombres, paneles sin nodo, datos MQTT (configuración y últimos valores), malla
   usuarios: (S) => S.usuarios ?? [], // users and their sessions (never a password)
+  automations: (S) => S.automations ?? null, // the automations, what they are waiting for and when each last ran
 };
 
 /** Lecturas de las últimas 26 h de los nodos vigilados (gráficas de las tarjetas y cambio rápido). */

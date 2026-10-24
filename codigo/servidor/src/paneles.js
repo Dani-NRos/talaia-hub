@@ -202,6 +202,7 @@ export function crearPaneles({ S, motor, eventos, almacen, registro, receptor, b
         if (num < 0) motor.touch(num, t);
         motor.evalThreshold(num, d.clave, c.v, t);
         cambioNodos = true;
+        eventos.emit("valor", num, d.clave); // the automations
       }
       lectura(num, d.clave, c.v, t);
     }
@@ -223,6 +224,7 @@ export function crearPaneles({ S, motor, eventos, almacen, registro, receptor, b
       if (num < 0) motor.touch(num, t);
       motor.evalEstado(num, d.clave);
       cambioNodos = true;
+      eventos.emit("valor", num, d.clave);
     }
     lectura(num, d.clave, r.v, t, true);
     const o = ordenes.get(d.clave);
@@ -296,10 +298,14 @@ export function crearPaneles({ S, motor, eventos, almacen, registro, receptor, b
   function suscribirse(solo = null) {
     for (const [id, con] of conexiones) {
       if (solo && id !== solo) continue;
-      for (const q of quitar.get(id) || []) q();
       const temas = new Set([...porClave.values()].filter(({ d }) => d.broker === id).map(({ d }) => d.tema));
       for (const p of Object.values(cfg.paneles)) if (p.conexion?.broker === id) temas.add(p.conexion.tema);
+      // The new ones first, then the old ones go: a topic that stays is subscribed again (its retained message comes
+      // again, for a new datum on it) and never unsubscribed in between (a broker that takes the unsubscribe after
+      // the new subscribe would leave it without one).
+      const antes = quitar.get(id) || [];
       quitar.set(id, [...temas].map((tema) => con.suscribir(tema, (t, carga) => recibido(id, tema, carga))));
+      for (const q of antes) q();
     }
   }
 
@@ -436,6 +442,8 @@ export function crearPaneles({ S, motor, eventos, almacen, registro, receptor, b
         contar();
       };
     },
+    /** A panel's MQTT datum (its configuration), or null. */
+    dato: (num, clave) => panel(num)?.datos.find((x) => x.clave === clave) || null,
     /** Qué datos usan ese broker (para no quitarlo). */
     usos: (id) => [...porClave.values()].filter(({ d }) => d.broker === id).map(({ num, d }) => `${nombrePanel(num)} (${nombreDato(d)})`)
       .concat(Object.entries(cfg.paneles).filter(([, p]) => p.conexion?.broker === id).map(([k]) => `${nombrePanel(Number(k))} (conexión)`)),
@@ -564,23 +572,25 @@ export function crearPaneles({ S, motor, eventos, almacen, registro, receptor, b
     /**
      * Enciende (v = 1) o apaga (v = 0) un dato ON/OFF que tenga orden: publica su mensaje y espera a que su tema de
      * estado diga que ha cambiado. Sin confirmación (decisión de Dani): cualquier usuario puede.
+     * by: who sends it, for the log (an automation; by default, whoever sent the order from a screen). When it can't
+     * be sent, code says why: "gone", "nocmd", "broker" (not connected), "busy" (another one waiting), "publish".
      */
-    async mandar(num, clave, v) {
+    async mandar(num, clave, v, { by } = {}) {
       const d = panel(num)?.datos.find((x) => x.clave === clave);
-      if (!S.cfg.watched[num] || !d) return { ok: false, error: tx("s.pan.datumGone") };
-      if (!d.orden) return { ok: false, error: tx("s.pan.noCmd") };
+      if (!S.cfg.watched[num] || !d) return { ok: false, code: "gone", error: tx("s.pan.datumGone") };
+      if (!d.orden) return { ok: false, code: "nocmd", error: tx("s.pan.noCmd") };
       if (v !== 0 && v !== 1) return { ok: false };
       const con = conexiones.get(d.broker);
-      if (!con?.conectada) return { ok: false, error: tx("s.pan.brokerDown", { name: nombreDato(d) }) };
+      if (!con?.conectada) return { ok: false, code: "broker", error: tx("s.pan.brokerDown", { name: nombreDato(d) }) };
       const antes = ordenes.get(clave);
-      if (antes && !antes.error) return { ok: false, error: tx("s.pan.waitCmd") };
+      if (antes && !antes.error) return { ok: false, code: "busy", error: tx("s.pan.waitCmd") };
       // Pending before publishing: a device on the same broker can answer before the broker acknowledges (qos 1),
       // and its answer has to find the order waiting.
-      const o = { num, v, t: Date.now(), timer: null, by: S.actor || null }; // who sent it, for the log when it answers
+      const o = { num, v, t: Date.now(), timer: null, by: by ?? S.actor ?? null }; // who sent it, for the log when it answers
       ordenes.set(clave, o);
       if (!(await con.publicar(d.orden.tema, v ? d.orden.on : d.orden.off, { qos: 1 }))) {
         if (ordenes.get(clave) === o) ordenes.delete(clave);
-        return { ok: false, error: tx("s.pan.cmdFailed") };
+        return { ok: false, code: "publish", error: tx("s.pan.cmdFailed") };
       }
       if (ordenes.get(clave) !== o) return { ok: true }; // it has already said it did it
       o.timer = setTimeout(() => {

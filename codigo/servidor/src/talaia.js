@@ -11,6 +11,7 @@ import os from "node:os";
 import { crearServicioMqtt, migrar as migrarMqtt } from "./mqtt.js";
 import { crearSalidaHA } from "./homeassistant.js";
 import { crearPaneles, migrarEstacion } from "./paneles.js";
+import { createAutomations } from "./automations.js";
 import { crearBrokerLocal } from "./mosquitto.js";
 import { crearUsuarios } from "./usuarios.js";
 import { tx, setLanguage, localeOf, LANGUAGES } from "@talaia/nucleo/idioma.js";
@@ -21,7 +22,7 @@ const DIAG_MAX = 200;
 
 /**
  * config: la de config.js. registro: el de registro.js.
- * opts: { almacen, receptorOpts } para las pruebas (almacén en memoria, enlace simulado).
+ * opts: { almacen, receptorOpts, automations } para las pruebas (almacén en memoria, enlace simulado, tiempos cortos).
  */
 export async function crearTalaia(config, registro, opts = {}) {
   const almacen = opts.almacen || abrirAlmacen(rutaAlmacen(config.datos, { mover: true }));
@@ -92,6 +93,7 @@ export async function crearTalaia(config, registro, opts = {}) {
   const motor = crearMotor(S, {
     cambio: () => eventos.emit("cambio"),
     lectura: (num) => eventos.emit("lectura", num),
+    valor: (num, k) => eventos.emit("valor", num, k), // the automations
     posicion: (num) => eventos.emit("posicion", num),
     peticion: (num) => eventos.emit("peticion", num),
     peticionEstado: (num) => eventos.emit("peticion", num),
@@ -189,6 +191,9 @@ export async function crearTalaia(config, registro, opts = {}) {
     crearSalidaHA, clienteId: `talaia-${os.hostname()}`, enganches: [paneles.enganchar, ...(local ? [local.enganchar] : [])], local, usos: paneles.usos,
   });
 
+  /* ── automations (2.1): «if … then …» ── */
+  const automations = createAutomations({ S, motor, paneles, almacen, eventos, registro, timing: opts.automations });
+
   /* ── tareas periódicas ── */
   // Sin señal y los estados que tienen que durar un tiempo («abierta más de 10 min»).
   const offlineId = setInterval(() => { motor.evalOffline(); motor.evalEstados(); }, 15000);
@@ -218,7 +223,7 @@ export async function crearTalaia(config, registro, opts = {}) {
   const resumenId = setInterval(resumen, HOUR);
 
   return {
-    S, motor, acciones, almacen, eventos, mqtt, paneles, usuarios,
+    S, motor, acciones, almacen, eventos, mqtt, paneles, usuarios, automations,
     get receptor() { return receptor; },
     /** The server's language: what it writes from now on (what is already in the log stays as it was). */
     idioma(l) {
@@ -239,6 +244,7 @@ export async function crearTalaia(config, registro, opts = {}) {
       receptor.start();
       mqtt.arrancar();
       paneles.arrancar();
+      automations.start();
     },
     async detener() {
       if (cerrado) return;
@@ -246,6 +252,7 @@ export async function crearTalaia(config, registro, opts = {}) {
       clearInterval(podarId);
       clearInterval(sesionesId);
       clearInterval(resumenId);
+      automations.stop();
       paneles.parar();
       await mqtt.parar(); // antes de cerrar: deja dicho «offline» a Home Assistant
       await receptor.disconnect();
