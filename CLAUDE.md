@@ -271,7 +271,9 @@ con Tasmota/ESPHome, Zigbee por zigbee2mqtt, ESPHome, Home Assistant…).
   internos (hecho, 23 oct. 2026: `INSTALADOR=4`, probado en un contenedor desde una instalación de Vigía hecha con el
   instalador 3); 5.2) usuarios del broker por seguridad dinámica (hecho, 23 oct. 2026: `INSTALADOR=5`); 5.3) imagen
   Docker, compose y GitHub Actions (hecho, 23 oct. 2026); 5.4) documentación en inglés (y español) → 2.0 (hecho,
-  23 oct. 2026). La versión `v2.0.0` la crea Dani en GitHub desde `main`.
+  23 oct. 2026). **2.0.0 publicada** por Dani en GitHub el 24 oct. 2026
+  (etiqueta `v2.0.0` desde `main`; `release.yml` subió la imagen amd64+arm64). El README de `vigia-mesh` y su
+  `codigo/servidor/README.md` (la 1.20) apuntan ya a Talaia Hub.
 - **Paso 5.4** (Dani, 23 oct. 2026: «también terminal»): documentación en `docs/guide.md` (inglés) y
   `docs/guide.es.md`, `README.md` (inglés) y `README.es.md`, `CHANGELOG.md` (en inglés); `codigo/servidor/README.md`
   solo apunta al manual. La pantalla enlaza el manual de su idioma en *Ajustes → Sistema → Acerca de*. Lo que escribe
