@@ -3,8 +3,8 @@
 *[Español](guide.es.md)*
 
 Talaia watches over a [Meshtastic](https://meshtastic.org) mesh and MQTT devices 24/7 on Linux: alarms (threshold,
-fast change, anti-theft fence, no signal, ON/OFF states), a year of history in SQLite and a screen for the browser,
-even when no phone or computer is looking.
+fast change, anti-theft fence, no signal, ON/OFF states), automations, orders over the mesh, a year of history in
+SQLite and a screen for the browser, even when no phone or computer is looking.
 
 - [What you need](#what-you-need)
 - [Install](#install) · [With Docker](#with-docker) · [Keeping an eye on it](#keeping-an-eye-on-it) ·
@@ -12,6 +12,7 @@ even when no phone or computer is looking.
 - [The screen](#the-screen) · [From outside your home (Tailscale)](#from-outside-your-home-tailscale)
 - [Alerts over the mesh](#alerts-over-the-mesh) · [MQTT](#mqtt) · [Home Assistant](#home-assistant)
 - [Panels and MQTT data](#panels-and-mqtt-data) · [To the mesh (the receiver's panel)](#to-the-mesh-the-receivers-panel)
+- [Automations](#automations) · [Orders over the mesh](#orders-over-the-mesh)
 
 ## What you need
 
@@ -181,13 +182,13 @@ When it finishes, the installer says where to open it, like `http://192.168.1.50
 the server's: all your devices see the same, and an *Acknowledge* on one is seen on all of them.
 
 - **Sections**: *Dashboard* (the alarm notice and the panels of what you watch), *Map*, *Nodes* (the whole mesh, with
-  its search: a node is watched from there), *Automations* (coming in 2.1), *Alarms* (the active ones and the log) and
-  *Settings*. On a computer they're in a bar on the left; on a phone, at the bottom, with *Settings* in the gear at the
-  top.
-- **Settings**, in parts: *Mesh* (no signal for new nodes, alerts over the mesh), *MQTT* (brokers, users of this
-  machine's broker, Home Assistant), *Receiver* (status, node, radio, channels, diagnostics), *System* (the server's
-  language, history, about), *Users* and *This screen* (language, light or dark theme, sound, notifications, keeping
-  the screen on and the map without internet: what belongs to each device).
+  its search: a node is watched from there), *Automations* (see [Automations](#automations)), *Alarms* (the active ones
+  and the log) and *Settings*. On a computer they're in a bar on the left; on a phone, at the bottom, with *Settings* in
+  the gear at the top.
+- **Settings**, in parts: *Mesh* (no signal for new nodes, alerts and orders over the mesh), *MQTT* (brokers, users of
+  this machine's broker, Home Assistant), *Receiver* (status, node, radio, channels, diagnostics), *System* (the
+  server's language, history, about), *Users* and *This screen* (language, light or dark theme, sound, notifications,
+  keeping the screen on and the map without internet: what belongs to each device).
 - **Two languages**: each screen picks its own (by default, the browser's). The server's, separately, is the language
   of what it writes: the log, the alerts over the mesh, Home Assistant, the journal and the CSV.
 - **With a user name and password**, at home too: without signing in nothing is seen (no nodes, no positions, no
@@ -440,3 +441,81 @@ mqtt_statestream:
 With `publish_attributes: true` each one's unit goes out too and Talaia picks it by itself. Each one goes out on
 `ha_states/sensor/station_temperature/state` (retained: Talaia has it as soon as it connects). Don't include the
 “Talaia · …” sensors: Talaia refuses its own topics so as not to receive again what it publishes.
+
+## Automations
+
+“If … then …” rules that the server runs 24/7, even with no screen open. They're made in the *Automations* section
+(*New*).
+
+**If…**, what starts it:
+
+- **A datum or a state** of a panel: a number that goes above or below a value (*Garden · Soil moisture drops below
+  30 %*), or an ON/OFF state that becomes one of the two (*Workshop · Door becomes Open*). Optionally, **and stays so
+  at least** some minutes.
+- **A time of day**, on the days of the week you choose, by the server's clock.
+- **An order over the mesh**: a text sent from a Meshtastic node (see [Orders over the mesh](#orders-over-the-mesh)).
+
+**Then…**, steps in order (up to 20):
+
+- **Switch on or off** a switch (an ON/OFF datum with *Switch on and off from Talaia*). With minutes in **For**, it
+  goes back afterwards.
+- **Wait** seconds, minutes or hours (up to 24 h).
+- **Message over the mesh**, to a private channel or a node. `{value}` puts in the value of the datum that started it,
+  and `{time}` the time (`{valor}` and `{hora}` work too).
+- **Ask a node for data**: environment, battery, air quality, power or position.
+
+Each one has its switch to turn it on or off and **Try** (press it twice) to run its steps now; the list says what it's
+waiting for and when it last ran, and the log, each time one runs and why.
+
+Worth knowing:
+
+- **Only the moment it happens counts.** If it was already so when you saved it, switched it on or the server
+  started, it waits until it stops being so. To run again, a number has to come back past the line by a small margin
+  (0.3 °C for temperature, 2 % for humidity…): a reading that wobbles on the line doesn't start it again and again.
+- **If it's started again while it's waiting**, it begins again from the first step: *light on, wait 5 min, light
+  off* switches off 5 min after the last time.
+- **“For” always goes back**, even if you switch the automation off, change it or remove it meanwhile: a pump is never
+  left on. If an automation sends another command to that switch meanwhile, the last one is what counts.
+- **Waits survive a restart.** What came due while the server was stopped runs a few seconds after it starts; switching
+  back is tried again for 10 minutes if its broker isn't connected yet. A time of day that passed while it was stopped
+  doesn't run afterwards.
+- **The brake**: one that runs by itself 10 times in 10 minutes is paused, and the log says so. Check it and switch it
+  on again.
+- **Messages** go out in the alerts' queue: 8 s apart, at most 20 an hour counting everything, and only to private
+  channels or to a node.
+- **With Docker**, the time of day is the container's: `TZ` in `compose.yaml` (it comes as `Europe/Madrid`).
+- An automation sends nothing over the mesh until it runs; what you try with *Try* does go out.
+
+## Orders over the mesh
+
+From a Meshtastic node (your phone with the Meshtastic app, a handheld node…), with a text message to the server's
+receiver: switch a switch on or off, ask how it is, or start an automation. Talaia answers the same way. They're set
+up in *Settings → Mesh → Orders over the mesh* (off by default).
+
+- **Nodes that may give them**, by **direct message**. The message must come encrypted with that node's key (Meshtastic
+  does it by itself when both have keys; since firmware 2.7.15 it doesn't let other direct messages through), and that
+  key must be the one the node had when you added it. If it changes (someone pretending to be it, or the same node
+  flashed again), its orders are refused; if it's the same node, remove it and add it again.
+- **And on the channel** (optional): a private channel, where anyone who has its key can give orders.
+- **A word for each switch**. With the word `pump`: `pump on`, `pump off` and `pump ?` (how it is); `encender` and
+  `apagar`, `1` and `0` or `estado` work too. Case and accents don't matter.
+- **Automations by order**: one whose *If…* is *An order over the mesh* starts with its text (`watering`) and answers
+  *Garden watering: running* (or that it's off).
+- **`help`** (or `ayuda`, `?`) answers with the orders there are.
+
+The answers, in the server's language:
+
+- A switch's, when the device says it has done it: *Pump: On*, or *Pump: didn't answer “On”* after 10 s. For `pump ?`,
+  its state and since when: *Pump: Off for 2 h*.
+- They go back the way the order came (a direct message, or the channel), in the alerts' queue: 8 s apart and at most
+  20 an hour counting everything.
+- To an allowed node that sends a direct message that isn't an order, it says how to see them. On the channel it only
+  answers orders: two servers on the same channel would otherwise answer each other.
+
+Not taken as orders:
+
+- Messages from whoever isn't allowed. They go to the log (once every 10 minutes per node) and nothing is answered.
+- What was waiting in the receiver while the server wasn't connected: what arrives in the first 10 s after it
+  connects, or is older than 10 minutes by the receiver's clock (which may be a few minutes off).
+- The same message heard twice (through a neighbour that relays it), and more than 20 orders in 10 minutes from the
+  same node.

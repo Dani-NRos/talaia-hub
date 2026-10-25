@@ -1,5 +1,16 @@
 # Changes
 
+## 2.1.0
+
+- **Automations**, in their own section: “if … then …” that the server runs 24/7. *If* a datum goes above or below a
+  value or a state becomes ON or OFF (optionally for at least some minutes), at a time of day on some days, or when an
+  order arrives over the mesh. *Then*, in order: switch on or off (optionally for some minutes, and back), wait, a
+  message over the mesh, ask a node for data. Only the moment it happens counts; waits survive a restart; one that
+  runs 10 times in 10 minutes is paused. *Try* runs one now.
+- **Orders over the mesh** (*Settings → Mesh*): `word on`, `word off` and `word ?` for the switches you give a word,
+  the text of an automation, and `help`. Only by direct messages encrypted with the key of the nodes you allow (the
+  key is pinned when you add them) and, if you choose, on a private channel. The answer goes back the same way.
+
 ## 2.0.0
 
 The first version of **Talaia Hub**.

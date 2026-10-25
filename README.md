@@ -9,6 +9,10 @@ machine; it works without internet.
 - **Dashboard** with a panel for each node or device you watch: readings, charts, battery, ON/OFF states and switches.
 - **Alarms**: thresholds, fast changes, an anti-theft fence, no signal, a door open for too long… They sound and notify
   on every screen that's open, and the server can send them over the mesh itself, to a private channel or a node.
+- **Automations**: “if … then …” with readings, ON/OFF states and times of day; switches (also for a while), waits,
+  messages over the mesh and requests to nodes.
+- **Orders over the mesh**: switch things on and off or start automations with a message from a Meshtastic node,
+  only from the nodes you allow (with their key checked), and get the answer back over the mesh.
 - **A year of history** in SQLite, with charts and CSV export.
 - **The whole mesh**: map, list with search, routes, requests to nodes (telemetry, position, node info, traceroute).
 - **MQTT**: its own Mosquitto broker with users managed from the screen, other brokers at the same time, and data from
@@ -39,7 +43,7 @@ docker compose exec talaia talaia --code
 ## Documentation
 
 - **[User guide](docs/guide.md)**: installing, Docker, configuration, the screen, Tailscale, MQTT, Home Assistant,
-  panels and data to the mesh.
+  panels and data to the mesh, automations and orders over the mesh.
 - **[Changes](CHANGELOG.md)** in each version.
 
 Problems and suggestions: [issues](https://github.com/Dani-NRos/talaia-hub/issues). The screen's

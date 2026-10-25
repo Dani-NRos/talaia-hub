@@ -10,6 +10,10 @@ queda en tu equipo y funciona sin internet.
   interruptores.
 - **Alarmas**: límites, cambios rápidos, valla antirrobo, sin señal, una puerta abierta demasiado rato… Suenan y avisan
   en cada pantalla abierta, y el servidor puede mandarlas él mismo por la malla, a un canal privado o a un nodo.
+- **Automatizaciones**: «si… entonces…» con lecturas, estados ON/OFF y horas del día; interruptores (también durante
+  un rato), esperas, mensajes por la malla y peticiones a nodos.
+- **Órdenes por la malla**: enciende y apaga cosas o pon en marcha automatizaciones con un mensaje desde un nodo
+  Meshtastic, solo desde los nodos que autorices (con su clave comprobada), y recibe la respuesta por la malla.
 - **Un año de histórico** en SQLite, con gráficas y exportación a CSV.
 - **Toda la malla**: mapa, lista con buscador, rutas y peticiones a los nodos (telemetría, posición, ficha,
   traceroute).
@@ -42,7 +46,7 @@ docker compose exec talaia talaia --codigo
 ## Documentación
 
 - **[Manual de uso](docs/guide.es.md)**: instalar, Docker, configuración, la pantalla, Tailscale, MQTT, Home
-  Assistant, paneles y datos a la malla.
+  Assistant, paneles y datos a la malla, automatizaciones y órdenes por la malla.
 - **[Cambios](CHANGELOG.md)** de cada versión (en inglés).
 
 Problemas y sugerencias: [issues](https://github.com/Dani-NRos/talaia-hub/issues). El *diagnóstico de conexión* de la

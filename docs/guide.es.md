@@ -3,8 +3,8 @@
 *[English](guide.md)*
 
 Talaia vigila 24/7 en Linux una malla [Meshtastic](https://meshtastic.org) y dispositivos MQTT: alarmas (umbral,
-cambio rápido, valla antirrobo, sin señal, estados ON/OFF), un año de histórico en SQLite y una pantalla para el
-navegador, aunque no haya ningún móvil ni ordenador mirando.
+cambio rápido, valla antirrobo, sin señal, estados ON/OFF), automatizaciones, órdenes por la malla, un año de
+histórico en SQLite y una pantalla para el navegador, aunque no haya ningún móvil ni ordenador mirando.
 
 - [Qué hace falta](#qué-hace-falta)
 - [Instalar](#instalar) · [Con Docker](#con-docker) · [Seguirlo](#seguirlo) · [Configuración](#configuración) ·
@@ -12,6 +12,7 @@ navegador, aunque no haya ningún móvil ni ordenador mirando.
 - [La pantalla](#la-pantalla) · [Desde fuera de casa (Tailscale)](#desde-fuera-de-casa-tailscale)
 - [Avisos por la malla](#avisos-por-la-malla) · [MQTT](#mqtt) · [Home Assistant](#home-assistant)
 - [Paneles y datos por MQTT](#paneles-y-datos-por-mqtt) · [A la malla (el panel del receptor)](#a-la-malla-el-panel-del-receptor)
+- [Automatizaciones](#automatizaciones) · [Órdenes por la malla](#órdenes-por-la-malla)
 
 ## Qué hace falta
 
@@ -178,12 +179,12 @@ broker). Mosquitto se queda instalado, sin la configuración de Talaia (si no lo
 Al terminar, el instalador dice en qué direcciones abrirla, como `http://192.168.1.50:4404`. Los datos y el receptor
 son los del servidor: todos tus aparatos ven lo mismo, y si das *Enterado* en uno, queda visto en todos.
 
-- **Secciones**: *Tablero* (el aviso de alarmas y los paneles de lo que vigilas), *Mapa*, *Nodos* (toda la malla, con
-  su buscador: desde ahí se vigila un nodo), *Automatizaciones* (llegan en la 2.1), *Alarmas* (las activas y el
-  registro) y *Ajustes*. En el ordenador van en una barra a la izquierda; en el móvil, abajo, y *Ajustes* en el
-  engranaje de arriba.
-- **Ajustes**, en apartados: *Malla* (sin señal para los nodos nuevos, avisos por la malla), *MQTT* (brokers, usuarios
-  del broker de este equipo, Home Assistant), *Receptor* (estado, nodo, radio, canales, diagnóstico), *Sistema*
+- **Secciones**: *Tablero* (el aviso de alarmas y los paneles de lo que vigilas), *Mapa*, *Nodos* (toda la malla, con su
+  buscador: desde ahí se vigila un nodo), *Automatizaciones* (ver [Automatizaciones](#automatizaciones)), *Alarmas* (las
+  activas y el registro) y *Ajustes*. En el ordenador van en una barra a la izquierda; en el móvil, abajo, y *Ajustes*
+  en el engranaje de arriba.
+- **Ajustes**, en apartados: *Malla* (sin señal para los nodos nuevos, avisos y órdenes por la malla), *MQTT* (brokers,
+  usuarios del broker de este equipo, Home Assistant), *Receptor* (estado, nodo, radio, canales, diagnóstico), *Sistema*
   (idioma del servidor, histórico, acerca de), *Usuarios* y *Esta pantalla* (idioma, tema claro u oscuro, sonido,
   notificaciones, pantalla encendida y mapa sin internet: lo que es de cada aparato).
 - **Dos idiomas**: cada pantalla elige el suyo (por defecto, el del navegador). El del servidor, aparte, es el de lo
@@ -432,3 +433,82 @@ mqtt_statestream:
 Con `publish_attributes: true` sale también la unidad de cada uno y Talaia la elige sola. Cada uno sale en
 `ha_estados/sensor/estacion_temperatura/state` (retenido: Talaia lo tiene nada más conectar). No incluyas los sensores
 «Talaia · …»: Talaia rechaza sus propios temas para no volver a recibir lo que ya publica él.
+
+## Automatizaciones
+
+Reglas «si… entonces…» que el servidor cumple 24/7, aunque no haya ninguna pantalla abierta. Se hacen en la sección
+*Automatizaciones* (*Nueva*).
+
+**Si…**, lo que la pone en marcha:
+
+- **Un dato o un estado** de un panel: un número que pasa de un valor o baja de él (*Huerto · Humedad suelo baja de
+  30 %*), o un estado ON/OFF que pasa a uno de los dos (*Taller · Puerta pasa a Abierta*). Si quieres, **y sigue así al
+  menos** unos minutos.
+- **Una hora del día**, los días de la semana que elijas, con la hora del servidor.
+- **Una orden por la malla**: un texto que mandas desde un nodo Meshtastic (ver
+  [Órdenes por la malla](#órdenes-por-la-malla)).
+
+**Entonces…**, pasos en orden (hasta 20):
+
+- **Encender o apagar** un interruptor (un dato ON/OFF con *Encender y apagar desde Talaia*). Con minutos en
+  **Durante**, después vuelve como estaba.
+- **Esperar** segundos, minutos u horas (hasta 24 h).
+- **Mensaje por la malla**, a un canal privado o a un nodo. `{valor}` pone el valor del dato que la ha puesto en marcha,
+  y `{hora}`, la hora (también valen `{value}` y `{time}`).
+- **Pedir datos a un nodo**: ambiente, batería, calidad del aire, energía o posición.
+
+Cada una tiene su interruptor para activarla o desactivarla y **Probar** (se pulsa dos veces) para hacer sus pasos ya;
+la lista dice qué está esperando y cuándo se puso en marcha por última vez, y el registro, cada vez que se pone en
+marcha y por qué.
+
+Conviene saber:
+
+- **Solo cuenta el momento en que pasa.** Si ya era así al guardarla, activarla o arrancar el servidor, espera a que
+  deje de serlo. Para volver a ponerse en marcha, un número tiene que volver atrás con un pequeño margen (0,3 °C la
+  temperatura, 2 % la humedad…): una lectura que baila sobre el límite no la pone en marcha una y otra vez.
+- **Si se pone en marcha mientras espera**, empieza otra vez desde el primer paso: *encender la luz, esperar 5 min,
+  apagarla* la apaga 5 min después de la última vez.
+- **«Durante» siempre vuelve**, aunque mientras tanto desactives, cambies o quites la automatización: una bomba nunca se
+  queda encendida. Si una automatización le manda otra orden a ese interruptor mientras tanto, vale la última.
+- **Las esperas siguen tras un reinicio.** Lo que venció con el servidor parado se hace unos segundos después de
+  arrancar; volver a poner un interruptor como estaba se reintenta durante 10 minutos si su broker aún no está
+  conectado. Una hora del día que pasó con el servidor parado no se hace después.
+- **El freno**: una que se pone en marcha sola 10 veces en 10 minutos se pausa, y el registro lo dice. Revísala y
+  actívala otra vez.
+- **Los mensajes** salen por la cola de los avisos: uno cada 8 s, 20 por hora como mucho contando todo, y solo a canales
+  privados o a un nodo.
+- **Con Docker**, la hora del día es la del contenedor: `TZ` en `compose.yaml` (viene `Europe/Madrid`).
+- Una automatización no manda nada por la malla hasta que se pone en marcha; lo que pruebes con *Probar* sí sale.
+
+## Órdenes por la malla
+
+Desde un nodo Meshtastic (el móvil con la app de Meshtastic, un nodo de mano…), con un mensaje de texto al receptor del
+servidor: encender o apagar un interruptor, preguntar cómo está o poner en marcha una automatización. Talaia contesta
+por el mismo camino. Se configura en *Ajustes → Malla → Órdenes por la malla* (apagado de entrada).
+
+- **Nodos que pueden mandarlas**, por **mensaje directo**. El mensaje tiene que venir cifrado con la clave de ese nodo
+  (Meshtastic lo hace solo cuando los dos tienen clave; desde el firmware 2.7.15 no deja pasar otros mensajes
+  directos), y esa clave tiene que ser la que tenía el nodo al añadirlo. Si cambia (alguien que se hace pasar por él,
+  o el mismo nodo flasheado otra vez), sus órdenes se rechazan; si es el mismo nodo, quítalo y vuelve a añadirlo.
+- **Y por el canal** (si quieres): un canal privado, en el que puede mandar órdenes cualquiera que tenga su clave.
+- **Una palabra para cada interruptor**. Con la palabra `bomba`: `bomba on`, `bomba off` y `bomba ?` (cómo está);
+  también valen `encender` y `apagar`, `1` y `0` o `estado`. No importan las mayúsculas ni los acentos.
+- **Automatizaciones por orden**: una cuyo *Si…* es *Una orden por la malla* se pone en marcha con su texto (`riego`)
+  y contesta *Riego del huerto: en marcha* (o que está desactivada).
+- **`ayuda`** (o `help`, `?`) contesta con las órdenes que hay.
+
+Las respuestas, en el idioma del servidor:
+
+- La de un interruptor, cuando el dispositivo dice que lo ha hecho: *Bomba: Encendido*, o *Bomba: no ha contestado a
+  «Encendido»* a los 10 s. Para `bomba ?`, cómo está y desde cuándo: *Bomba: Apagado desde hace 2 h*.
+- Vuelven por donde llegó la orden (mensaje directo, o el canal), por la cola de los avisos: uno cada 8 s y 20 por
+  hora como mucho contando todo.
+- A un nodo autorizado que manda un mensaje directo que no es una orden, le dice cómo verlas. Por el canal solo
+  contesta a las órdenes: si no, dos servidores en el mismo canal se contestarían entre sí.
+
+No se toman como órdenes:
+
+- Los mensajes de quien no está autorizado. Van al registro (uno cada 10 minutos por nodo) y no se contesta nada.
+- Lo que esperaba en el receptor mientras el servidor no estaba conectado: lo que llega en los primeros 10 s tras
+  conectar, o tiene más de 10 minutos según el reloj del receptor (que puede ir unos minutos desfasado).
+- El mismo mensaje oído dos veces (por un vecino que lo repite) y más de 20 órdenes en 10 minutos del mismo nodo.
