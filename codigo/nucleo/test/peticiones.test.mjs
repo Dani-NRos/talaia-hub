@@ -26,7 +26,7 @@ test("el id de la petición se conoce al enviarla, y la librería queda como est
   const rc = new Receptor({});
   rc.mesh = new FakeMesh();
   rc.state = "ready";
-  const sent = rc.requestTelemetry(0xaa62b264, 2, 0);
+  const sent = rc.requestTelemetry(0x2b3c4d5e, 2, 0);
   assert.equal(sent.id, 123456789);
   assert.equal(Object.prototype.hasOwnProperty.call(rc.mesh, "generateRandId"), false);
   assert.equal(await sent.done, 123456789);
@@ -40,7 +40,7 @@ test("el id de la petición se conoce al enviarla, y la librería queda como est
   await assert.rejects(no.done);
 });
 
-const DNN4 = 0xaa62b264;
+const TOR4 = 0x2b3c4d5e;
 
 test("el receptor manda el traceroute vacío, con acuse y respuesta, y da el id al momento", async () => {
   class FakeMesh {
@@ -54,8 +54,8 @@ test("el receptor manda el traceroute vacío, con acuse y respuesta, y da el id 
   const rc = new Receptor({});
   rc.mesh = new FakeMesh();
   rc.state = "ready";
-  const sent = rc.requestTraceroute(DNN4, 1);
+  const sent = rc.requestTraceroute(TOR4, 1);
   assert.equal(sent.id, 987654321);
   assert.equal(await sent.done, 987654321);
-  assert.deepEqual(rc.mesh.last, { payload: [], port: 70, dest: DNN4, channel: 1, wantAck: true, wantResponse: true });
+  assert.deepEqual(rc.mesh.last, { payload: [], port: 70, dest: TOR4, channel: 1, wantAck: true, wantResponse: true });
 });

@@ -1,5 +1,5 @@
 // Settings → Users: your account (signing out, your password, your other devices) and everyone else's. One kind of
-// user (Dani, 23 Oct. 2026): everyone can do everything, adding and removing users included; the server checks it.
+// user: everyone can do everything, adding and removing users included; the server checks it.
 import { ctx } from "../ctx.js";
 import { t } from "../i18n.js";
 import { $, esc } from "../ui.js";

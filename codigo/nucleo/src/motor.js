@@ -661,7 +661,7 @@ export function crearMotor(S, g = {}) {
     if (num === S.myNode) return tx("hop.mine");
     return S.nodes.get(num)?.long || hexId(num);
   }
-  /** «directa» o «por R3 → DNN4». */
+  /** «directa» o «por R3 → TOR4». */
   function legText(leg) {
     const mid = relays(leg);
     return mid.length ? tx("leg.via", { list: mid.map(hopName).join(" → ") }) : tx("leg.direct");

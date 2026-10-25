@@ -79,7 +79,7 @@ test("settings: words, the channel and the nodes allowed (with their key pinned)
   const { talaia, taller, mo } = await montar(t, { orders: false });
   const { S, automations } = talaia;
   const ref = `${taller}|mq1`;
-  assert.match(mo.configure({ channel: 0 }).error, /«SFNarrow» es público/);
+  assert.match(mo.configure({ channel: 0 }).error, /«LongFast» es público/);
   assert.match(mo.configure({ channel: 7 }).error, /no está en el receptor/);
   assert.equal(mo.configure({ channel: 1 }).ok, true);
   assert.match(mo.configure({ words: { [ref]: "on" } }).error, /ya es una orden/);

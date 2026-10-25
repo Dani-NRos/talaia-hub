@@ -18,7 +18,7 @@ export const USB_VENDORS = [
   { vid: 0x10c4, name: "Silicon Labs CP210x" }, // Heltec V3, T-Beam…
   { vid: 0x1a86, name: "WCH CH340/CH9102" }, // TTGO, LilyGO…
   { vid: 0x0403, name: "FTDI" },
-  { vid: 0x239a, name: "Adafruit nRF52" }, // nRF52 con su cargador (RAK4631, T-Echo, DNN…)
+  { vid: 0x239a, name: "Adafruit nRF52" }, // nRF52 con su cargador (RAK4631, T-Echo…)
   { vid: 0x2886, name: "Seeed" }, // XIAO, T1000-E, Wio Tracker
   { vid: 0x1915, name: "Nordic" },
   { vid: 0x2e8a, name: "Raspberry Pi RP2040" },

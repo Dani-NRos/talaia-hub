@@ -3,7 +3,7 @@ import test from "node:test";
 import assert from "node:assert/strict";
 import { newDelivery, deliveryStep } from "../src/delivery.js";
 
-const ME = 0xacc75e7e, DEST = 0x0ac9eca4, OTHER = 0x0ea18cd1;
+const ME = 0x1a2b3c4d, DEST = 0x0bd1f2a3, OTHER = 0x0c2d3e4f;
 const ctx = { dest: DEST };
 const run = (...evs) => evs.reduce((st, ev) => deliveryStep(st, ev, ctx), newDelivery());
 const ack = (from, err = 0) => ({ type: "ack", from, err });

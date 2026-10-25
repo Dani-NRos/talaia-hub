@@ -194,17 +194,17 @@ test("estado ON/OFF (servidor): «abierta más de 10 min», «desde» se mantien
 });
 
 test("valla antirrobo: hacen falta dos posiciones fuera; se cierra al volver dentro del 80 % del radio", (t) => {
-  const fence = { lat: 39.15, lon: -0.44, r: 100, at: T0 - HOUR };
+  const fence = { lat: 39.15, lon: -3.44, r: 100, at: T0 - HOUR };
   const { S, motor } = montar(t, { watched: { [CASETA]: vigilado({}, { fence }) } });
   const key = `${CASETA}||moved`;
-  motor.setPosition(CASETA, { lat: 39.1545, lon: -0.44, t: T0, bits: 32 }, { live: true }); // ~500 m al norte
+  motor.setPosition(CASETA, { lat: 39.1545, lon: -3.44, t: T0, bits: 32 }, { live: true }); // ~500 m al norte
   assert.ok(!S.active.has(key));
-  motor.setPosition(CASETA, { lat: 39.1546, lon: -0.44, t: T0 + MIN, bits: 32 }, { live: true });
+  motor.setPosition(CASETA, { lat: 39.1546, lon: -3.44, t: T0 + MIN, bits: 32 }, { live: true });
   assert.ok(S.active.has(key));
   assert.match(motor.alarmDetail(S.active.get(key)), /al N de su sitio \(valla de 100 m\)/);
-  motor.setPosition(CASETA, { lat: 39.1508, lon: -0.44, t: T0 + 2 * MIN, bits: 32 }, { live: true }); // ~89 m: aún no
+  motor.setPosition(CASETA, { lat: 39.1508, lon: -3.44, t: T0 + 2 * MIN, bits: 32 }, { live: true }); // ~89 m: aún no
   assert.ok(S.active.has(key));
-  motor.setPosition(CASETA, { lat: 39.1505, lon: -0.44, t: T0 + 3 * MIN, bits: 32 }, { live: true }); // ~56 m
+  motor.setPosition(CASETA, { lat: 39.1505, lon: -3.44, t: T0 + 3 * MIN, bits: 32 }, { live: true }); // ~56 m
   assert.ok(!S.active.has(key));
   assert.match(S.log[0].text, /De vuelta en su sitio/);
 });
@@ -451,7 +451,7 @@ test("avisos por la malla: uno cada 8 s mientras hay cola, y como mucho 20 por h
   assert.ok(S.log.some((l) => l.text === `Avisos por la malla en pausa: ya van ${MESH_HOURLY} en la última hora (2 sin enviar)`));
 });
 
-// Aceptado (Dani, 18 oct. 2026): si saltan varias alarmas en el mismo instante (una lectura de ambiente con temperatura
+// Aceptado (18 oct. 2026): si saltan varias alarmas en el mismo instante (una lectura de ambiente con temperatura
 // y humedad fuera de rango) y los avisos van a un solo destino, salen seguidos, sin los 8 s. El nodo los pone en cola.
 test("dos alarmas a la vez con un solo destino salen seguidas (aceptado)", async (t) => {
   const mesh = { enabled: true, channel: 1, node: null, onClear: false };
@@ -494,11 +494,11 @@ test("la telemetría repetida (mismo nodo y mismo id) se cuenta una sola vez", (
 
 test("canales: guarda nombre y si es privado, nunca la clave", (t) => {
   const { S, motor, ev } = montar(t, { channels: [] });
-  motor.recibir.channel({ index: 0, role: 1, settings: { name: "SFNarrow", psk: new Uint8Array([1]) } });
+  motor.recibir.channel({ index: 0, role: 1, settings: { name: "LongFast", psk: new Uint8Array([1]) } });
   motor.recibir.channel({ index: 2, role: 2, settings: { name: "avisos", psk: new Uint8Array(32).fill(9) } });
   motor.recibir.channel({ index: 3, role: 0, settings: {} });
   assert.deepEqual(S.channels, [
-    { index: 0, name: "SFNarrow", primary: true, private: false, kind: "default", why: "clave pública por defecto" },
+    { index: 0, name: "LongFast", primary: true, private: false, kind: "default", why: "clave pública por defecto" },
     { index: 2, name: "avisos", primary: false, private: true, kind: "", why: "" },
   ]);
   assert.ok(ev.guardado.includes("channels"));

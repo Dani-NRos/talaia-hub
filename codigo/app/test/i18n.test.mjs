@@ -13,11 +13,11 @@ test("Spanish and English have the same keys", () => {
 test("texts with values, and plurals", () => {
   setLang("es");
   assert.equal(getLang(), "es");
-  assert.equal(t("link.ready", { name: "DNN5" }), "DNN5 conectado");
+  assert.equal(t("link.ready", { name: "BAS5" }), "BAS5 conectado");
   assert.equal(t("nav.alarmsBadge", { n: 1 }), "1 alarma sin atender");
   assert.equal(t("nav.alarmsBadge", { n: 3 }), "3 alarmas sin atender");
   setLang("en");
-  assert.equal(t("link.ready", { name: "DNN5" }), "DNN5 connected");
+  assert.equal(t("link.ready", { name: "BAS5" }), "BAS5 connected");
   assert.equal(t("title.alarm", { n: 2 }), "(2) Alarm · Talaia");
   assert.equal(t("no.such.key"), "no.such.key");
   setLang("xx"); // unknown: stays as it was

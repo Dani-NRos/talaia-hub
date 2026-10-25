@@ -54,7 +54,7 @@ test("unidades: se pasa a la de Talaia y se rechaza lo imposible", () => {
 });
 
 test("qué tipo parece cada tema: Home Assistant (por la entidad) y JSON (por el campo)", () => {
-  const ha = (x) => `ha_estados/sensor/meteoclimatic_weather_for_alzira_ajuntament_valencia_espva4600000046600b_alzira_ajuntament_valencia_${x}/state`;
+  const ha = (x) => `ha_estados/sensor/meteoclimatic_weather_for_villafria_de_abajo_es00000000000000a_villafria_de_abajo_${x}/state`;
   assert.equal(adivinarTipo(ha("temperature")), "temperature");
   assert.equal(adivinarTipo(ha("humidity")), "relativeHumidity");
   assert.equal(adivinarTipo(ha("pressure")), "barometricPressure");

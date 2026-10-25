@@ -14,7 +14,7 @@ export const NAV_ICONS = {
   settings: svg(`<path d="M12 15.2a3.2 3.2 0 1 0 0-6.4 3.2 3.2 0 0 0 0 6.4Z"/><path d="M19.4 13.5a7.6 7.6 0 0 0 0-3l2-1.6-2-3.4-2.4.9a7.5 7.5 0 0 0-2.6-1.5L14 2.4h-4l-.4 2.5A7.5 7.5 0 0 0 7 6.4l-2.4-.9-2 3.4 2 1.6a7.6 7.6 0 0 0 0 3l-2 1.6 2 3.4 2.4-.9a7.5 7.5 0 0 0 2.6 1.5l.4 2.5h4l.4-2.5a7.5 7.5 0 0 0 2.6-1.5l2.4.9 2-3.4-2-1.6Z"/>`),
 };
 
-// In the order of the navigation (Dani, 22 Oct 2026). Settings: at the bottom of the rail, or the gear on phones.
+// In the order of the navigation. Settings: at the bottom of the rail, or the gear on phones.
 export const VIEWS = ["dashboard", "map", "nodes", "automations", "alarms", "settings"];
 const LABEL = { dashboard: "nav.dashboard", alarms: "nav.alarms", nodes: "nav.nodes", map: "nav.map", automations: "nav.automations", settings: "nav.settings" };
 

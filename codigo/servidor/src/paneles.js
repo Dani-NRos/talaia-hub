@@ -11,7 +11,7 @@
 //    motor sabe desde cuándo está cada uno («desde») para avisar de «abierta más de 10 min».
 //  - Un panel sin nodo puede tener un tema de conexión (el LWT de Tasmota, el «online» de Shelly…): «Sin conexión» en
 //    el panel al momento y, si se pide, su alarma.
-//  - Un estado con «orden» se enciende y apaga desde Talaia (sin confirmación, como decidió Dani): se publica el mensaje
+//  - Un estado con «orden» se enciende y apaga desde Talaia (sin confirmación): se publica el mensaje
 //    en su tema y se espera a que el tema de estado diga que ha cambiado (si en 10 s no lo dice, «no ha contestado»).
 //  - Los Shelly no dejan su estado guardado en el broker: al conectar con él se les pide (status_update / update).
 //
@@ -572,7 +572,7 @@ export function crearPaneles({ S, motor, eventos, almacen, registro, receptor, b
     },
     /**
      * Enciende (v = 1) o apaga (v = 0) un dato ON/OFF que tenga orden: publica su mensaje y espera a que su tema de
-     * estado diga que ha cambiado. Sin confirmación (decisión de Dani): cualquier usuario puede.
+     * estado diga que ha cambiado. Sin confirmación: cualquier usuario puede.
      * by: who sends it, for the log (an automation; by default, whoever sent the order from a screen). done(ok): when
      * the device has said it did it (true) or it didn't answer (false). When it can't be sent, code says why: "gone",
      * "nocmd", "broker" (not connected), "busy" (another one waiting), "publish".

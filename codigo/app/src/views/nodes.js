@@ -1,4 +1,4 @@
-// Nodes: every node of the mesh the receiver knows (about 1100 at Dani's), with a search box, filters and order.
+// Nodes: every node of the mesh the receiver knows (it can be over a thousand), with a search box, filters and order.
 // Watched ones are listed too, marked. Panels without a node are not part of the mesh and are not here.
 import { ctx } from "../ctx.js";
 import { t } from "../i18n.js";

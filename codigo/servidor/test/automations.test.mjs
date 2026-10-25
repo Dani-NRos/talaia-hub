@@ -105,7 +105,7 @@ test("what an automation can be: the server checks every part", async (t) => {
   assert.match(save({ name: "Riego", when: sube, steps: [bomba, { type: "wait", seconds: 0 }] }).error, /^Paso 2: la espera va de 1 s a 24 h/);
   assert.match(save({ name: "Riego", when: sube, steps: [{ ...bomba, key: "mq3" }] }).error, /^Paso 1: elige un interruptor/, "the door can't be switched");
   assert.match(save({ name: "Riego", when: sube, steps: [{ ...bomba, value: 2 }] }).error, /encender o apagar/);
-  assert.match(save({ name: "Riego", when: sube, steps: [{ type: "message", to: { channel: 0 }, text: "hola" }] }).error, /«SFNarrow» es público/);
+  assert.match(save({ name: "Riego", when: sube, steps: [{ type: "message", to: { channel: 0 }, text: "hola" }] }).error, /«LongFast» es público/);
   assert.match(save({ name: "Riego", when: sube, steps: [{ type: "message", to: { channel: 1 }, text: "ñ".repeat(101) }] }).error, /no cabe/);
   assert.match(save({ name: "Riego", when: sube, steps: [{ type: "message", to: { node: talaia.S.myNode }, text: "hola" }] }).error, /canal privado o un nodo/);
   assert.match(save({ name: "Riego", when: sube, steps: [{ type: "ask", num: CASETA, what: "route" }] }).error, /qué pedir/);

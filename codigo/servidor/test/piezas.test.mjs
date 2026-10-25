@@ -30,12 +30,12 @@ function sysFalso() {
     fs.mkdirSync(dev, { recursive: true });
     if (tty !== "ttyACM1") fs.writeFileSync(path.join(dev, tty), ""); // ttyACM1: in /sys, not passed to the container
   };
-  aparato("1-1", "239a", "8029", "DNN 5", "ttyACM0");
+  aparato("1-1", "239a", "8029", "Base 5", "ttyACM0");
   aparato("1-2", "0bda", "5411", "Lector de tarjetas", "ttyUSB0");
-  aparato("1-3", "239a", "8029", "DNN 5 de otro", "ttyACM1");
+  aparato("1-3", "239a", "8029", "Base 5 de otro", "ttyACM1");
   fs.mkdirSync(path.join(sys, "class/tty/ttyS0"), { recursive: true }); // puerto de la placa: no cuenta
   fs.mkdirSync(path.join(dev, "serial/by-id"), { recursive: true });
-  fs.symlinkSync("../../ttyACM0", path.join(dev, "serial/by-id/usb-Adafruit_DNN_5_ABC123-if00"));
+  fs.symlinkSync("../../ttyACM0", path.join(dev, "serial/by-id/usb-Adafruit_Base_5_ABC123-if00"));
   return { sys, dev };
 }
 
@@ -43,15 +43,15 @@ test("puertos: lee fabricante y producto USB de /sys y el nombre estable de /dev
   const raices = sysFalso();
   const l = listarPuertos(raices);
   assert.equal(l.length, 2); // ttyACM1 is in /sys but not in /dev (a container that hasn't got it)
-  assert.deepEqual([l[0].vid, l[0].pid, l[0].producto, l[0].conocido], [0x239a, 0x8029, "DNN 5", true]);
-  assert.equal(l[0].porId, path.join(raices.dev, "serial/by-id/usb-Adafruit_DNN_5_ABC123-if00"));
+  assert.deepEqual([l[0].vid, l[0].pid, l[0].producto, l[0].conocido], [0x239a, 0x8029, "Base 5", true]);
+  assert.equal(l[0].porId, path.join(raices.dev, "serial/by-id/usb-Adafruit_Base_5_ABC123-if00"));
   assert.equal(l[1].conocido, false);
 });
 
 test("puertos: auto elige el nodo; por id USB; por ruta; y explica por qué no hay ninguno", () => {
   const l = listarPuertos(sysFalso());
-  assert.equal(elegirPuerto("auto", l).puerto.producto, "DNN 5");
-  assert.equal(elegirPuerto("239a:8029", l).puerto.producto, "DNN 5");
+  assert.equal(elegirPuerto("auto", l).puerto.producto, "Base 5");
+  assert.equal(elegirPuerto("239a:8029", l).puerto.producto, "Base 5");
   assert.match(elegirPuerto("303a:1001", l).motivo, /ningún aparato USB 303a:1001/);
   assert.equal(elegirPuerto(l[0].porId, l).puerto.ruta, l[0].porId);
   assert.match(elegirPuerto("auto", l.filter((p) => !p.conocido)).motivo, /ninguno parece un nodo Meshtastic/);

@@ -64,10 +64,10 @@ for (const [t, h] of [[22.1, 63], [23.4, 61], [24.0, 60], [26.2, 58]]) { nodo.am
 // The receiver as a weather station: many readings, some long (they must fit in their boxes).
 nodo.ambiente(ME, { temperature: 19.6, relativeHumidity: 55, barometricPressure: 1014.8, windSpeed: 3.4, windGust: 12.9, rainfall1h: 0.4, rainfall24h: 112.6, lux: 12450, voltage: 4.12 });
 nodo.ambiente(AVISADO, { temperature: 17.2, relativeHumidity: 70 });
-// Around Alzira, for the map.
-nodo.posicion(ME, 39.1513, -0.4352);
-nodo.posicion(CASETA, 39.1604, -0.4521);
-nodo.posicion(AVISADO, 39.1388, -0.4189);
+// Somewhere inland, for the map (an invented place).
+nodo.posicion(ME, 39.1513, -3.4352);
+nodo.posicion(CASETA, 39.1604, -3.4521);
+nodo.posicion(AVISADO, 39.1388, -3.4189);
 await orden({ orden: "limite", num: CASETA, metrica: "temperature", lado: "max", valor: 30 });
 nodo.ambiente(CASETA, { temperature: 31.4, relativeHumidity: 57 });
 await sleep(800);

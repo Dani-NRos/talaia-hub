@@ -1,4 +1,4 @@
-// Users and sessions: who can open the screens and send orders (Dani, 23 Oct. 2026).
+// Users and sessions: who can open the screens and send orders.
 //
 // - Always asked, also at home. One kind of user: everyone can do everything, users included. The table keeps a
 //   role column (all "admin") so kinds of user can come later without moving data.

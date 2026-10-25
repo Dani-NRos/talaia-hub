@@ -309,5 +309,5 @@ test("la configuración de la 1.16 (un broker y la estación) se migra al arranc
   // It published on «vigia/…» then: the same base and ids, so Home Assistant keeps the same devices.
   assert.equal(talaia.S.mqtt.ha.base, "vigia");
   await hasta(() => ha.json(CFG("sensor", "temperature", `vigia_${ID}`)), 5000, "sigue publicando en HA, con los mismos ids");
-  assert.match((await talaia.mqtt.quitarBroker("b1")).error, /Lo usa: Home Assistant, DNN 5 \(Temperatura\)/);
+  assert.match((await talaia.mqtt.quitarBroker("b1")).error, /Lo usa: Home Assistant, Base 5 \(Temperatura\)/);
 });

@@ -8,10 +8,10 @@ const NOW = Date.UTC(2026, 9, 16, 20, 0);
 const pos = (lat, lon, t = NOW - HOUR, bits = 32) => ({ lat, lon, t, bits });
 
 const nodes = [
-  { num: 1, lastHeard: NOW - 5 * MIN, pos: pos(39.15, -0.43), metrics: { temperature: { v: 18.4, t: NOW - 5 * MIN }, relativeHumidity: { v: 66, t: NOW - 5 * MIN }, channelUtilization: { v: 12, t: NOW } } },
-  { num: 2, lastHeard: NOW - 2 * HOUR, pos: pos(39.16, -0.44), metrics: { temperature: { v: 31.2, t: NOW - 2 * HOUR } } },
+  { num: 1, lastHeard: NOW - 5 * MIN, pos: pos(39.15, -3.43), metrics: { temperature: { v: 18.4, t: NOW - 5 * MIN }, relativeHumidity: { v: 66, t: NOW - 5 * MIN }, channelUtilization: { v: 12, t: NOW } } },
+  { num: 2, lastHeard: NOW - 2 * HOUR, pos: pos(39.16, -3.44), metrics: { temperature: { v: 31.2, t: NOW - 2 * HOUR } } },
   { num: 3, lastHeard: NOW - 3 * DAY, pos: pos(39.2, -0.5), metrics: { temperature: { v: 9, t: NOW - 3 * DAY } } }, // vieja
-  { num: 4, lastHeard: NOW - 10 * MIN, pos: pos(39.17, -0.42), metrics: { batteryLevel: { v: 101, t: NOW - 10 * MIN } } }, // sin temperatura
+  { num: 4, lastHeard: NOW - 10 * MIN, pos: pos(39.17, -3.42), metrics: { batteryLevel: { v: 101, t: NOW - 10 * MIN } } }, // sin temperatura
   { num: 5, lastHeard: NOW, metrics: { temperature: { v: 20, t: NOW } } }, // sin ubicación: nunca sale
   // Se movió: llegó a su sitio hace 1 h y su temperatura es de hace 3 h.
   { num: 6, lastHeard: NOW, pos: pos(39.3, -0.6), place: { lat: 39.3, lon: -0.6, since: NOW - HOUR, moved: true, bits: 32 }, metrics: { temperature: { v: 25, t: NOW - 3 * HOUR } } },

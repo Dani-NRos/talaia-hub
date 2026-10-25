@@ -1,5 +1,5 @@
 // Prueba por cable con un puerto serie virtual (un pseudoterminal) unido al nodo simulado: pasa por serialport de
-// verdad, como con el DNN 5 enchufado. Necesita python3 (para crear el pseudoterminal); si no está, se salta.
+// verdad, como con el Base 5 enchufado. Necesita python3 (para crear el pseudoterminal); si no está, se salta.
 import test from "node:test";
 import assert from "node:assert/strict";
 import fs from "node:fs";
@@ -53,7 +53,7 @@ test("por cable: conecta, lee la configuración y guarda lecturas", { skip: !hay
   await hasta(() => v.S.link.state === "ready", 8000, "receptor listo por cable");
   assert.equal(v.S.myNode, ME);
   assert.equal(v.S.device.kind, "serial");
-  assert.match(v.S.log[0].text, /^Receptor listo por cable: DNN 5$/);
+  assert.match(v.S.log[0].text, /^Receptor listo por cable: Base 5$/);
   nodo.ambiente(CASETA, { temperature: 21.5 });
   await hasta(() => v.S.nodes.get(CASETA).metrics.temperature?.v === 21.5, 3000, "lectura");
   assert.equal((await v.almacen.lecturas.series(CASETA, "temperature", 0)).length, 1);

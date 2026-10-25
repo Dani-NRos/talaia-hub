@@ -27,7 +27,7 @@ function encode({ route = [], snrTowards = [], routeBack = [], snrBack = [] }, p
   return new Uint8Array(out);
 }
 
-const ME = 0x64591ab0, R3 = 0x2299aa10, DNN4 = 0xaa62b264, LEJOS = 0xdeadbeef;
+const ME = 0x3c4d5e6f, R3 = 0x4d5e6f70, TOR4 = 0x2b3c4d5e, LEJOS = 0xdeadbeef;
 
 test("lee la respuesta empaquetada y suelta, con SNR negativos", () => {
   const msg = { route: [R3], snrTowards: [25, -18], routeBack: [R3], snrBack: [-12, 28] };
@@ -40,32 +40,32 @@ test("lee la respuesta empaquetada y suelta, con SNR negativos", () => {
 });
 
 test("directo: sin nodos intermedios, un SNR en cada sentido", () => {
-  const t = readTrace({ route: [], snrTowards: [44], routeBack: [], snrBack: [41] }, ME, DNN4);
-  assert.deepEqual(t.fwd, { nodes: [ME, DNN4], snr: [11] });
-  assert.deepEqual(t.back, { nodes: [DNN4, ME], snr: [10.25] });
+  const t = readTrace({ route: [], snrTowards: [44], routeBack: [], snrBack: [41] }, ME, TOR4);
+  assert.deepEqual(t.fwd, { nodes: [ME, TOR4], snr: [11] });
+  assert.deepEqual(t.back, { nodes: [TOR4, ME], snr: [10.25] });
   assert.deepEqual(relays(t.fwd), []);
 });
 
 test("dos saltos, con la vuelta por otro camino", () => {
-  const t = readTrace({ route: [R3, LEJOS], snrTowards: [25, -18, -50], routeBack: [R3], snrBack: [-39, 28] }, ME, DNN4);
-  assert.deepEqual(t.fwd.nodes, [ME, R3, LEJOS, DNN4]);
+  const t = readTrace({ route: [R3, LEJOS], snrTowards: [25, -18, -50], routeBack: [R3], snrBack: [-39, 28] }, ME, TOR4);
+  assert.deepEqual(t.fwd.nodes, [ME, R3, LEJOS, TOR4]);
   assert.deepEqual(t.fwd.snr, [6.25, -4.5, -12.5]);
-  assert.deepEqual(t.back.nodes, [DNN4, R3, ME]);
+  assert.deepEqual(t.back.nodes, [TOR4, R3, ME]);
   assert.deepEqual(t.back.snr, [-9.75, 7]);
-  assert.deepEqual(weakest(t), { snr: -12.5, from: LEJOS, to: DNN4, leg: "fwd" });
+  assert.deepEqual(weakest(t), { snr: -12.5, from: LEJOS, to: TOR4, leg: "fwd" });
 });
 
 test("salto desconocido (repite sin la clave del canal) y SNR desconocido", () => {
-  const t = readTrace({ route: [UNKNOWN_NODE], snrTowards: [-128, 12], routeBack: [], snrBack: [8] }, ME, DNN4);
-  assert.deepEqual(t.fwd.nodes, [ME, UNKNOWN_NODE, DNN4]);
+  const t = readTrace({ route: [UNKNOWN_NODE], snrTowards: [-128, 12], routeBack: [], snrBack: [8] }, ME, TOR4);
+  assert.deepEqual(t.fwd.nodes, [ME, UNKNOWN_NODE, TOR4]);
   assert.deepEqual(t.fwd.snr, [null, 3]);
 });
 
 test("vuelta incompleta (firmware antiguo en el camino): sin vuelta y SNR de ida desconocidos", () => {
-  const t = readTrace({ route: [R3], snrTowards: [], routeBack: [], snrBack: [] }, ME, DNN4);
+  const t = readTrace({ route: [R3], snrTowards: [], routeBack: [], snrBack: [] }, ME, TOR4);
   assert.deepEqual(t.fwd.snr, [null, null]);
   assert.equal(t.back, null);
-  assert.equal(readTrace({ route: [], snrTowards: [4], routeBack: [], snrBack: [4] }, ME, DNN4, false).back, null);
+  assert.equal(readTrace({ route: [], snrTowards: [4], routeBack: [], snrBack: [4] }, ME, TOR4, false).back, null);
 });
 
 test("calidad según el preset del receptor", () => {

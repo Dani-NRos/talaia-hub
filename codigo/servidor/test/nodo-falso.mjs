@@ -60,10 +60,10 @@ export class NodoFalso {
   configuracion(id) {
     const t = Math.floor(Date.now() / 1000);
     this.enviar({ case: "myInfo", value: create(M.MyNodeInfoSchema, { myNodeNum: ME }) });
-    this.enviar({ case: "nodeInfo", value: create(M.NodeInfoSchema, { num: ME, user: user(ME, "DNN 5", "DNN5", 1), lastHeard: t }) });
+    this.enviar({ case: "nodeInfo", value: create(M.NodeInfoSchema, { num: ME, user: user(ME, "Base 5", "BAS5", 1), lastHeard: t }) });
     this.enviar({ case: "nodeInfo", value: create(M.NodeInfoSchema, { num: CASETA, user: user(CASETA, "Caseta huerto", "CAS", 2), lastHeard: t - 600, snr: 4.5, hopsAway: 1, deviceMetrics: create(TEL.DeviceMetricsSchema, { batteryLevel: 87, voltage: 4.01 }) }) });
     this.enviar({ case: "nodeInfo", value: create(M.NodeInfoSchema, { num: AVISADO, user: user(AVISADO, "Garaje", "GAR", 3), lastHeard: t - 1200, snr: 7, hopsAway: 0 }) });
-    this.enviar({ case: "channel", value: create(CH.ChannelSchema, { index: 0, role: CH.Channel_Role.PRIMARY, settings: create(CH.ChannelSettingsSchema, { name: "SFNarrow", psk: new Uint8Array([1]) }) }) });
+    this.enviar({ case: "channel", value: create(CH.ChannelSchema, { index: 0, role: CH.Channel_Role.PRIMARY, settings: create(CH.ChannelSettingsSchema, { name: "LongFast", psk: new Uint8Array([1]) }) }) });
     this.enviar({ case: "channel", value: create(CH.ChannelSchema, { index: 1, role: CH.Channel_Role.SECONDARY, settings: create(CH.ChannelSettingsSchema, { name: "avisos", psk: KEY(9) }) }) });
     this.enviar({ case: "config", value: create(CFG.ConfigSchema, { payloadVariant: { case: "lora", value: create(CFG.Config_LoRaConfigSchema, { usePreset: false, spreadFactor: 7, hopLimit: 6 }) } }) });
     this.enviar({ case: "configCompleteId", value: id });

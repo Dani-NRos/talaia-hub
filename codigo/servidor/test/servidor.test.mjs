@@ -32,14 +32,14 @@ test("conecta por TCP, lee la configuración del nodo y la guarda", async (t) =>
   assert.equal(S.myNode, ME);
   assert.equal(S.nodes.get(CASETA).long, "Caseta huerto");
   assert.equal(S.nodes.get(CASETA).metrics.batteryLevel.v, 87);
-  assert.deepEqual(S.channels.map((c) => [c.name, c.private]), [["SFNarrow", false], ["avisos", true]]);
+  assert.deepEqual(S.channels.map((c) => [c.name, c.private]), [["LongFast", false], ["avisos", true]]);
   assert.deepEqual(S.lora, { usePreset: false, modemPreset: 0, spreadFactor: 7, hopLimit: 6 });
   assert.equal(S.device.kind, "tcp");
-  assert.match(S.log[0].text, /^Receptor listo por la red: DNN 5$/);
+  assert.match(S.log[0].text, /^Receptor listo por la red: Base 5$/);
   // Despertar y nada más antes de la configuración.
   assert.ok(nodo.textos.length >= 1);
   assert.equal(nodo.recibido[0].payloadVariant.case, "wantConfigId");
-  assert.deepEqual(v.almacen.leer("channels").map((c) => c.name), ["SFNarrow", "avisos"]);
+  assert.deepEqual(v.almacen.leer("channels").map((c) => c.name), ["LongFast", "avisos"]);
   assert.equal(v.almacen.leer("my"), ME);
 });
 

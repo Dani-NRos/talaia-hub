@@ -13,11 +13,11 @@ function montar(t) {
   const S = estadoInicial();
   S.store = { rows: [], async add(r) { this.rows.push(...r); }, async series() { return [{ t: T0 - 60000, v: 20 }]; }, async prune() { return 0; }, async clear() { this.rows = []; } };
   S.link = { state: "ready" };
-  S.channels = [{ index: 0, name: "SFNarrow", private: false, why: "clave pública por defecto" }, { index: 1, name: "avisos", private: true, why: "" }];
+  S.channels = [{ index: 0, name: "LongFast", private: false, why: "clave pública por defecto" }, { index: 1, name: "avisos", private: true, why: "" }];
   const guardado = [];
   const motor = crearMotor(S, { guardar: (k) => guardado.push(k) });
   motor.node(CASETA).long = "Caseta";
-  Object.assign(motor.node(CASETA), { metrics: { temperature: { v: 31, t: T0 } }, pos: { lat: 39.15, lon: -0.44, t: T0, bits: 32 }, lastHeard: T0 });
+  Object.assign(motor.node(CASETA), { metrics: { temperature: { v: 31, t: T0 } }, pos: { lat: 39.15, lon: -3.44, t: T0, bits: 32 }, lastHeard: T0 });
   return { S, motor, a: crearAcciones(motor), guardado };
 }
 
@@ -80,7 +80,7 @@ test("valla: radio de 20 m o más; se fija en la posición actual, se cambia y s
   a.vigilar(CASETA);
   assert.equal(a.fijarValla(CASETA, 10).error, "Pon un radio de 20 m o más.");
   assert.equal(a.fijarValla(CASETA, 150).toast, "Valla fijada en su posición actual");
-  assert.deepEqual(S.cfg.watched[CASETA].fence, { lat: 39.15, lon: -0.44, r: 150, at: T0 });
+  assert.deepEqual(S.cfg.watched[CASETA].fence, { lat: 39.15, lon: -3.44, r: 150, at: T0 });
   assert.deepEqual(a.radioValla(CASETA, 5), { ok: false, error: "Pon un radio de 20 m o más.", radio: 150 });
   assert.equal(a.radioValla(CASETA, 300).toast, "Radio de la valla: 300 m");
   assert.equal(a.quitarValla(CASETA).ok, true);

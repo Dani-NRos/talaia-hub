@@ -110,7 +110,7 @@ async function entrarPantalla(page, nombre, clave) {
   await page.fill("#gName", nombre);
   await page.fill("#gPass", clave);
   await Promise.all([page.waitForNavigation(), page.click(".gate-go")]);
-  await esperarTexto(page, /DNN5 conectado/, `${nombre} dentro`);
+  await esperarTexto(page, /BAS5 conectado/, `${nombre} dentro`);
 }
 
 await paso("sin usuarios: el PC crea el primero con el código; el móvil entra con usuario y contraseña", async () => {
@@ -127,7 +127,7 @@ await paso("sin usuarios: el PC crea el primero con el código; el móvil entra 
   await esperarTexto(pc, /El código no es ese/, "código malo");
   await pc.fill("#gCode", codigo.toLowerCase());
   await Promise.all([pc.waitForNavigation(), pc.click(".gate-go")]);
-  await esperarTexto(pc, /DNN5 conectado/, "el PC dentro");
+  await esperarTexto(pc, /BAS5 conectado/, "el PC dentro");
   if (fs.existsSync(path.join(datos, "primer-usuario.txt"))) throw new Error("el código sigue en su fichero");
   // The phone was showing «make the first one»: someone made it meanwhile, so it asks to sign in.
   await movil.fill("#gCode", codigo);
@@ -146,8 +146,8 @@ await paso("sin usuarios: el PC crea el primero con el código; el móvil entra 
 await foto(pc, "pc-dentro");
 
 await paso("las dos pantallas ven el receptor conectado", async () => {
-  await esperarTexto(movil, /DNN5 conectado/, "DNN5 conectado (móvil)");
-  await esperarTexto(pc, /DNN5 conectado/, "DNN5 conectado (pc)");
+  await esperarTexto(movil, /BAS5 conectado/, "BAS5 conectado (móvil)");
+  await esperarTexto(pc, /BAS5 conectado/, "BAS5 conectado (pc)");
 });
 await foto(movil, "movil-inicio");
 
@@ -330,8 +330,8 @@ await paso("Enterado desde Home Assistant queda visto en las pantallas", async (
 });
 
 // La estación, en el panel del receptor: lo que Home Assistant publica con mqtt_statestream (los nombres largos de
-// Meteoclimatic de Dani) sale a la malla como del receptor. La unidad del viento, con publish_attributes.
-const MC = (x) => `ha_estados/sensor/meteoclimatic_weather_for_alzira_ajuntament_valencia_espva4600000046600b_alzira_ajuntament_valencia_${x}`;
+// una estación de Meteoclimatic) sale a la malla como del receptor. La unidad del viento, con publish_attributes.
+const MC = (x) => `ha_estados/sensor/meteoclimatic_weather_for_villafria_de_abajo_es00000000000000a_villafria_de_abajo_${x}`;
 for (const [x, v, u] of [["temperature", "19.6", "°C"], ["humidity", "64", "%"], ["pressure", "1014.8", "hPa"], ["wind_speed", "18", "km/h"], ["dew_point", "12.4", "°C"]]) {
   await ha.publishAsync(MC(`${x}/state`), v, { retain: true });
   await ha.publishAsync(MC(`${x}/unit_of_measurement`), JSON.stringify(u), { retain: true });
@@ -349,7 +349,7 @@ await paso("datos MQTT en el panel del receptor: buscar, filtrar y «Usar»; dos
   await ir(pc, "nodes");
   await pc.click(`[data-watch="${ME}"]`);
   await ir(pc, "dashboard");
-  await esperarTexto(pc, /Paneles[\s\S]*DNN5/i, "el receptor vigilado");
+  await esperarTexto(pc, /Paneles[\s\S]*BAS5/i, "el receptor vigilado");
   await pc.click(`#cards .name-btn[data-open="${ME}"]`);
   await sleep(400);
   await fotoApartado(pc, "#datBox", "datos-vacio");
@@ -398,7 +398,7 @@ await paso("datos MQTT en el panel del receptor: buscar, filtrar y «Usar»; dos
   await fotoApartado(pc, "#mallaBox", "malla-receptor");
   // En la tarjeta del receptor, como lecturas suyas (con su nombre la del salón).
   await pc.keyboard.press("Escape");
-  await esperarTexto(pc, /DNN5[\s\S]*Salón\s*22,1/i, "la del salón en la tarjeta"); // las etiquetas, en mayúsculas
+  await esperarTexto(pc, /BAS5[\s\S]*Salón\s*22,1/i, "la del salón en la tarjeta"); // las etiquetas, en mayúsculas
 });
 
 await paso("Enviar ahora: el nodo recibe la telemetría por el canal 1; las dos pantallas ven «repetido por la malla»", async () => {
@@ -589,7 +589,7 @@ await paso("al reiniciar el servidor se acuerda de todo y las pantallas vuelven 
   await esperarTexto(movil, /Sin conexión con el servidor/, "aviso de sin conexión en el móvil");
   await foto(movil, "movil-sin-servidor");
   srv = arrancarServidor();
-  await esperarTexto(movil, /DNN5 conectado/, "reconectado", 20000);
+  await esperarTexto(movil, /BAS5 conectado/, "reconectado", 20000);
   const t = await texto(movil);
   if (!/Huerto/.test(t) || !/por encima de 30/.test(t)) throw new Error("se ha perdido el vigilado o la alarma");
   if (!/Enchufe del taller[\s\S]*Potencia/i.test(t)) throw new Error("se ha perdido el panel del enchufe");
