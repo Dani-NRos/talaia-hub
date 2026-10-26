@@ -13,6 +13,15 @@ dialog.sheet[open] { display: flex; flex-direction: column; animation: up .22s e
 .sheet-t .meta { margin-top: 4px; }
 .sheet-b { overflow-y: auto; padding: 0 max(18px, env(safe-area-inset-right, 0px)) calc(20px + env(safe-area-inset-bottom, 0px)) max(18px, env(safe-area-inset-left, 0px)); }
 
+/* Its tabs: fixed under the header (the body is what scrolls). Every tab is painted; only the current one shows. */
+.sheet-h:has(+ .sheet-tabs) { border-bottom: 0; }
+.tabs.sheet-tabs { flex: none; margin: 0; padding: 0 max(8px, env(safe-area-inset-right, 0px)) 0 max(8px, env(safe-area-inset-left, 0px)); }
+.sheet-tabs .tab { background: none; border: 0; border-bottom: 3px solid transparent; cursor: pointer; }
+.sheet-tabs .tab[aria-selected="true"] { color: var(--ink); border-bottom-color: var(--accent); }
+.sheet-p { display: none; }
+.sheet[data-tab="node"] .sheet-p[data-tabp="node"], .sheet[data-tab="alarms"] .sheet-p[data-tabp="alarms"],
+.sheet[data-tab="history"] .sheet-p[data-tabp="history"], .sheet[data-tab="settings"] .sheet-p[data-tabp="settings"] { display: block; }
+
 /* limits */
 .tbl { overflow-x: auto; }
 .thr-t { width: 100%; border-collapse: collapse; }

@@ -183,6 +183,11 @@ son los del servidor: todos tus aparatos ven lo mismo, y si das *Enterado* en un
   buscador: desde ahí se vigila un nodo), *Automatizaciones* (ver [Automatizaciones](#automatizaciones)), *Alarmas* (las
   activas y el registro) y *Ajustes*. En el ordenador van en una barra a la izquierda; en el móvil, abajo, y *Ajustes*
   en el engranaje de arriba.
+- **La ficha de un nodo o panel** (se abre pulsando su nombre) tiene pestañas: *Nodo* (pedir datos, ruta, ubicación y
+  valla; solo en nodos Meshtastic), *Alarmas* (sin señal, límites, estados, cambio rápido), *Histórico* (las gráficas)
+  y *Ajustes* (nombre, datos MQTT, conexión, lo que sale a la malla, y dejar de vigilar o quitar el panel). Uno que no
+  se vigila solo tiene *Nodo* e *Histórico*. Cada aparato recuerda la última pestaña que usó, y lo que hayas escrito
+  sin guardar sigue ahí al cambiar de pestaña.
 - **Ajustes**, en apartados: *Malla* (sin señal para los nodos nuevos, avisos y órdenes por la malla), *MQTT* (brokers,
   usuarios del broker de este equipo, Home Assistant), *Receptor* (estado, nodo, radio, canales, diagnóstico), *Sistema*
   (idioma del servidor, histórico, acerca de), *Usuarios* y *Esta pantalla* (idioma, tema claro u oscuro, sonido,

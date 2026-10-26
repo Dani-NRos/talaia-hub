@@ -3,7 +3,7 @@
 // MQTT data and, on the receiver, what goes out to the mesh: panel-config.js).
 import { ctx } from "../ctx.js";
 import { t } from "../i18n.js";
-import { $, $$, esc, parseNum, ICON } from "../ui.js";
+import { $, $$, esc, parseNum, ICON, LS } from "../ui.js";
 import { chartSVG, stateSpans, stateSummary, stateSVG } from "../charts.js";
 import { requestBlock, requestStatus, positionBlock, switchHTML } from "./node-parts.js";
 import { metaLine, displayName, saveCardUi } from "./dashboard.js";
@@ -242,10 +242,11 @@ function alarmsSection(num, n, keys) {
 }
 
 /** Opens a node's (or panel's) sheet. What was changed and not saved stays if the same one is reopened. */
-export function openSheet(num) {
+export function openSheet(num, { tab = null } = {}) {
   const { S } = ctx;
   forgetDraftsExcept(num);
-  S.detail = { num, range: S.detail?.num === num ? S.detail.range : "24h" };
+  // The tab: the one asked for or, if none, the last one used on this device (`currentTab` falls back if this sheet lacks it).
+  S.detail = { num, range: S.detail?.num === num ? S.detail.range : "24h", tab: tab || LS.get(TAB_KEY, null) };
   renderSheet({ force: true }); // opening it: what was typed and not saved is rebuilt from the drafts
   if (!isSheetOpen()) sheet().showModal();
   drawCharts();
@@ -273,27 +274,33 @@ export function renderSheet({ force = false } = {}) {
   const noNode = num < 0; // a panel of an MQTT device: no requests, route or location
   const tags = (noNode ? [`${TIPOS_PANEL[n.tipoPanel]?.label || "MQTT"}`, t("sheet.tag.mqtt")]
     : [hexId(num), n.hw ? n.hw.replaceAll("_", " ") : "", n.num === S.myNode ? t("sheet.tag.receiver") : ""]).filter(Boolean).join(" · ");
-  let body = "";
+  // Every tab is painted and the ones not showing are hidden by CSS (`data-tab` on the dialog): switching is only a
+  // change of that attribute, so what was typed in the others, the drafts and the elements the rest of the code
+  // looks for by id all stay as they are.
+  const watchCta = w ? "" : `<section class="blk cta"><p>${esc(t("sheet.watchCta"))}</p><button class="btn primary" data-watch="${num}">${esc(t("sheet.watchBtn"))}</button></section>`;
+  const panels = {};
   if (!noNode) {
-    body += `<section class="blk"><h3>${esc(t("req.title"))}</h3><div class="ask in-sheet" data-ask-box="${num}" data-sheet="1">${requestBlock(num, true)}</div>
-    <p class="hint">${esc(t("sheet.askHint"))}</p></section>`;
-    body += `<section class="blk"><div class="route-box" data-route-box="${num}">${routeBlock(num)}</div></section>`;
-    body += `<section class="blk"><div class="pos in-sheet" data-pos-box="${num}" data-sheet="1">${positionBlock(num, true)}</div></section>`;
+    panels.node = watchCta
+      + `<section class="blk"><h3>${esc(t("req.title"))}</h3><div class="ask in-sheet" data-ask-box="${num}" data-sheet="1">${requestBlock(num, true)}</div>
+    <p class="hint">${esc(t("sheet.askHint"))}</p></section>`
+      + `<section class="blk"><div class="route-box" data-route-box="${num}">${routeBlock(num)}</div></section>`
+      + `<section class="blk"><div class="pos in-sheet" data-pos-box="${num}" data-sheet="1">${positionBlock(num, true)}</div></section>`;
   }
-  body += w ? alarmsSection(num, n, keys)
-    : `<section class="blk cta"><p>${esc(t("sheet.watchCta"))}</p><button class="btn primary" data-watch="${num}">${esc(t("sheet.watchBtn"))}</button></section>`;
+  if (w) panels.alarms = alarmsSection(num, n, keys);
   const range = S.detail.range;
-  body += `<section class="blk"><div class="blk-h"><h3>${esc(t("sheet.history"))}</h3><div class="seg" role="group" aria-label="${esc(t("sheet.period"))}">
+  panels.history = (w ? "" : watchCta) + `<section class="blk"><div class="blk-h"><h3>${esc(t("sheet.history"))}</h3><div class="seg" role="group" aria-label="${esc(t("sheet.period"))}">
       <button type="button" data-range="24h" aria-pressed="${range === "24h"}">24 h</button><button type="button" data-range="7d" aria-pressed="${range === "7d"}">${esc(t("sheet.days", { n: 7 }))}</button></div></div>
       <div id="chartList" class="chart-list">${keys.length ? keys.map((k) => `<figure class="chart" data-m="${k}"><figcaption><span>${esc(metricMeta(k).label)}</span><b data-cur="${k}">${n.metrics[k] ? esc(fmtWithUnit(k, n.metrics[k].v)) : "—"}</b><span class="mm" data-mm="${k}"></span></figcaption><div class="chart-box"></div></figure>`).join("") : `<p class="hint">${esc(t(noNode ? "sheet.noDataPanel" : "sheet.noTelemetry"))}</p>`}</div></section>`;
-  // Watched: its name here, its MQTT data and, on the receiver, what goes out to the mesh.
+  // Watched: its name here, its MQTT data and, on the receiver, what goes out to the mesh; and stopping watching it.
   if (w) {
-    body += panelSections(num);
-    body += noNode
+    panels.settings = panelSections(num) + (noNode
       ? `<section class="blk end"><button class="btn danger-ghost" data-panel-quitar="${num}">${esc(t("sheet.removePanel"))}</button></section>`
-      : `<section class="blk end"><button class="btn danger-ghost" id="unwatchBtn" data-unwatch="${num}">${esc(t("sheet.unwatch"))}</button></section>`;
+      : `<section class="blk end"><button class="btn danger-ghost" id="unwatchBtn" data-unwatch="${num}">${esc(t("sheet.unwatch"))}</button></section>`);
   }
-  const html = `<div class="sheet-h"><span class="tag">${esc(n.short)}</span><div class="sheet-t"><h2>${esc(displayName(n))}</h2><p class="meta">${esc(tags)}<br>${esc(metaLine(n))}</p></div><button class="icon-btn" data-full="${num}" aria-label="${esc(t("card.fullHint", { name: displayName(n) }))}" title="${esc(t("card.full"))}">${ICON.expand}</button><button class="icon-btn" data-close aria-label="${esc(t("sheet.close"))}">${ICON.close}</button></div><div class="sheet-b">${body}</div>`;
+  const tabs = sheetTabs(num);
+  const tabBar = `<div class="tabs sheet-tabs" role="tablist" aria-label="${esc(t("sheet.tabs"))}">${tabs.map((k) => `<button type="button" class="tab" role="tab" id="st-${k}" aria-controls="sp-${k}" data-sheet-tab="${k}">${esc(t(`sheet.tab.${k}`))}</button>`).join("")}</div>`;
+  const body = tabs.map((k) => `<div class="sheet-p" role="tabpanel" id="sp-${k}" aria-labelledby="st-${k}" data-tabp="${k}">${panels[k]}</div>`).join("");
+  const html = `<div class="sheet-h"><span class="tag">${esc(n.short)}</span><div class="sheet-t"><h2>${esc(displayName(n))}</h2><p class="meta">${esc(tags)}<br>${esc(metaLine(n))}</p></div><button class="icon-btn" data-full="${num}" aria-label="${esc(t("card.fullHint", { name: displayName(n) }))}" title="${esc(t("card.full"))}">${ICON.expand}</button><button class="icon-btn" data-close aria-label="${esc(t("sheet.close"))}">${ICON.close}</button></div>${tabBar}<div class="sheet-b">${body}</div>`;
   const el = sheet();
   const sameNode = isSheetOpen() && el.dataset.num === String(num); // the same sheet, already on screen
   // Nothing different to show (what arrived belongs to another node): leave it alone, with what is typed in it.
@@ -303,7 +310,60 @@ export function renderSheet({ force = false } = {}) {
   el.dataset.num = String(num);
   el.innerHTML = html;
   el._h = html;
+  showTab();
   holdScroll(top);
+  return true;
+}
+
+/* ── tabs ── */
+
+const TAB_KEY = "talaia.sheetTab"; // the last one used on this device
+
+/** The tabs a sheet has: only the parts that apply to what it shows (a panel without a node has no Node; one not watched has no alarms or settings). */
+function sheetTabs(num) {
+  const w = ctx.S.cfg.watched[num];
+  return [...(num < 0 ? [] : ["node"]), ...(w ? ["alarms"] : []), "history", ...(w ? ["settings"] : [])];
+}
+/** The one showing: the one chosen if this sheet has it, otherwise its first. */
+function currentTab(num) {
+  const tabs = sheetTabs(num);
+  return tabs.includes(ctx.S.detail?.tab) ? ctx.S.detail.tab : tabs[0];
+}
+/** Shows the current tab: the CSS hides the other panels; the bar says which one it is. */
+function showTab() {
+  const { S } = ctx;
+  if (!S.detail) return;
+  const tab = currentTab(S.detail.num);
+  sheet().dataset.tab = tab;
+  for (const b of $$("#detail [role=tab]")) {
+    const on = b.dataset.sheetTab === tab;
+    b.setAttribute("aria-selected", String(on));
+    b.tabIndex = on ? 0 : -1;
+  }
+}
+export function setSheetTab(tab) {
+  const { S } = ctx;
+  if (!S.detail || !sheetTabs(S.detail.num).includes(tab)) return;
+  S.detail.tab = tab;
+  LS.set(TAB_KEY, tab);
+  showTab();
+  hold = null;
+  const b = sheetBody();
+  if (b) b.scrollTop = 0; // each tab starts at its top
+  if (tab === "history") drawCharts(); // the charts wait for their width while hidden
+}
+/** Arrows, Home and End move between the tabs (returns true if the key was one of those). */
+export function sheetTabKey(ev) {
+  const { S } = ctx;
+  if (!S.detail) return false;
+  const tabs = sheetTabs(S.detail.num);
+  const i = tabs.indexOf(ev.target.dataset.sheetTab);
+  const to = { ArrowLeft: i - 1, ArrowRight: i + 1, Home: 0, End: tabs.length - 1 }[ev.key];
+  if (to == null || i < 0) return false;
+  ev.preventDefault();
+  const next = tabs[(to + tabs.length) % tabs.length];
+  setSheetTab(next);
+  $(`#detail [data-sheet-tab="${next}"]`)?.focus();
   return true;
 }
 
@@ -328,6 +388,7 @@ function releaseScroll(done = false) {
 export async function drawCharts() {
   const { S } = ctx;
   if (!S.detail) return;
+  if (sheet().dataset.tab !== "history") return releaseScroll(true); // hidden: it has no width; it is drawn on showing it
   const { num, range } = S.detail;
   const to = Date.now(), from = to - (range === "7d" ? 7 * DAY : DAY);
   const rules = S.cfg.watched[num]?.rules || {};

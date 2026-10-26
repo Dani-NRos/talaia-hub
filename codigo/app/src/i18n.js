@@ -578,6 +578,11 @@ const es = {
 
   // node sheet
   "sheet.close": "Cerrar",
+  "sheet.tabs": "Apartados de la ficha",
+  "sheet.tab.node": "Nodo",
+  "sheet.tab.alarms": "Alarmas",
+  "sheet.tab.history": "Histórico",
+  "sheet.tab.settings": "Ajustes",
   "sheet.tag.mqtt": "datos por MQTT",
   "sheet.tag.receiver": "tu receptor",
   "sheet.askHint": "La petición sale por LoRa desde tu receptor y el nodo contesta con una lectura recién tomada. Si está dormido para ahorrar batería o fuera de alcance, no contesta.",
@@ -1349,6 +1354,11 @@ const en = {
   "route.via": "through {n} nodes",
 
   "sheet.close": "Close",
+  "sheet.tabs": "Parts of the sheet",
+  "sheet.tab.node": "Node",
+  "sheet.tab.alarms": "Alarms",
+  "sheet.tab.history": "History",
+  "sheet.tab.settings": "Settings",
   "sheet.tag.mqtt": "data over MQTT",
   "sheet.tag.receiver": "your receiver",
   "sheet.askHint": "The request goes out over LoRa from your receiver and the node answers with a fresh reading. If it is asleep to save battery or out of range, it doesn't answer.",

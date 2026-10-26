@@ -1,5 +1,12 @@
 # Changes
 
+## Unreleased (2.2.0 when it is)
+
+- **The sheet has tabs**: *Node*, *Alarms*, *History* and *Settings* (a panel without a node has no *Node*; a node that
+  isn't watched has *Node* and *History*). The bar stays under the header while the body scrolls, the arrow keys move
+  between tabs, each device remembers the last one used, and what was typed but not saved survives changing tabs.
+  A panel just created opens on *Settings*.
+
 ## 2.1.1
 
 - **The scroll no longer jumps to the top.** A node's sheet went back to the top every time a reading arrived from

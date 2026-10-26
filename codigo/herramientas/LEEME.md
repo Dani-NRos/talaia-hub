@@ -13,9 +13,12 @@ Necesitan Playwright con Chromium (no va en el repo: se busca en `PLAYWRIGHT_DIR
 
 - **`vistazo.mjs <salida> [secciones…] [--en]`**: capturas de cada sección en el ordenador y en el móvil, de día y
   de noche, con un nodo simulado (un sensor vigilado con una alarma y el receptor). Para revisar el diseño. Además de
-  las secciones: `sheet` (la ficha del sensor, entera), `receiver` (la del receptor, con lo que manda a la malla),
+  las secciones: `sheet` (la ficha del sensor, una captura por pestaña), `receiver` (la del receptor, con lo que manda a la malla),
   `full` (el sensor y el receptor a pantalla completa, comprobando que ninguna lectura se sale de su casilla) y
   `signin` (crear el primer usuario y entrar). Entra con el código que el servidor deja en su carpeta de datos.
+- **`pestanas.mjs [carpeta]`**: las pestañas de la ficha: cuáles tiene cada tipo (nodo vigilado, sin vigilar, panel sin
+  nodo), que se recuerda la última, que lo escrito sin guardar sobrevive al cambiar de pestaña, las gráficas a su ancho,
+  la barra fija y las flechas del teclado. Sale con 1 si algo falla; con una carpeta, guarda capturas.
 - **`scroll.mjs`**: que el scroll no se mueva: la ficha de un nodo (con su alarma y las lecturas de otro nodo que
   también la tiene) y Ajustes, con el servidor de verdad y un nodo simulado. Sale con 1 si algo falla.
 - **`iconos.mjs`**: dibuja los iconos de la app (`app/pwa/icon-*.png`) con la torre de `app/src/logo.js`.

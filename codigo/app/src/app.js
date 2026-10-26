@@ -7,7 +7,7 @@ import { refreshPosition, copyText, patchSwitches, setFence, setFenceRadius, rem
 import { renderNodes, onNodesQuery, saveNodesView } from "./views/nodes.js";
 import { renderLog } from "./views/alarms.js";
 import { boardHTML, renderCards, toggleCard, toggleAllCards, moveCard, watchCardsWidth } from "./views/dashboard.js";
-import { openSheet, onSheetClose, renderSheet, drawCharts, refreshSheetLive, refreshRequests, patchRequestStatus, legHops, setSheetRange, resizeSheet, trendFormFill, addTrend, removeTrend, saveStateAlarm, saveRuleFromInput, watch, unwatch, isSheetOpen } from "./views/sheet.js";
+import { openSheet, onSheetClose, renderSheet, drawCharts, refreshSheetLive, refreshRequests, patchRequestStatus, legHops, setSheetRange, setSheetTab, sheetTabKey, resizeSheet, trendFormFill, addTrend, removeTrend, saveStateAlarm, saveRuleFromInput, watch, unwatch, isSheetOpen } from "./views/sheet.js";
 import { patchPanels, data, meshOut, newPanelSheet, createPanel } from "./views/panel-config.js";
 import { openFull, closeFull, refreshFull, setFullRange, resizeFull } from "./views/fullscreen.js";
 import { loraSf } from "@talaia/nucleo/route.js";
@@ -38,7 +38,7 @@ const S = {
   meshQ: "", // texto del buscador de «Resto de la malla» (no se guarda)
   meshView: { filters: [], sort: "auto" }, // filtros y orden del buscador (se guardan)
   logExpanded: false,
-  detail: null, // { num, range }
+  detail: null, // { num, range, tab }
   servidorOk: false, // modo «Servidor»: hay conexión con él
   me: null, // who this screen is signed in as: { nombre, sesion } (the start of its session's id)
   usuarios: [], // the server's users and their sessions (Settings → Users)
@@ -264,6 +264,7 @@ document.addEventListener("click", async (ev) => {
     return;
   }
   if ("range" in ds) return setSheetRange(ds.range);
+  if ("sheetTab" in ds) return setSheetTab(ds.sheetTab);
   if (t.id === "linkBtn") return openSettings("receiver");
   if (t.id === "meshMore") { S.meshExpanded = !S.meshExpanded; return renderNodes(); }
   if ("mf" in ds) {
@@ -314,6 +315,7 @@ document.addEventListener("keydown", (ev) => {
   }
   if ((ev.key === "Enter" || ev.key === " ") && ev.target.matches?.(".card[data-open]")) { ev.preventDefault(); openSheet(Number(ev.target.dataset.open)); }
   if (ev.key === "Enter" && ev.target.closest?.(".tr-form") && ev.target.matches("input")) { ev.preventDefault(); return S.detail && addTrend(S.detail.num); }
+  if (ev.target.matches?.("#detail [role=tab]") && sheetTabKey(ev)) return;
   if (ev.key === "Enter" && ev.target.matches?.("#detail .inp")) ev.target.blur();
 });
 

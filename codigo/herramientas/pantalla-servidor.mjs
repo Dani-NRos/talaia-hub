@@ -164,6 +164,7 @@ await paso("límite de temperatura desde el móvil", async () => {
   await esperarTexto(movil, /24,5/, "lectura 24,5 en el móvil");
   await movil.click(`.card[data-open="${CASETA}"] .name-btn`);
   await sleep(500);
+  await pestana(movil, "alarms");
   const inp = movil.locator('#detail input[data-rule="temperature"][data-side="max"]');
   await inp.fill("30");
   await inp.press("Enter");
@@ -196,6 +197,7 @@ await paso("Enterado en el PC queda visto en el móvil", async () => {
 await paso("pedir ambiente desde el móvil: acuse del nodo y respuesta", async () => {
   await movil.click(`.card[data-open="${CASETA}"] .name-btn`);
   await sleep(400);
+  await pestana(movil, "node");
   const antes = nodo.paquetes(PORT.TELEMETRY_APP).length;
   await movil.click(`#detail [data-ask="env"][data-num="${CASETA}"]`);
   await nodo.esperar(() => nodo.paquetes(PORT.TELEMETRY_APP).length > antes, 5000, "petición de telemetría");
@@ -253,6 +255,11 @@ const ID = CASETA.toString(16).padStart(8, "0");
 const esperarMqtt = async (f, que, ms = 8000) => { const fin = Date.now() + ms; while (Date.now() < fin) { if (f()) return; await sleep(100); } throw new Error(`MQTT no vio: ${que}`); };
 
 /** Foto de un apartado de Ajustes entero: la ventana, alta para que quepa (Ajustes tiene su propio desplazamiento). */
+/** The sheet shows one tab at a time: goes to the one with what the step needs (it is remembered on each screen). */
+async function pestana(page, tab) {
+  await page.click(`#detail [data-sheet-tab="${tab}"]`);
+  await sleep(250);
+}
 async function fotoApartado(page, sel, nombre) {
   const vp = page.viewportSize();
   await page.setViewportSize({ width: vp.width, height: 4000 });
@@ -352,6 +359,7 @@ await paso("datos MQTT en el panel del receptor: buscar, filtrar y «Usar»; dos
   await esperarTexto(pc, /Paneles[\s\S]*BAS5/i, "el receptor vigilado");
   await pc.click(`#cards .name-btn[data-open="${ME}"]`);
   await sleep(400);
+  await pestana(pc, "settings");
   await fotoApartado(pc, "#datBox", "datos-vacio");
   await pc.click("[data-dat-buscar]");
   await esperarTexto(pc, /Encontrados \d+ con números/, "temas encontrados");
@@ -404,6 +412,7 @@ await paso("datos MQTT en el panel del receptor: buscar, filtrar y «Usar»; dos
 await paso("Enviar ahora: el nodo recibe la telemetría por el canal 1; las dos pantallas ven «repetido por la malla»", async () => {
   await pc.click(`#cards .name-btn[data-open="${ME}"]`);
   await sleep(300);
+  await pestana(pc, "settings");
   const antes = nodo.paquetes(PORT.TELEMETRY_APP).length;
   await pc.click("[data-malla-send]");
   await nodo.esperar(() => nodo.paquetes(PORT.TELEMETRY_APP).length > antes, 5000, "telemetría de la estación");
@@ -416,6 +425,7 @@ await paso("Enviar ahora: el nodo recibe la telemetría por el canal 1; las dos 
   nodo.paquete({ from: ME, payloadVariant: { case: "decoded", value: create(M.DataSchema, { portnum: PORT.ROUTING_APP, payload: rout, requestId: p.id }) } });
   await esperarTexto(pc, /Último \(a mano\), a las \d\d:\d\d: «Temperatura 19,6 °C[^»]*» → canal «avisos»: repetido por la malla/, "último envío en el PC");
   await movil.click(`#cards .name-btn[data-open="${ME}"]`);
+  await pestana(movil, "settings");
   await esperarTexto(movil, /repetido por la malla\./, "último envío en el móvil");
   await fotoApartado(movil, "#mallaBox", "malla-movil");
   await movil.keyboard.press("Escape");
@@ -430,6 +440,7 @@ await paso("Enviar ahora: el nodo recibe la telemetría por el canal 1; las dos 
 await paso("renombrar un nodo desde el móvil: sale con su nombre nuevo en el PC y en Home Assistant", async () => {
   await movil.click(`#cards .name-btn[data-open="${CASETA}"]`);
   await sleep(300);
+  await pestana(movil, "settings");
   await esperarTexto(movil, /Su nombre en Meshtastic es «Caseta huerto»/, "su nombre de Meshtastic");
   await movil.fill("#pnNombre", "Huerto");
   await movil.click("[data-pn-nombre]");
@@ -458,6 +469,7 @@ await paso("panel nuevo sin nodo (Tasmota): sus datos, una alarma y nada a Home 
   await esperarTexto(pc, /45 W · ahora mismo/, "la potencia en la ficha");
   await fotoApartado(pc, "#detail .sheet-b", "panel-enchufe");
   // Límite de potencia: la alarma, con el nombre del panel.
+  await pestana(pc, "alarms");
   await pc.locator('#detail tr:has(th:text("Potencia")) [data-side="max"]').fill("40");
   await pc.keyboard.press("Tab");
   await esperarTexto(movil, /Enchufe del taller · Potencia por encima de 40 W/, "la alarma en el móvil");
@@ -477,6 +489,7 @@ await paso("estados ON/OFF y conexión en el panel del enchufe: «Usar», al rev
   await ha.publishAsync("zigbee2mqtt/Puerta taller", JSON.stringify({ contact: true, battery: 80 }), { retain: true });
   await pc.click("#cards .name-btn:text('Enchufe del taller')");
   await sleep(300);
+  await pestana(pc, "settings");
   await pc.click("[data-dat-buscar]");
   await esperarTexto(pc, /Encontrados \d+ con números o estados/, "temas encontrados");
   await pc.fill("#filtroTemas", "enchufe");
@@ -504,11 +517,13 @@ await paso("estados ON/OFF y conexión en el panel del enchufe: «Usar», al rev
   const k = st.paneles.paneles[num].datos.find((d) => d.nombre === "Enchufe").clave;
   await fotoApartado(pc, "#datBox", "datos-estados");
   // Alarma cuando esté apagado, al momento.
+  await pestana(pc, "alarms");
   await pc.selectOption(`#detail [data-est-cuando="${k}"]`, "0");
   await esperarTexto(pc, /Avisará con «Apagado»/, "aviso guardado");
   await ha.publishAsync("stat/enchufe/POWER", "OFF", { retain: true });
   await esperarTexto(movil, /Enchufe del taller · Enchufe: Apagado/, "la alarma en el móvil");
   await fotoApartado(pc, "#detail .sheet-b", "panel-estados");
+  await pestana(pc, "history");
   await pc.locator("#chartList").scrollIntoViewIfNeeded();
   await sleep(600);
   await pc.locator("#chartList").screenshot({ path: path.join(out, "graficas-estados.png") });
@@ -545,6 +560,7 @@ await paso("encender y apagar un Shelly desde la tarjeta del móvil: propone el 
   await shelly.subscribeAsync("shellyplug01/command/#");
   await pc.click("#cards .name-btn:text('Enchufe del taller')");
   await sleep(300);
+  await pestana(pc, "settings");
   await pc.click("[data-dat-add]");
   const i = (await pc.locator("#datLista .est-d").count()) - 1;
   await fila(pc, i, "tipo").selectOption("estado");
@@ -597,6 +613,7 @@ await paso("al reiniciar el servidor se acuerda de todo y las pantallas vuelven 
 await paso("quitar el panel del enchufe desde el móvil", async () => {
   await movil.click("#cards .name-btn:text('Enchufe del taller')");
   await sleep(300);
+  await pestana(movil, "settings");
   await movil.click("[data-panel-quitar]");
   await movil.click("[data-panel-quitar]");
   await esperarTexto(movil, /Panel «Enchufe del taller» quitado/, "aviso");

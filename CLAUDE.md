@@ -61,7 +61,7 @@ codigo/                 npm workspaces: npm install, npm test, npm run build
     test/               node --test; nodo-falso.mjs is a simulated Meshtastic node (real protobuf) over TCP or a
                         virtual serial port; aedes is an MQTT broker in memory; mosquitto.test.mjs needs Mosquitto
   herramientas/         pantalla-servidor.mjs (end to end with Playwright), vistazo.mjs (screenshots of every section),
-                        scroll.mjs (the scroll of the sheet and Settings must not move),
+                        scroll.mjs (the scroll of the sheet and Settings must not move), pestanas.mjs (the sheet's tabs),
                         docker-prueba.mjs (the image with compose): see herramientas/LEEME.md
 Dockerfile docker/      the image and compose.yaml
 .github/workflows/      ci.yml (tests on Node 22 and 24, build, image amd64+arm64) and release.yml (image to ghcr.io)
@@ -95,6 +95,11 @@ The engine gets the state object `S` (see `estadoInicial()`) and hooks; the app 
   database; Tailscale Funnel is refused.
 - **History**: a year by default; nothing in the normal path goes through the whole readings table (the total is in
   memory, the CSV comes out in blocks).
+- **The sheet has tabs** (Node, Alarms, History, Settings: `sheetTabs()` in `sheet.js`; none for what doesn't apply).
+  Every panel is rendered and the inactive ones are hidden by CSS (`data-tab` on the dialog), so drafts, typed values
+  and id lookups (`#datBox`, `[data-cur]`…) keep working and the repaint check doesn't depend on the tab. The last tab
+  is in `localStorage["talaia.sheetTab"]`; if it doesn't exist for that sheet, the first one. The charts are only drawn
+  while History shows. `herramientas/pestanas.mjs` checks it.
 - **Repainting keeps the scroll**: the parts that arrive (`active`, `cfg`…) are not specific to the sheet's node, so
   `renderSheet()` skips the repaint when its HTML is the same as the last one (`{ force: true }` when opening it) and,
   when it does repaint, puts `.sheet-b` back where it was (`holdScroll`/`releaseScroll`: the charts fill in later and

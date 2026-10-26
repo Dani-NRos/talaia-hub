@@ -1,7 +1,7 @@
 // A look at the screen: every section on a computer and on a phone, by day and at night, with a simulated node
 // (a watched sensor with an alarm, the receiver, a neighbour). To review the design, not to test behaviour.
 // Usage: npm run build && node herramientas/vistazo.mjs <output folder> [views…] [--en]
-// Views: the sections (Settings, each of its parts), and also "sheet" (the sensor's sheet, whole), "receiver" (the
+// Views: the sections (Settings, each of its parts), and also "sheet" (the sensor's sheet, a picture of each tab), "receiver" (the
 // receiver's sheet, with what it sends to the mesh), "full" (the sensor full screen), "automation" (the editor of an
 // automation with every kind of step) and "signin" (making the first user, and signing in).
 import fs from "node:fs";
@@ -120,8 +120,15 @@ for (const size of Object.keys(SIZES)) {
         await sleep(200);
         await page.click(`#cards .name-btn[data-open="${v === "sheet" ? CASETA : ME}"]`);
         await sleep(600);
-        await page.addStyleTag({ content: "dialog.sheet { max-height: none !important; } .sheet-b { overflow: visible !important; }" });
-        await page.locator("#detail").screenshot({ path: file });
+        // One picture for each tab of the sheet; the limit on its height is lifted only for the picture (with it
+        // lifted the tabs can fall outside the window, and they could not be pressed).
+        for (const tab of await page.evaluate(() => [...document.querySelectorAll("#detail [role=tab]")].map((b) => b.dataset.sheetTab))) {
+          await page.click(`#detail [data-sheet-tab="${tab}"]`);
+          await sleep(600);
+          const style = await page.addStyleTag({ content: "dialog.sheet { max-height: none !important; } .sheet-b { overflow: visible !important; }" });
+          await page.locator("#detail").screenshot({ path: file.replace(/\.png$/, `-${tab}.png`) });
+          await style.evaluate((e) => e.remove());
+        }
         await page.keyboard.press("Escape");
         await sleep(200);
         continue;

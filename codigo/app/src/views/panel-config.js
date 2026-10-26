@@ -455,7 +455,7 @@ export async function createPanel(openSheet) {
   ctx.toast(res.toast);
   ctx.render();
   if (!S().nodes.has(res.num)) return $("#detail").close();
-  openSheet(res.num);
+  openSheet(res.num, { tab: "settings" }); // its data are there
   $("#datBox")?.scrollIntoView({ block: "start" });
 }
 
