@@ -4,6 +4,8 @@ import { ctx } from "../ctx.js";
 import { t } from "../i18n.js";
 import { $, $$, esc, setHTML, fitSame, LS, ICON } from "../ui.js";
 import { requestBlock, positionBlock, switchHTML } from "./node-parts.js";
+import { shownKeys, cardMetric } from "./metric-order.js";
+import { enableDrag, isDragging } from "../order-drag.js";
 import { metricMeta, sortMetrics, fmtValue, fmtNum, fmtLimit } from "@talaia/nucleo/metrics.js";
 import { seriesKey, trendKey, estadoKey } from "@talaia/nucleo/motor.js";
 import { MIN, hhmm, ago, stamp, dur, isNum, hoursText } from "@talaia/nucleo/textos.js";
@@ -143,9 +145,10 @@ function cardHTML(num) {
   const rules = S.cfg.watched[num]?.rules || {};
   const [st, stLabel] = panelState(num);
   if (S.ui.collapsed[num]) return `<article class="card min st-${st}" data-open="${num}">${cardHead(num, n, st, stLabel, true)}</article>`;
-  const keys = sortMetrics(Object.keys(n.metrics).filter((k) => !metricMeta(k).minor));
+  const keys = shownKeys(num);
   const readings = keys.map((k) => readingHTML(num, n, k, rules)).join("");
-  const sparkMetric = ["temperature", "batteryLevel", "relativeHumidity"].find((k) => n.metrics[k]) || keys.find((k) => !metricMeta(k).estados) || keys[0];
+  // The chart on the card: the one chosen for this panel, otherwise one picked from what it has.
+  const sparkMetric = cardMetric(num, keys) || ["temperature", "batteryLevel", "relativeHumidity"].find((k) => n.metrics[k]) || keys.find((k) => !metricMeta(k).estados) || keys[0];
   const series = S.recent.get(seriesKey(num, sparkMetric)) || [];
   const spark = sparkMetric
     ? `<div class="spark-wrap"><span class="spark-cap">${esc(t("card.spark", { label: metricMeta(sparkMetric).label }))}</span>${metricMeta(sparkMetric).estados ? ctx.sparkStateHTML(series, sparkMetric, n.metrics[sparkMetric]) : ctx.sparkHTML(series, sparkMetric, rules[sparkMetric])}</div>`
@@ -159,7 +162,6 @@ function cardHTML(num) {
     </article>`;
 }
 
-let drag = null; // a card being dragged while ordering
 
 export function renderCards() {
   const { S } = ctx;
@@ -178,7 +180,7 @@ export function renderCards() {
     return;
   }
   if (S.ordering) {
-    if (drag) return; // not repainted while dragging
+    if (isDragging()) return; // not repainted while dragging
     setHTML(el, `<ol class="ord-list" aria-label="${esc(t("dash.orderList"))}">${nums.map((num, i) => {
       const n = ctx.motor.node(num), name = displayName(n);
       return `<li class="ord-row" data-num="${num}"><span class="ord-pos">${i + 1}</span><span class="tag sm">${esc(n.short)}</span><span class="ord-n">${esc(name)}</span>
@@ -243,40 +245,11 @@ export function moveCard(num, dir) {
   const b = $(`[data-move="${num}"][data-dir="${dir}"]`);
   if (b && !b.disabled) b.focus(); else $(`[data-move="${num}"][data-dir="${-dir}"]`)?.focus();
 }
-function renumber(list) {
-  [...list.children].forEach((row, i, all) => {
-    row.querySelector(".ord-pos").textContent = String(i + 1);
-    row.querySelector('[data-dir="-1"]').disabled = i === 0;
-    row.querySelector('[data-dir="1"]').disabled = i === all.length - 1;
-  });
-}
-document.addEventListener("pointerdown", (ev) => {
-  const h = ev.target.closest?.("[data-drag]");
-  if (!h || !ctx.S?.ordering) return;
-  const row = h.closest(".ord-row");
-  ev.preventDefault();
-  h.setPointerCapture(ev.pointerId);
-  drag = { row, list: row.parentElement, y0: ev.clientY };
-  row.classList.add("dragging");
+enableDrag({
+  handle: "[data-drag]",
+  active: () => ctx.S?.ordering,
+  onDrop(list) {
+    setOrder([...list.children].map((r) => Number(r.dataset.num)));
+    renderCards();
+  },
 });
-document.addEventListener("pointermove", (ev) => {
-  if (!drag) return;
-  const { row, list } = drag;
-  let dy = ev.clientY - drag.y0;
-  // Past half of the neighbouring row, they swap places.
-  const next = row.nextElementSibling, prev = row.previousElementSibling;
-  if (dy > 0 && next && dy > next.offsetHeight / 2) { list.insertBefore(next, row); drag.y0 += next.offsetHeight; dy = ev.clientY - drag.y0; renumber(list); }
-  else if (dy < 0 && prev && -dy > prev.offsetHeight / 2) { list.insertBefore(row, prev); drag.y0 -= prev.offsetHeight; dy = ev.clientY - drag.y0; renumber(list); }
-  row.style.transform = `translateY(${dy}px)`;
-});
-function endDrag() {
-  if (!drag) return;
-  const { row, list } = drag;
-  row.style.transform = "";
-  row.classList.remove("dragging");
-  drag = null;
-  setOrder([...list.children].map((r) => Number(r.dataset.num)));
-  renderCards();
-}
-document.addEventListener("pointerup", endDrag);
-document.addEventListener("pointercancel", endDrag);

@@ -5,6 +5,8 @@ import { t } from "../i18n.js";
 import { $, $$, esc, setHTML, fitSame, ICON } from "../ui.js";
 import { chartSVG, stateSpans, stateSummary, stateSVG } from "../charts.js";
 import { switchHTML } from "./node-parts.js";
+import { shownKeys, ordering, editorHTML, cardButton, orderButton } from "./metric-order.js";
+import { isDragging } from "../order-drag.js";
 import { panelState, metaLine, stateRuleText, trendShort, displayName } from "./dashboard.js";
 import { metricMeta, sortMetrics, fmtValue, fmtNum, fmtLimit } from "@talaia/nucleo/metrics.js";
 import { trendKey, estadoKey } from "@talaia/nucleo/motor.js";
@@ -17,6 +19,7 @@ let wakeLock = null, chartsTimer = null;
 
 export async function openFull(num) {
   const { S } = ctx;
+  S.metricOrder = null;
   S.full = { num, range: S.full?.num === num ? S.full.range : "24h" };
   // Real full screen (without the system bars). Asked for before opening the view: whatever enters the top layer
   // last stays on top, and the other way round the page would cover the view.
@@ -34,6 +37,7 @@ export async function openFull(num) {
 
 /** On closing the view (its "close" event). */
 export function closeFull() {
+  if (ctx.S.full && ctx.S.metricOrder === ctx.S.full.num) ctx.S.metricOrder = null;
   ctx.S.full = null;
   if (document.fullscreenElement) document.exitFullscreen?.().catch(() => {});
   wakeLock?.release?.().catch(() => {});
@@ -43,7 +47,7 @@ export function closeFull() {
 function tiles(num) {
   const { S, motor } = ctx;
   const n = motor.node(num), w = S.cfg.watched[num] || {};
-  const keys = sortMetrics(Object.keys(n.metrics).filter((k) => !metricMeta(k).minor));
+  const keys = shownKeys(num);
   if (!keys.length) return `<p class="hint">${esc(t(num < 0 ? "sheet.noDataPanel" : "card.noDataNode"))}</p>`;
   return keys.map((k) => {
     const m = metricMeta(k), r = (w.rules || {})[k] || {}, cur = n.metrics[k];
@@ -68,18 +72,19 @@ export function renderFull() {
   const { num, range } = S.full;
   const n = motor.node(num);
   const [st, stLabel] = panelState(num);
-  const keys = sortMetrics(Object.keys(n.metrics).filter((k) => !metricMeta(k).minor));
+  const keys = shownKeys(num, "charts");
   const seg = Object.keys(RANGES).map((r) => `<button type="button" data-full-range="${r}" aria-pressed="${r === range}">${esc(rangeLabel(r))}</button>`).join("");
-  const charts = keys.map((k) => `<figure class="nv-chart" data-m="${k}"><figcaption><span>${esc(metricMeta(k).label)}</span><span class="mm" data-fmm="${k}"></span></figcaption><div class="chart-box"></div></figure>`).join("");
+  const charts = keys.map((k) => `<figure class="nv-chart" data-m="${k}"><figcaption><span>${esc(metricMeta(k).label)}</span><span class="mm" data-fmm="${k}"></span>${cardButton(num, k)}</figcaption><div class="chart-box"></div></figure>`).join("");
   view().setAttribute("aria-label", `${displayName(n)} · ${t("card.full")}`);
   view().innerHTML = `<div class="nv-h">
       <button class="icon-btn" data-close aria-label="${esc(t("full.close"))}">${ICON.close}</button>
       <span class="tag">${esc(n.short)}</span>
       <div class="nv-t"><h2>${esc(displayName(n))}</h2><p class="meta" data-full-meta>${esc(metaLine(n))}</p></div>
       <span class="st st-${st}" data-full-st>${esc(stLabel)}</span>
+      ${orderButton(num)}
       <div class="seg" role="group" aria-label="${esc(t("full.period"))}">${seg}</div>
     </div>
-    <div class="nv-b"><div data-full-al>${alarms(num)}</div><div class="nv-tiles" data-full-tiles>${tiles(num)}</div><div class="nv-charts">${charts}</div></div>`;
+    <div class="nv-b"><div data-full-al>${alarms(num)}</div>${ordering(num) ? editorHTML(num) : `<div class="nv-tiles" data-full-tiles>${tiles(num)}</div><div class="nv-charts">${charts}</div>`}</div>`;
 }
 
 /** Big readings that fit in their tiles: all the figures at the same size, and the ON/OFF states at theirs. */
@@ -105,6 +110,14 @@ export function refreshFull(num) {
   const al = $("[data-full-al]");
   if (al) setHTML(al, alarms(S.full.num));
   if (num != null) { clearTimeout(chartsTimer); chartsTimer = setTimeout(drawFullCharts, 2000); }
+}
+
+/** After the layout changed (here or on another screen): the whole view again, unless a row is being dragged. */
+export function repaintFull() {
+  if (!ctx.S.full || !view().open || isDragging()) return;
+  renderFull();
+  fitTiles();
+  drawFullCharts();
 }
 
 export function setFullRange(range) {

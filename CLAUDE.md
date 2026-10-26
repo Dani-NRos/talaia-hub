@@ -61,7 +61,7 @@ codigo/                 npm workspaces: npm install, npm test, npm run build
     test/               node --test; nodo-falso.mjs is a simulated Meshtastic node (real protobuf) over TCP or a
                         virtual serial port; aedes is an MQTT broker in memory; mosquitto.test.mjs needs Mosquitto
   herramientas/         pantalla-servidor.mjs (end to end with Playwright), vistazo.mjs (screenshots of every section),
-                        scroll.mjs (the scroll of the sheet and Settings must not move), pestanas.mjs (the sheet's tabs),
+                        scroll.mjs (the scroll of the sheet and Settings must not move), pestanas.mjs (the sheet's tabs), orden.mjs (order of data and charts),
                         docker-prueba.mjs (the image with compose): see herramientas/LEEME.md
 Dockerfile docker/      the image and compose.yaml
 .github/workflows/      ci.yml (tests on Node 22 and 24, build, image amd64+arm64) and release.yml (image to ghcr.io)
@@ -100,6 +100,12 @@ The engine gets the state object `S` (see `estadoInicial()`) and hooks; the app 
   and id lookups (`#datBox`, `[data-cur]`…) keep working and the repaint check doesn't depend on the tab. The last tab
   is in `localStorage["talaia.sheetTab"]`; if it doesn't exist for that sheet, the first one. The charts are only drawn
   while History shows. `herramientas/pestanas.mjs` checks it.
+- **A panel's layout** (`layout` of `cfg.paneles[num]` in `paneles.js`, order `panelLayout`): `{ data, charts, card }`,
+  the order of its readings (card, sheet, full screen) and of its charts (sheet, full screen) and the chart on its
+  card, kept by the server for any panel or watched node and sent in `S.paneles`. What isn't in a list goes last, in
+  the fixed order (`sortMetrics(keys, order)`). The editor is `views/metric-order.js` (arrows, and `order-drag.js` for
+  dragging, shared with the board's order); the screen applies a change at once and the server's echo repaints only
+  if it differs (`layoutsSig` in `app.js`). `herramientas/orden.mjs` checks it.
 - **Repainting keeps the scroll**: the parts that arrive (`active`, `cfg`…) are not specific to the sheet's node, so
   `renderSheet()` skips the repaint when its HTML is the same as the last one (`{ force: true }` when opening it) and,
   when it does repaint, puts `.sheet-b` back where it was (`holdScroll`/`releaseScroll`: the charts fill in later and

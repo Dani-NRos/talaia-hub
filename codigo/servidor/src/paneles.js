@@ -512,6 +512,26 @@ export function crearPaneles({ S, motor, eventos, almacen, registro, receptor, b
       contar();
       return { ok: true, toast: tx(nombre ? "s.pan.renamed" : "s.pan.renamedBack", { name: ahora }) };
     },
+    /**
+     * How a panel shows its data: `layout` = { data: [keys], charts: [keys], card: key } — the order of its readings
+     * (card, sheet and full screen), the order of its charts (sheet and full screen) and the chart on its card.
+     * Only what is given changes; `card: null` goes back to the automatic one. Metrics that are not in a list go last.
+     */
+    ordenar(num, { data, charts, card } = {}) {
+      if (num < 0) { if (!panel(num)) return { ok: false, error: tx("s.pan.gone") }; }
+      else if (!S.nodes.has(num)) return { ok: false, error: tx("s.pan.noNode") };
+      const lista = (v) => [...new Set((Array.isArray(v) ? v : []).filter((k) => typeof k === "string" && k && k.length <= 40))].slice(0, 200);
+      const p = (cfg.paneles[num] ||= { datos: [] });
+      const lay = { ...(p.layout || {}) };
+      if (data !== undefined) lay.data = lista(data);
+      if (charts !== undefined) lay.charts = lista(charts);
+      if (card !== undefined) { if (typeof card === "string" && card && card.length <= 40) lay.card = card; else delete lay.card; }
+      for (const k of ["data", "charts"]) if (!lay[k]?.length) delete lay[k];
+      if (Object.keys(lay).length) p.layout = lay; else delete p.layout;
+      guardar();
+      contar();
+      return { ok: true };
+    },
     /** Qué es un panel sin nodo (Shelly, Tasmota…): solo la etiqueta. */
     tipoPanel(num, tipo) {
       const p = panel(num);

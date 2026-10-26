@@ -298,3 +298,35 @@ test("talaia --salud: 0 if the screen answers on its port (Docker's health check
   const libre = await new Promise((r) => { const s = net.createServer().listen(0, "127.0.0.1", () => { const p = s.address().port; s.close(() => r(p)); }); });
   assert.equal(await salud(libre), 1);
 });
+
+test("órdenes de la disposición: orden de datos y de gráficas y gráfica de la tarjeta, por panel, en el servidor", async (t) => {
+  const { base, talaia } = await montar(t);
+  let r = await orden(base, { orden: "crearPanel", nombre: "Enchufe del taller", tipo: "tasmota" });
+  assert.equal(r.json.num, -1);
+  talaia.acciones.vigilar(CASETA);
+  // A panel with a node and one without; what is sent is what the screens get, in the «paneles» part.
+  r = await orden(base, { orden: "panelLayout", num: CASETA, data: ["humidity", "temperature"], charts: ["temperature"], card: "humidity" });
+  assert.equal(r.json.ok, true);
+  assert.deepEqual(talaia.S.paneles.paneles[CASETA].layout, { data: ["humidity", "temperature"], charts: ["temperature"], card: "humidity" });
+  // Only what is given changes; null goes back to the automatic card chart; an empty list, to the fixed order.
+  r = await orden(base, { orden: "panelLayout", num: CASETA, card: null, charts: [] });
+  assert.equal(r.json.ok, true);
+  assert.deepEqual(talaia.S.paneles.paneles[CASETA].layout, { data: ["humidity", "temperature"] });
+  r = await orden(base, { orden: "panelLayout", num: CASETA, data: [] });
+  assert.equal(talaia.S.paneles.paneles[CASETA].layout, undefined);
+  // Repeated and wrong things are tidied up or refused.
+  r = await orden(base, { orden: "panelLayout", num: -1, data: ["mq1", "mq1", "mq2"] });
+  assert.deepEqual(talaia.S.paneles.paneles[-1].layout, { data: ["mq1", "mq2"] });
+  for (const mal of [{ data: "mq1" }, { data: [1] }, { charts: [null] }, { card: 3 }, { num: "x" }]) {
+    r = await orden(base, { orden: "panelLayout", num: -1, ...mal });
+    assert.equal(r.status, 400, JSON.stringify(mal));
+  }
+  r = await orden(base, { orden: "panelLayout", num: -77, data: ["a"] });
+  assert.match(r.json.error, /ya no existe/);
+  r = await orden(base, { orden: "panelLayout", num: 0x12345678, data: ["a"] });
+  assert.equal(r.json.ok, false); // a node this server does not know
+  // It survives restarting (it is in the saved configuration) and goes when the panel does.
+  assert.deepEqual(JSON.parse(JSON.stringify(talaia.S.paneles.paneles[-1].layout)), { data: ["mq1", "mq2"] });
+  r = await orden(base, { orden: "quitarPanel", num: -1 });
+  assert.equal(talaia.S.paneles.paneles[-1], undefined);
+});

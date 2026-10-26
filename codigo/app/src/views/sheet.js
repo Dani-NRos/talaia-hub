@@ -8,6 +8,8 @@ import { chartSVG, stateSpans, stateSummary, stateSVG } from "../charts.js";
 import { requestBlock, requestStatus, positionBlock, switchHTML } from "./node-parts.js";
 import { metaLine, displayName, saveCardUi } from "./dashboard.js";
 import { panelSections, forgetDraftsExcept, hasDrafts } from "./panel-config.js";
+import { orderedKeys, ordering, editorHTML, cardButton, orderButton } from "./metric-order.js";
+import { isDragging } from "../order-drag.js";
 import { metricMeta, sortMetrics, fmtValue, fmtWithUnit, fmtNum, fmtLimit } from "@talaia/nucleo/metrics.js";
 import { askKey, hexId, trendKey, estadoKey } from "@talaia/nucleo/motor.js";
 import { relays, snrQuality, loraSf, weakest, UNKNOWN_NODE, PRESET_NAME } from "@talaia/nucleo/route.js";
@@ -92,7 +94,7 @@ export function trendNowText(num, k, rule) {
 function trendMetrics(num) {
   const { S } = ctx;
   const n = S.nodes.get(num), w = S.cfg.watched[num];
-  return sortMetrics(new Set([...Object.keys(n?.metrics || {}), ...Object.keys(w?.rules || {})])).filter((k) => !metricMeta(k).minor && !metricMeta(k).estados);
+  return orderedKeys(num, new Set([...Object.keys(n?.metrics || {}), ...Object.keys(w?.rules || {})])).filter((k) => !metricMeta(k).minor && !metricMeta(k).estados);
 }
 
 /** sel: the metric left chosen in the form (the one just saved). */
@@ -245,6 +247,7 @@ function alarmsSection(num, n, keys) {
 export function openSheet(num, { tab = null } = {}) {
   const { S } = ctx;
   forgetDraftsExcept(num);
+  S.metricOrder = null;
   // The tab: the one asked for or, if none, the last one used on this device (`currentTab` falls back if this sheet lacks it).
   S.detail = { num, range: S.detail?.num === num ? S.detail.range : "24h", tab: tab || LS.get(TAB_KEY, null) };
   renderSheet({ force: true }); // opening it: what was typed and not saved is rebuilt from the drafts
@@ -267,10 +270,13 @@ export function setSheetRange(range) {
 /** Paints the sheet; false if there was nothing new to paint (unless `force`: when it is being opened). */
 export function renderSheet({ force = false } = {}) {
   const { S } = ctx;
+  if (isDragging()) return false; // a row of the order editor is in the user's hand
   const { num } = S.detail;
   const n = ctx.motor.node(num);
   const w = S.cfg.watched[num];
-  const keys = sortMetrics(new Set([...Object.keys(n.metrics), ...Object.keys(w?.rules || {})]));
+  const all = new Set([...Object.keys(n.metrics), ...Object.keys(w?.rules || {})]);
+  const keys = orderedKeys(num, all); // the readings: the alarms table and the rest
+  const chartKeys = orderedKeys(num, all, "charts");
   const noNode = num < 0; // a panel of an MQTT device: no requests, route or location
   const tags = (noNode ? [`${TIPOS_PANEL[n.tipoPanel]?.label || "MQTT"}`, t("sheet.tag.mqtt")]
     : [hexId(num), n.hw ? n.hw.replaceAll("_", " ") : "", n.num === S.myNode ? t("sheet.tag.receiver") : ""]).filter(Boolean).join(" · ");
@@ -288,9 +294,9 @@ export function renderSheet({ force = false } = {}) {
   }
   if (w) panels.alarms = alarmsSection(num, n, keys);
   const range = S.detail.range;
-  panels.history = (w ? "" : watchCta) + `<section class="blk"><div class="blk-h"><h3>${esc(t("sheet.history"))}</h3><div class="seg" role="group" aria-label="${esc(t("sheet.period"))}">
+  panels.history = (w ? "" : watchCta) + `<section class="blk"><div class="blk-h"><h3>${esc(t("sheet.history"))}</h3>${n.metrics && Object.keys(n.metrics).length ? orderButton(num) : ""}<div class="seg" role="group" aria-label="${esc(t("sheet.period"))}">
       <button type="button" data-range="24h" aria-pressed="${range === "24h"}">24 h</button><button type="button" data-range="7d" aria-pressed="${range === "7d"}">${esc(t("sheet.days", { n: 7 }))}</button></div></div>
-      <div id="chartList" class="chart-list">${keys.length ? keys.map((k) => `<figure class="chart" data-m="${k}"><figcaption><span>${esc(metricMeta(k).label)}</span><b data-cur="${k}">${n.metrics[k] ? esc(fmtWithUnit(k, n.metrics[k].v)) : "—"}</b><span class="mm" data-mm="${k}"></span></figcaption><div class="chart-box"></div></figure>`).join("") : `<p class="hint">${esc(t(noNode ? "sheet.noDataPanel" : "sheet.noTelemetry"))}</p>`}</div></section>`;
+      ${ordering(num) ? editorHTML(num) : ""}<div id="chartList" class="chart-list"${ordering(num) ? " hidden" : ""}>${keys.length ? chartKeys.map((k) => `<figure class="chart" data-m="${k}"><figcaption><span>${esc(metricMeta(k).label)}</span><b data-cur="${k}">${n.metrics[k] ? esc(fmtWithUnit(k, n.metrics[k].v)) : "—"}</b><span class="mm" data-mm="${k}"></span>${n.metrics[k] ? cardButton(num, k) : ""}</figcaption><div class="chart-box"></div></figure>`).join("") : `<p class="hint">${esc(t(noNode ? "sheet.noDataPanel" : "sheet.noTelemetry"))}</p>`}</div></section>`;
   // Watched: its name here, its MQTT data and, on the receiver, what goes out to the mesh; and stopping watching it.
   if (w) {
     panels.settings = panelSections(num) + (noNode

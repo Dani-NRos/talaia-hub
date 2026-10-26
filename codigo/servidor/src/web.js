@@ -108,6 +108,12 @@ function crearOrdenes(talaia) {
     crearPanel: ({ nombre, tipo }) => { exigir(typeof nombre === "string" && typeof tipo === "string", "panel"); return talaia.paneles.crearPanel({ nombre, tipo }); },
     quitarPanel: ({ num }) => { exigir(esPanel(num), "num"); return talaia.paneles.quitarPanel(num); },
     renombrar: ({ num, nombre }) => { exigir(esPanel(num), "num"); exigir(typeof nombre === "string", "nombre"); return talaia.paneles.renombrar(num, nombre); },
+    panelLayout: ({ num, data, charts, card }) => {
+      exigir(esPanel(num), "num");
+      for (const [k, v] of [["data", data], ["charts", charts]]) if (v !== undefined) exigir(Array.isArray(v) && v.length <= 200 && v.every((x) => typeof x === "string"), k);
+      if (card !== undefined) exigir(card === null || typeof card === "string", "card");
+      return talaia.paneles.ordenar(num, { data, charts, card });
+    },
     tipoPanel: ({ num, tipo }) => { exigir(esPanel(num), "num"); exigir(typeof tipo === "string", "tipo"); return talaia.paneles.tipoPanel(num, tipo); },
     datosPanel: ({ num, datos, conexion }) => {
       exigir(esPanel(num), "num");

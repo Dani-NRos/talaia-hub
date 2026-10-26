@@ -1,17 +1,18 @@
 # Changes
 
-## Unreleased (2.2.0 when it is)
-
-- **The sheet has tabs**: *Node*, *Alarms*, *History* and *Settings* (a panel without a node has no *Node*; a node that
-  isn't watched has *Node* and *History*). The bar stays under the header while the body scrolls, the arrow keys move
-  between tabs, each device remembers the last one used, and what was typed but not saved survives changing tabs.
-  A panel just created opens on *Settings*.
-
-## 2.1.1
+## 2.2.0
 
 - **The scroll no longer jumps to the top.** A node's sheet went back to the top every time a reading arrived from
   *another* node that has an alarm on, and when you changed its own limits. Now it only repaints when something it
   shows has changed, and keeps where you were when it does. Settings keeps its place too when it is painted again.
+- **The sheet has tabs**: *Node*, *Alarms*, *History* and *Settings* (a panel without a node has no *Node*; a node that
+  isn't watched has *Node* and *History*). The bar stays under the header while the body scrolls, the arrow keys move
+  between tabs, each device remembers the last one used, and what was typed but not saved survives changing tabs.
+  A panel just created opens on *Settings*.
+- **Choose the order of a panel's data and charts, and the chart on its card.** *Reorder* (in full screen and in the
+  sheet's *History*) has the readings and the charts in two lists, with arrows and a handle to drag. The readings keep
+  their order on the card, the sheet and the full screen; the charts, in the sheet and the full screen. *On the card*,
+  on each chart, picks the one the Dashboard card shows. It is kept by the server, per panel, and every screen sees it.
 
 ## 2.1.0
 

@@ -9,7 +9,8 @@ import { renderLog } from "./views/alarms.js";
 import { boardHTML, renderCards, toggleCard, toggleAllCards, moveCard, watchCardsWidth } from "./views/dashboard.js";
 import { openSheet, onSheetClose, renderSheet, drawCharts, refreshSheetLive, refreshRequests, patchRequestStatus, legHops, setSheetRange, setSheetTab, sheetTabKey, resizeSheet, trendFormFill, addTrend, removeTrend, saveStateAlarm, saveRuleFromInput, watch, unwatch, isSheetOpen } from "./views/sheet.js";
 import { patchPanels, data, meshOut, newPanelSheet, createPanel } from "./views/panel-config.js";
-import { openFull, closeFull, refreshFull, setFullRange, resizeFull } from "./views/fullscreen.js";
+import { openFull, closeFull, refreshFull, setFullRange, resizeFull, repaintFull } from "./views/fullscreen.js";
+import { setOrdering, moveMetric, setCardChart } from "./views/metric-order.js";
 import { loraSf } from "@talaia/nucleo/route.js";
 import { FILTERS } from "./meshsearch.js";
 import { conectarServidor, crearStoreRemoto } from "./remoto.js";
@@ -67,6 +68,12 @@ const { ack, unacked, hopName } = motor;
 let servidor = null; // modo «Servidor»: la conexión con él
 const orden = (datos) => servidor.orden(datos);
 Object.assign(ctx, { S, motor, orden, toast: (m) => toast(m), render: () => render(), sparkHTML, sparkStateHTML });
+/** The layout of a panel changed (here or on another screen): what shows it, again. */
+ctx.repaintMetrics = () => {
+  renderCards();
+  if (S.detail && $("#detail").open && renderSheet()) drawCharts();
+  repaintFull();
+};
 
 /* ───────────── persistencia: solo lo de este aparato ───────────── */
 function saveSettings() { LS.set("talaia.settings", S.settings); }
@@ -214,6 +221,10 @@ document.addEventListener("click", async (ev) => {
   if ("order" in ds) { S.ordering = true; renderCards(); return $("#cards .ord-row [data-move]")?.focus(); }
   if ("orderDone" in ds) { S.ordering = false; renderCards(); return toast(tr("dash.orderSaved")); }
   if ("move" in ds) return moveCard(Number(ds.move), Number(ds.dir));
+  if ("moOpen" in ds) return setOrdering(Number(ds.moOpen));
+  if ("moDone" in ds) return setOrdering(null);
+  if ("moMove" in ds) return moveMetric(S.metricOrder, ds.moMove, ds.key, Number(ds.dir));
+  if ("cardChart" in ds) return setCardChart(t.closest("#nodeview") ? S.full?.num : S.detail?.num, ds.cardChart);
   if ("full" in ds) return openFull(Number(ds.full));
   if ("fullRange" in ds) return setFullRange(ds.fullRange);
   if ("routeMap" in ds) { const num = Number(ds.routeMap); return S.traces[num] && openMap(num, { to: num, ...S.traces[num] }); }
@@ -362,6 +373,7 @@ function anadirReciente(r) {
   while (arr.length && arr[0].t < Date.now() - 26 * HOUR) arr.shift();
   S.recent.set(key, arr);
 }
+const layoutsSig = (pp) => JSON.stringify(Object.entries(pp?.paneles || {}).map(([k, v]) => [k, v.layout]).filter(([, l]) => l));
 function aplicarPartes(p) {
   if ("cfg" in p) S.cfg = p.cfg;
   if ("active" in p) {
@@ -371,7 +383,9 @@ function aplicarPartes(p) {
   }
   for (const k of ["log", "channels", "myNode", "myUser", "lora", "traces", "meshLast", "link", "device", "trouble", "diag", "mqtt", "usuarios", "automations", "meshOrders"]) if (k in p) S[k] = p[k];
   if ("paneles" in p) {
+    const antes = layoutsSig(S.paneles);
     S.paneles = p.paneles;
+    if (layoutsSig(S.paneles) !== antes) S.layoutCambio = true; // another screen changed an order
     registrarMetricas(metasDe(S.paneles?.paneles)); // los datos MQTT, como métricas con su nombre y su unidad
   }
   if ("req" in p) S.req = new Map(p.req.map((r) => [askKey(r.num, r.type), r]));
@@ -395,6 +409,7 @@ function refrescarAbiertos(p) {
     }
     if ("paneles" in p || "mqtt" in p || "channels" in p) patchPanels(); // values, names of the brokers, channels
   }
+  if (S.layoutCambio) { S.layoutCambio = false; ctx.repaintMetrics(); }
   if (S.full && (p.nodes || p.rows || "active" in p)) refreshFull(S.full.num);
   if ((S.detail || S.full) && ("paneles" in p || p.nodes)) patchSwitches();
   if (isView("settings")) {

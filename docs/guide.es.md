@@ -188,6 +188,12 @@ son los del servidor: todos tus aparatos ven lo mismo, y si das *Enterado* en un
   y *Ajustes* (nombre, datos MQTT, conexión, lo que sale a la malla, y dejar de vigilar o quitar el panel). Uno que no
   se vigila solo tiene *Nodo* e *Histórico*. Cada aparato recuerda la última pestaña que usó, y lo que hayas escrito
   sin guardar sigue ahí al cambiar de pestaña.
+- **El orden de los datos de un panel** lo eliges tú: *Ordenar* (en la pantalla completa y en el *Histórico* de la
+  ficha) abre dos listas, los datos y las gráficas, cada una con flechas y un asa para arrastrar. El orden de los datos
+  es el mismo en la tarjeta, la ficha y la pantalla completa; el de las gráficas, en la ficha y la pantalla completa.
+  Cada gráfica tiene un botón *En la tarjeta*: es la gráfica que enseña la tarjeta del panel en el Tablero (púlsalo
+  otra vez para que Talaia elija una). Lo guarda el servidor, por panel, así que todas las pantallas ven lo mismo; lo
+  que aún no tiene sitio (un dato nuevo) va al final.
 - **Ajustes**, en apartados: *Malla* (sin señal para los nodos nuevos, avisos y órdenes por la malla), *MQTT* (brokers,
   usuarios del broker de este equipo, Home Assistant), *Receptor* (estado, nodo, radio, canales, diagnóstico), *Sistema*
   (idioma del servidor, histórico, acerca de), *Usuarios* y *Esta pantalla* (idioma, tema claro u oscuro, sonido,

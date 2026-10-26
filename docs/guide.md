@@ -190,6 +190,12 @@ the server's: all your devices see the same, and an *Acknowledge* on one is seen
   MQTT data, connection, what goes out to the mesh, and stop watching or remove the panel). One that isn't watched only
   has *Node* and *History*. Each device remembers the last tab used, and what you've typed but not saved is still there
   when you change tabs.
+- **The order of a panel's data** is yours to choose: *Reorder* (in full screen, and in the sheet's *History*) opens two
+  lists, the readings and the charts, each with arrows and a handle to drag. The order of the readings is the same on
+  the card, the sheet and the full screen; the one of the charts, in the sheet and the full screen. Each chart has an
+  *On the card* button: that is the chart the panel's card on the Dashboard shows (press it again to let Talaia pick
+  one). It's kept by the server, per panel, so every screen sees the same; what has no place yet (a new reading) goes
+  last.
 - **Settings**, in parts: *Mesh* (no signal for new nodes, alerts and orders over the mesh), *MQTT* (brokers, users of
   this machine's broker, Home Assistant), *Receiver* (status, node, radio, channels, diagnostics), *System* (the
   server's language, history, about), *Users* and *This screen* (language, light or dark theme, sound, notifications,

@@ -91,7 +91,16 @@ export function registrarMetricas(metas) {
 
 export const metricMeta = (k) => EXTRA.get(k) || METRICS[k] || { label: k, unit: "", dec: 1, hyst: 0, order: 99 };
 
-export const sortMetrics = (keys) => [...keys].sort((a, b) => metricMeta(a).order - metricMeta(b).order);
+/**
+ * The metrics in the fixed order of `metricMeta`, or, with `order` (the keys in the order a panel chose), those it
+ * mentions first in that order and the rest (new ones that have no place yet) after them in the fixed one.
+ */
+export function sortMetrics(keys, order = null) {
+  const base = [...keys].sort((a, b) => metricMeta(a).order - metricMeta(b).order);
+  if (!order?.length) return base;
+  const pos = new Map(order.map((k, i) => [k, i]));
+  return [...base.filter((k) => pos.has(k)).sort((a, b) => pos.get(a) - pos.get(b)), ...base.filter((k) => !pos.has(k))];
+}
 
 // Thousands grouped only from five digits (1015 hPa, 12 000 lx), as Spanish does: readings look like an instrument's.
 const NF = new Map();

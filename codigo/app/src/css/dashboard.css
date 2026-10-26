@@ -174,3 +174,13 @@
 .tgl:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
 .tgl-t { font: 400 12.5px/1.2 var(--f-body); color: var(--ink-2); }
 @media (max-width: 420px) { .rd-v { font-size: calc(30px * var(--fit, 1)); } .rds { --cg: 18px; --rg: 16px; } }
+
+/* The order of a panel's readings and charts (sheet and full screen): same rows as the board's, in two lists. */
+.mo h3 { margin: 14px 0 6px; font: 600 13px/1.2 var(--f-body); text-transform: uppercase; letter-spacing: .04em; color: var(--ink-2); }
+.mo .ord-list { margin-bottom: 4px; }
+.mo-end { display: flex; justify-content: flex-end; margin-top: 12px; }
+.chip-btn { border: 1px solid var(--line); background: transparent; color: var(--ink-2); border-radius: 999px; padding: 4px 10px; font: 600 12px/1.2 var(--f-body); cursor: pointer; white-space: nowrap; }
+.chip-btn:hover { border-color: var(--accent); color: var(--ink); }
+.chip-btn[aria-pressed="true"] { background: var(--accent); border-color: var(--accent); color: var(--on-accent); }
+.blk-h [data-mo-open] { margin-left: auto; }
+.chart figcaption .chip-btn { margin-left: auto; }

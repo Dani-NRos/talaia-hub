@@ -5,7 +5,10 @@ dialog.full[open] { display: grid; grid-template-rows: auto minmax(0, 1fr); }
 .nv-t { flex: 1 1 200px; min-width: 0; }
 .nv-t h2 { font: 700 clamp(22px, 3vw, 34px)/1.05 var(--f-display); overflow-wrap: anywhere; }
 .nv-h .st { font-size: 15px; }
-.nv-h .seg { margin-left: auto; }
+.nv-h [data-mo-open] { margin-left: auto; }
+.nv-h .seg { flex: none; }
+.nv-chart figcaption .chip-btn { margin-left: auto; }
+.nv-b .mo { max-width: 640px; }
 .nv-b { overflow-y: auto; display: grid; gap: 14px; align-content: start; padding: 16px max(16px, env(safe-area-inset-right, 0px)) calc(20px + env(safe-area-inset-bottom, 0px)) max(16px, env(safe-area-inset-left, 0px)); }
 .nv-b > [data-full-al]:empty { display: none; }
 /* tiles wide enough for big figures; the figures fit them (--fit and --fit-est, from fitTiles) */

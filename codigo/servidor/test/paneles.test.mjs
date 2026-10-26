@@ -371,6 +371,25 @@ test("panel de un nodo: renombrar, datos MQTT junto a los suyos (sin tocar cuán
   assert.match((await talaia.mqtt.quitarBroker("b1")).error, /Lo usa: Caseta huerto \(Temperatura dentro\)/);
 });
 
+test("disposición de un panel: el orden de datos y gráficas y la gráfica de la tarjeta se guardan y llegan a las pantallas", async (t) => {
+  const puerto = await broker(t);
+  const { talaia, almacen } = await montar(t, puerto);
+  const { S, paneles, acciones } = talaia;
+  acciones.vigilar(CASETA);
+  assert.equal(paneles.ordenar(CASETA, { data: ["relativeHumidity", "temperature"], charts: ["temperature", "relativeHumidity"], card: "relativeHumidity" }).ok, true);
+  // Saved in the configuration (it survives restarting) and sent to the screens with the panels.
+  assert.deepEqual(almacen.leer("paneles", null).paneles[CASETA].layout, { data: ["relativeHumidity", "temperature"], charts: ["temperature", "relativeHumidity"], card: "relativeHumidity" });
+  assert.deepEqual(S.paneles.paneles[CASETA].layout.data, ["relativeHumidity", "temperature"]);
+  // A panel that only has this is still a panel of a node: no data, and renaming it and going back leaves the layout alone.
+  assert.deepEqual(S.paneles.paneles[CASETA].datos, []);
+  assert.equal(paneles.renombrar(CASETA, "Huerto").ok, true);
+  assert.equal(paneles.renombrar(CASETA, "").ok, true);
+  assert.equal(S.paneles.paneles[CASETA].layout.card, "relativeHumidity");
+  // Empty it all: nothing is kept.
+  assert.equal(paneles.ordenar(CASETA, { data: [], charts: [], card: null }).ok, true);
+  assert.equal(S.paneles.paneles[CASETA].layout, undefined);
+});
+
 test("la estación de la 1.16 pasa al panel del receptor, con su histórico, y sigue saliendo a la malla", async (t) => {
   const puerto = await broker(t);
   const ha = await cliente(t, puerto);

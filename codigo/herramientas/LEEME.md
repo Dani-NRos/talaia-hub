@@ -19,6 +19,10 @@ Necesitan Playwright con Chromium (no va en el repo: se busca en `PLAYWRIGHT_DIR
 - **`pestanas.mjs [carpeta]`**: las pestañas de la ficha: cuáles tiene cada tipo (nodo vigilado, sin vigilar, panel sin
   nodo), que se recuerda la última, que lo escrito sin guardar sobrevive al cambiar de pestaña, las gráficas a su ancho,
   la barra fija y las flechas del teclado. Sale con 1 si algo falla; con una carpeta, guarda capturas.
+- **`orden.mjs [carpeta]`**: el orden de los datos y de las gráficas de un panel y la gráfica de su tarjeta: el editor
+  (flechas, teclado y arrastre) en pantalla completa y en la ficha, lo que se ve en la tarjeta, la ficha y la pantalla
+  completa, que otra pantalla lo ve al momento y que se queda al recargar (lo guarda el servidor). Sale con 1 si algo
+  falla; con una carpeta, guarda capturas.
 - **`scroll.mjs`**: que el scroll no se mueva: la ficha de un nodo (con su alarma y las lecturas de otro nodo que
   también la tiene) y Ajustes, con el servidor de verdad y un nodo simulado. Sale con 1 si algo falla.
 - **`iconos.mjs`**: dibuja los iconos de la app (`app/pwa/icon-*.png`) con la torre de `app/src/logo.js`.
