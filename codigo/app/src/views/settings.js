@@ -64,7 +64,10 @@ export function renderSettings() {
   if (!tab) return;
   const tabs = TABS.map((k) => `<a href="#/settings/${k}" class="tab"${k === tab ? ' aria-current="page"' : ""}>${esc(t(`set.tab.${k}`))}</a>`).join("");
   const body = { mesh: meshTab, mqtt: mqttTab, receiver: receiverTab, system: systemTab, users: usersTab, screen: screenTab }[tab]();
+  // The same part painted again (something arrived): the page stays where it was. Another part starts at the top.
+  const y = box().querySelector(".tab-b")?.dataset.tab === tab ? window.scrollY : 0;
   box().innerHTML = `<nav class="tabs" aria-label="${esc(t("set.tabs"))}">${tabs}</nav><div class="tab-b" data-tab="${tab}">${body}</div>`;
+  if (y) window.scrollTo(0, y);
   // On a phone not all the tabs fit: the row slides so the current one shows (without moving the page).
   const nav = box().querySelector(".tabs"), cur = nav.querySelector("[aria-current]");
   if (cur && nav.scrollWidth > nav.clientWidth) nav.scrollLeft = Math.max(0, cur.offsetLeft - (nav.clientWidth - cur.offsetWidth) / 2);

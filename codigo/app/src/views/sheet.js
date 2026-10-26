@@ -246,7 +246,7 @@ export function openSheet(num) {
   const { S } = ctx;
   forgetDraftsExcept(num);
   S.detail = { num, range: S.detail?.num === num ? S.detail.range : "24h" };
-  renderSheet();
+  renderSheet({ force: true }); // opening it: what was typed and not saved is rebuilt from the drafts
   if (!isSheetOpen()) sheet().showModal();
   drawCharts();
 }
@@ -263,7 +263,8 @@ export function setSheetRange(range) {
   drawCharts();
 }
 
-export function renderSheet() {
+/** Paints the sheet; false if there was nothing new to paint (unless `force`: when it is being opened). */
+export function renderSheet({ force = false } = {}) {
   const { S } = ctx;
   const { num } = S.detail;
   const n = ctx.motor.node(num);
@@ -292,8 +293,36 @@ export function renderSheet() {
       ? `<section class="blk end"><button class="btn danger-ghost" data-panel-quitar="${num}">${esc(t("sheet.removePanel"))}</button></section>`
       : `<section class="blk end"><button class="btn danger-ghost" id="unwatchBtn" data-unwatch="${num}">${esc(t("sheet.unwatch"))}</button></section>`;
   }
-  sheet().setAttribute("aria-label", displayName(n));
-  sheet().innerHTML = `<div class="sheet-h"><span class="tag">${esc(n.short)}</span><div class="sheet-t"><h2>${esc(displayName(n))}</h2><p class="meta">${esc(tags)}<br>${esc(metaLine(n))}</p></div><button class="icon-btn" data-full="${num}" aria-label="${esc(t("card.fullHint", { name: displayName(n) }))}" title="${esc(t("card.full"))}">${ICON.expand}</button><button class="icon-btn" data-close aria-label="${esc(t("sheet.close"))}">${ICON.close}</button></div><div class="sheet-b">${body}</div>`;
+  const html = `<div class="sheet-h"><span class="tag">${esc(n.short)}</span><div class="sheet-t"><h2>${esc(displayName(n))}</h2><p class="meta">${esc(tags)}<br>${esc(metaLine(n))}</p></div><button class="icon-btn" data-full="${num}" aria-label="${esc(t("card.fullHint", { name: displayName(n) }))}" title="${esc(t("card.full"))}">${ICON.expand}</button><button class="icon-btn" data-close aria-label="${esc(t("sheet.close"))}">${ICON.close}</button></div><div class="sheet-b">${body}</div>`;
+  const el = sheet();
+  const sameNode = isSheetOpen() && el.dataset.num === String(num); // the same sheet, already on screen
+  // Nothing different to show (what arrived belongs to another node): leave it alone, with what is typed in it.
+  if (!force && sameNode && el._h === html) return false;
+  const top = sameNode ? sheetBody()?.scrollTop || 0 : 0;
+  el.setAttribute("aria-label", displayName(n));
+  el.dataset.num = String(num);
+  el.innerHTML = html;
+  el._h = html;
+  holdScroll(top);
+  return true;
+}
+
+/**
+ * Where the body of the sheet was scrolled, kept across a repaint. The charts fill in afterwards and can make it
+ * shorter for a moment (which moves the scroll), so it is put back as they are drawn, unless the person scrolled.
+ */
+let hold = null; // { top: where it was, set: where it stood after putting it back }
+const sheetBody = () => $(".sheet-b", sheet());
+function holdScroll(top) {
+  const b = sheetBody();
+  if (!b || !top) { hold = null; return; }
+  b.scrollTop = top;
+  hold = { top, set: b.scrollTop };
+}
+function releaseScroll(done = false) {
+  const b = sheetBody();
+  if (hold && b && b.scrollTop === hold.set) { b.scrollTop = hold.top; hold.set = b.scrollTop; }
+  if (done) hold = null;
 }
 
 export async function drawCharts() {
@@ -313,12 +342,15 @@ export async function drawCharts() {
       const spans = stateSpans(ser, from, to, S.nodes.get(num)?.metrics?.[k]);
       box.innerHTML = stateSVG(spans, k, from, to, W);
       $(`[data-mm="${k}"]`, fig).textContent = stateSummary(k, spans);
+      releaseScroll();
       continue;
     }
     box.innerHTML = chartSVG(ser, k, rules[k], from, to, W);
     const vals = ser.map((p) => p.v).filter((v) => !(k === "batteryLevel" && v > 100));
     $(`[data-mm="${k}"]`, fig).textContent = vals.length ? t("sheet.minmax", { min: fmtNum(Math.min(...vals), metricMeta(k).dec), max: fmtNum(Math.max(...vals), metricMeta(k).dec) }) : "";
+    releaseScroll();
   }
+  releaseScroll(true);
 }
 
 let liveTimer = null;

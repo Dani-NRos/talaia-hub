@@ -61,6 +61,7 @@ codigo/                 npm workspaces: npm install, npm test, npm run build
     test/               node --test; nodo-falso.mjs is a simulated Meshtastic node (real protobuf) over TCP or a
                         virtual serial port; aedes is an MQTT broker in memory; mosquitto.test.mjs needs Mosquitto
   herramientas/         pantalla-servidor.mjs (end to end with Playwright), vistazo.mjs (screenshots of every section),
+                        scroll.mjs (the scroll of the sheet and Settings must not move),
                         docker-prueba.mjs (the image with compose): see herramientas/LEEME.md
 Dockerfile docker/      the image and compose.yaml
 .github/workflows/      ci.yml (tests on Node 22 and 24, build, image amd64+arm64) and release.yml (image to ghcr.io)
@@ -94,6 +95,11 @@ The engine gets the state object `S` (see `estadoInicial()`) and hooks; the app 
   database; Tailscale Funnel is refused.
 - **History**: a year by default; nothing in the normal path goes through the whole readings table (the total is in
   memory, the CSV comes out in blocks).
+- **Repainting keeps the scroll**: the parts that arrive (`active`, `cfg`…) are not specific to the sheet's node, so
+  `renderSheet()` skips the repaint when its HTML is the same as the last one (`{ force: true }` when opening it) and,
+  when it does repaint, puts `.sheet-b` back where it was (`holdScroll`/`releaseScroll`: the charts fill in later and
+  can shorten it for a moment). `renderSettings()` keeps `window.scrollY` for the same part. `herramientas/scroll.mjs`
+  checks it.
 
 ## Publishing
 

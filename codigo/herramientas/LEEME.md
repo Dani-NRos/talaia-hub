@@ -16,6 +16,8 @@ Necesitan Playwright con Chromium (no va en el repo: se busca en `PLAYWRIGHT_DIR
   las secciones: `sheet` (la ficha del sensor, entera), `receiver` (la del receptor, con lo que manda a la malla),
   `full` (el sensor y el receptor a pantalla completa, comprobando que ninguna lectura se sale de su casilla) y
   `signin` (crear el primer usuario y entrar). Entra con el código que el servidor deja en su carpeta de datos.
+- **`scroll.mjs`**: que el scroll no se mueva: la ficha de un nodo (con su alarma y las lecturas de otro nodo que
+  también la tiene) y Ajustes, con el servidor de verdad y un nodo simulado. Sale con 1 si algo falla.
 - **`iconos.mjs`**: dibuja los iconos de la app (`app/pwa/icon-*.png`) con la torre de `app/src/logo.js`.
 - **`docker-prueba.mjs [imagen]`**: la imagen de Docker de punta a punta con `docker/compose.yaml` (Talaia y su
   Mosquitto) y un nodo simulado por la red: salud, receptor listo, el primer usuario con el código de

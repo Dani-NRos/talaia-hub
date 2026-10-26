@@ -1,5 +1,11 @@
 # Changes
 
+## 2.1.1
+
+- **The scroll no longer jumps to the top.** A node's sheet went back to the top every time a reading arrived from
+  *another* node that has an alarm on, and when you changed its own limits. Now it only repaints when something it
+  shows has changed, and keeps where you were when it does. Settings keeps its place too when it is painted again.
+
 ## 2.1.0
 
 - **Automations**, in their own section: “if … then …” that the server runs 24/7. *If* a datum goes above or below a

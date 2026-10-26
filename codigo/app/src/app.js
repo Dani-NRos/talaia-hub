@@ -383,10 +383,10 @@ function refrescarAbiertos(p) {
   const escribiendo = (sel) => document.activeElement?.matches?.(sel);
   const num = S.detail?.num;
   if (num != null && $("#detail").open) {
-    if (("cfg" in p || "active" in p || "traces" in p) && !escribiendo("#detail input, #detail select")) { renderSheet(); drawCharts(); }
+    // `active` arrives with every reading of any node that has an alarm on: renderSheet leaves it alone if it is not this one's.
+    if (("cfg" in p || "active" in p || "traces" in p) && !escribiendo("#detail input, #detail select")) { if (renderSheet()) drawCharts(); }
     else if (p.nodes?.some((n) => n.num === num) && Object.keys(S.nodes.get(num)?.metrics || {}).some((k) => !$(`#detail [data-cur="${k}"]`)) && !escribiendo("#detail input, #detail select")) {
-      renderSheet(); // a new metric (its first datum): its row of limits and its chart
-      drawCharts();
+      if (renderSheet()) drawCharts(); // a new metric (its first datum): its row of limits and its chart
     } else {
       if (p.nodes?.some((n) => n.num === num) || p.rows?.some((r) => r.node === num)) refreshSheetLive();
       if ("req" in p || "traces" in p) { refreshRequests(num); refreshPosition(num); }
