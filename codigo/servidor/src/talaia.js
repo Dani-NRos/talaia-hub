@@ -199,11 +199,12 @@ export async function crearTalaia(config, registro, opts = {}) {
   });
 
   /* ── automations (2.1): «if … then …» ── */
-  const automations = createAutomations({ S, motor, paneles, almacen, eventos, registro, timing: opts.automations, orderWords: () => meshOrders?.words() ?? new Set() });
+  let telegram = null;
+  const automations = createAutomations({ S, motor, paneles, almacen, eventos, registro, timing: opts.automations, orderWords: () => meshOrders?.words() ?? new Set(), telegram: () => telegram });
   meshOrders = createMeshOrders({ S, motor, paneles, automations, almacen, eventos, timing: opts.meshOrders });
   /* ── Telegram: the alarms to a bot, and orders from it ── */
   // (TALAIA_TELEGRAM_API points the bot at a fake Bot API: only the tools in herramientas/ use it)
-  const telegram = createTelegram({ S, motor, paneles, meshOrders, almacen, eventos, registro }, opts.telegram ?? (process.env.TALAIA_TELEGRAM_API ? { api: process.env.TALAIA_TELEGRAM_API, timing: { poll: 1 } } : undefined));
+  telegram = createTelegram({ S, motor, paneles, meshOrders, almacen, eventos, registro }, opts.telegram ?? (process.env.TALAIA_TELEGRAM_API ? { api: process.env.TALAIA_TELEGRAM_API, timing: { poll: 1 } } : undefined));
 
   /* ── tareas periódicas ── */
   // Sin señal y los estados que tienen que durar un tiempo («abierta más de 10 min»).

@@ -430,6 +430,13 @@ addTexts({
     "s.tg.chatRemoved": "«{name}» ya no recibe nada",
     "s.tg.testMsg": "Prueba desde Talaia: esto llega bien.",
     "s.tg.testSent": "Mandado a {n} chat(s)",
+    "s.tg.swGone": "Ese interruptor ya no está",
+    "s.tg.swSent": "{name} → {state}: enviado, espera a que conteste",
+    "s.auto.step.telegram": "mensaje por Telegram",
+    "s.auto.e.tgOff": "Telegram está apagado (Ajustes → Telegram)",
+    "s.auto.e.via": "Elige por dónde puede llegar la orden",
+    "s.auto.tgNoPos": "{node}: no se conoce su posición",
+    "s.auto.why.telegram": "«{text}» por Telegram, de {who}",
   },
   en: {
     // the journal (journalctl): what the server does
@@ -857,5 +864,12 @@ addTexts({
     "s.tg.chatRemoved": "“{name}” no longer gets anything",
     "s.tg.testMsg": "Test from Talaia: this arrives fine.",
     "s.tg.testSent": "Sent to {n} chat(s)",
+    "s.tg.swGone": "That switch is gone",
+    "s.tg.swSent": "{name} → {state}: sent, waiting for its answer",
+    "s.auto.step.telegram": "message by Telegram",
+    "s.auto.e.tgOff": "Telegram is off (Settings → Telegram)",
+    "s.auto.e.via": "Choose where the order may come from",
+    "s.auto.tgNoPos": "{node}: its position isn't known",
+    "s.auto.why.telegram": "“{text}” by Telegram, from {who}",
   },
 });

@@ -467,7 +467,9 @@ With `publish_attributes: true` each one's unit goes out too and Talaia picks it
   30 %*), or an ON/OFF state that becomes one of the two (*Workshop · Door becomes Open*). Optionally, **and stays so
   at least** some minutes.
 - **A time of day**, on the days of the week you choose, by the server's clock.
-- **An order over the mesh**: a text sent from a Meshtastic node (see [Orders over the mesh](#orders-over-the-mesh)).
+- **An order** (over the mesh or by Telegram): a text sent from a Meshtastic node (see
+  [Orders over the mesh](#orders-over-the-mesh)) or from a paired Telegram chat (see [Telegram](#telegram)). *It comes
+  by* says which of the two ways count: the mesh, Telegram or either.
 
 **Then…**, steps in order (up to 20):
 
@@ -476,6 +478,8 @@ With `publish_attributes: true` each one's unit goes out too and Talaia picks it
 - **Wait** seconds, minutes or hours (up to 24 h).
 - **Message over the mesh**, to a private channel or a node. `{value}` puts in the value of the datum that started it,
   and `{time}` the time (`{valor}` and `{hora}` work too).
+- **Message by Telegram**, to every paired chat (see [Telegram](#telegram)), with the same `{value}` and `{time}`.
+  With a node in *With the position of*, its last position goes too, as a pin on the map.
 - **Ask a node for data**: environment, battery, air quality, power or position.
 
 Each one has its switch to turn it on or off and **Try** (press it twice) to run its steps now; the list says what it's
@@ -552,7 +556,7 @@ for them), so leave it off if you'd rather keep all of it at home.
   marks it seen in Talaia (the log says who, *Ana, by Telegram*). When the alarm is seen or clears, the button
   becomes a note (*✓ Seen*, *✓ Cleared*). The alarms of MQTT data and of the receiver go too.
 - **In the chat**: `/paneles` shows a button per watched panel: press one and it answers with its readings now, when
-  its last datum came and its alarms (with their buttons). `/panel name` does the same by name. `/alarmas` lists the
+  its last datum came, its alarms (with their buttons) and a pair of buttons for each of its switches. `/panel name` does the same by name. `/alarmas` lists the
   active ones. `/ayuda` says all this.
 - **Orders**: the switches' words of [Orders over the mesh](#orders-over-the-mesh) work here too (`riego on`,
   `riego off`, `riego ?`), and so do the automations' texts. In a group the bot only sees what starts with `/` or

@@ -79,11 +79,11 @@ export function createMeshOrders({ S, motor, paneles, automations, almacen, even
     return null; // the mesh's own chat on other channels
   }
 
-  function parse(text) {
+  function parse(text, via = "mesh") {
     const t = normOrder(text);
     if (!t) return null;
     if (HELP.has(t)) return { kind: "help" };
-    if (automations.meshTexts().has(t)) return { kind: "auto", text: t };
+    if (automations.meshTexts(via).has(t)) return { kind: "auto", text: t };
     const [word, ...rest] = t.split(" ");
     const sw = switches().find((x) => x.word === word);
     if (!sw) return null;
@@ -154,7 +154,7 @@ export function createMeshOrders({ S, motor, paneles, automations, almacen, even
   async function run(cmd, path, who) {
     if (cmd.kind === "help") return answer(path, helpText());
     if (cmd.kind === "auto") {
-      const done = automations.meshFire(cmd.text, who);
+      const done = automations.meshFire(cmd.text, who, path.via || "mesh");
       return answer(path, done.map((x) => tx(`s.mo.auto.${x.state}`, { name: x.name })).join(" · "));
     }
     const { sw } = cmd;
@@ -177,7 +177,7 @@ export function createMeshOrders({ S, motor, paneles, automations, almacen, even
     return since < MIN ? tx("s.mo.stateNew", { name, state: fmtValue(sw.key, m.v) }) : tx("s.mo.state", { name, state: fmtValue(sw.key, m.v), d: dur(since) });
   }
   function helpText() {
-    const list = api.helpList();
+    const list = api.helpList("mesh");
     return list.length ? tx("s.mo.help", { list: list.join(", ") }) : tx("s.mo.helpNone");
   }
 
@@ -210,14 +210,14 @@ export function createMeshOrders({ S, motor, paneles, automations, almacen, even
      * An order that didn't come over the mesh (Telegram): the same words and answers. `send(text)` gets the answers;
      * `by` is how the log says who did it. Returns false if the text isn't an order (help included).
      */
-    order(text, { who, by, send }) {
-      const cmd = parse(text);
+    order(text, { who, by, send, via = "telegram" }) {
+      const cmd = parse(text, via);
       if (!cmd) return false;
-      run(cmd, { dm: true, reply: { send }, by }, who);
+      run(cmd, { dm: true, reply: { send }, by, via }, who);
       return true;
     },
-    /** What the help lists (switch words and automation texts), for other channels' own help. */
-    helpList() { return switches().filter((x) => datum(x.num, x.key)?.orden).map((x) => `${x.word} on/off/?`).concat([...automations.meshTexts()]); },
+    /** What the help lists (switch words and automation texts that may come that way), for other channels' own help. */
+    helpList(via = "mesh") { return switches().filter((x) => datum(x.num, x.key)?.orden).map((x) => `${x.word} on/off/?`).concat([...automations.meshTexts(via)]); },
     /** The receiver is ready: what arrives in the next seconds was waiting in it. */
     ready() { readyAt = Date.now(); },
     publicKey(num, key) {

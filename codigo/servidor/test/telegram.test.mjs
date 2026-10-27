@@ -285,3 +285,58 @@ test("commands and orders: /ayuda, /paneles with buttons, /panel, the switch wor
   await new Promise((r) => setTimeout(r, 500));
   assert.equal(tg.msgs().length, sends, "nothing while off");
 });
+
+test("automations: a Telegram step (with a node's position), and orders by Telegram only, by the mesh only or by either", async (t) => {
+  const tg = await telegramFalso(t);
+  const { talaia, nodo } = await montar(t, { tg });
+  const { telegram, S, automations, acciones } = talaia;
+  acciones.vigilar(CASETA);
+  nodo.posicion(CASETA, 39.1, -0.44);
+  await hasta(() => S.nodes.get(CASETA)?.pos, 3000, "a position");
+  // Saved with Telegram off: it is kept, but running it says why it couldn't send.
+  let r = automations.save({ name: "Aviso", on: true, when: { type: "time", at: "08:00", days: [1] }, steps: [{ type: "telegram", text: "Hola {hora}", pos: CASETA }] });
+  assert.equal(r.ok, true, r.error);
+  const id = r.id ?? automations.list.at(-1).id;
+  assert.match(automations.save({ name: "x", on: true, when: { type: "time", at: "08:00", days: [1] }, steps: [{ type: "telegram", text: "", pos: null }] }).error, /mensaje/);
+  assert.match(automations.save({ name: "x", on: true, when: { type: "time", at: "08:00", days: [1] }, steps: [{ type: "telegram", text: "a", pos: 12345 }] }).error, /nodo/i);
+  assert.equal(automations.runNow(id).ok, true);
+  await hasta(() => S.log.some((e) => /Telegram está apagado/.test(e.text)), 3000, "the log says Telegram is off");
+  // On and paired: the text (with the time in) and the pin.
+  await telegram.configure({ token: TOKEN, on: true });
+  await hasta(() => S.telegram.state === "ok", 3000, "connected");
+  await emparejar(tg, talaia, 42);
+  assert.equal(automations.runNow(id).ok, true);
+  await hasta(() => tg.msgs(42).some((m) => /^Hola \d\d:\d\d$/.test(m.text)) && tg.calls("sendVenue").length === 1, 4000, "the message and the pin");
+  const venue = tg.calls("sendVenue")[0];
+  assert.equal(venue.chat_id, 42);
+  assert.equal(venue.latitude, 39.1);
+  assert.equal(venue.title, "Caseta huerto");
+  // Orders: «riego» by either way, «cerrar» only over the mesh, «abrir» only by Telegram.
+  for (const [text, via] of [["riego", "any"], ["cerrar", "mesh"], ["abrir", "telegram"]]) {
+    r = automations.save({ name: text, on: true, when: { type: "mesh", text, via }, steps: [{ type: "telegram", text: `ok ${text}`, pos: null }] });
+    assert.equal(r.ok, true, r.error);
+  }
+  assert.match(automations.save({ name: "x", on: true, when: { type: "mesh", text: "y", via: "fax" }, steps: [{ type: "telegram", text: "z", pos: null }] }).error, /por dónde/);
+  assert.deepEqual([...automations.meshTexts("mesh")].sort(), ["cerrar", "riego"]);
+  assert.deepEqual([...automations.meshTexts("telegram")].sort(), ["abrir", "riego"]);
+  tg.text(42, "/ayuda");
+  await hasta(() => /Soy Talaia/.test(tg.last(42)?.text), 3000, "help");
+  assert.match(tg.last(42).text, /abrir/);
+  assert.doesNotMatch(tg.last(42).text, /cerrar/);
+  tg.text(42, "abrir");
+  await hasta(() => /abrir: en marcha/.test(tg.last(42)?.text), 3000, "started by Telegram");
+  assert.ok(S.log.some((e) => /«abrir» por Telegram, de Ana Pérez/.test(e.text)), "the log says who and how");
+  tg.text(42, "cerrar");
+  await hasta(() => /No conozco «cerrar»/.test(tg.last(42)?.text), 3000, "a mesh-only order isn't one by Telegram");
+  tg.text(42, "riego");
+  await hasta(() => /riego: en marcha/.test(tg.last(42)?.text), 3000, "either way");
+  // A switch's buttons under a panel: pressed, the Shelly answers and so does the bot.
+  tg.text(42, "/panel taller");
+  await hasta(() => /^Taller\nBomba: Apagado/.test(tg.last(42)?.text), 3000, "the panel");
+  const kb = tg.last(42).reply_markup.inline_keyboard.flat();
+  assert.deepEqual(kb.map((b) => b.text), ["Bomba: Encendido", "Bomba: Apagado"]);
+  tg.button(42, kb[0].callback_data);
+  await hasta(() => /^Bomba: Encendido$/.test(tg.last(42)?.text), 4000, "switched on from the button");
+  assert.match(tg.calls("answerCallbackQuery").at(-1).text, /enviado/);
+  assert.ok(S.log.some((e) => e.by === "Ana Pérez, por Telegram" && /Bomba/.test(e.text)));
+});

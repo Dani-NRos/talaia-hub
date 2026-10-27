@@ -28,6 +28,8 @@ import "./textos.js";
 
 export const MAX_STEPS = 20, MAX_AUTOMATIONS = 100, NAME_MAX = 40, TEXT_MAX = 200, ORDER_MAX = 40;
 export const MAX_FOR = 1440, MAX_WAIT = 86400; // minutes (24 h) and seconds (24 h)
+export const TG_TEXT_MAX = 500; // a Telegram message can be longer than one over the mesh
+export const VIAS = ["any", "mesh", "telegram"]; // where an order text may come from
 export const ASKABLE = ["env", "device", "air", "power", "pos"]; // not the node's info (12 h) nor traceroutes
 const TICK = 5000; // times of day and «for N min» are looked at this often
 const BRAKE_RUNS = 10, BRAKE_WINDOW = 10 * MIN;
@@ -111,7 +113,9 @@ function checkWhen(w, { S, paneles, orderWords }) {
     if (HELP.has(n)) return e("s.auto.e.orderHelp", { text });
     const word = n.split(" ")[0];
     if (orderWords().has(word)) return e("s.auto.e.orderWord", { word });
-    return { when: { type: "mesh", text } };
+    const via = w.via == null ? "any" : w.via;
+    if (!VIAS.includes(via)) return e("s.auto.e.via");
+    return { when: { type: "mesh", text, via } };
   }
   return e("s.auto.e.when");
 }
@@ -154,6 +158,14 @@ function checkStep(s, { S, paneles }) {
     if (!ASKABLE.includes(s.what)) return e("s.auto.e.ask");
     return { step: { type: "ask", num: s.num, what: s.what } };
   }
+  if (s.type === "telegram") { // a message to every paired chat, with a node's position as a pin if asked
+    const text = String(s.text ?? "").trim();
+    const pos = s.pos == null ? null : s.pos;
+    if (pos != null && (!Number.isInteger(pos) || pos < 0 || !S.nodes.has(pos))) return e("s.auto.e.node");
+    if (!text && pos == null) return e("s.auto.e.text");
+    if (bytes(text) > TG_TEXT_MAX) return e("s.auto.e.textLong", { n: TG_TEXT_MAX });
+    return { step: { type: "telegram", text, pos } };
+  }
   return e("s.auto.e.stepType");
 }
 
@@ -162,7 +174,7 @@ function checkStep(s, { S, paneles }) {
  * watched panel has a newer value; it emits «parte» «automations». timing: shorter times for the tests (ms in a
  * minute and in a second, and the other waits).
  */
-export function createAutomations({ S, motor, paneles, almacen, eventos, registro, timing = {}, orderWords = () => new Set() }) {
+export function createAutomations({ S, motor, paneles, almacen, eventos, registro, timing = {}, orderWords = () => new Set(), telegram = () => null }) {
   const T = { min: MIN, sec: 1000, tick: TICK, afterStart: AFTER_START, retry: BACK_RETRY, ...timing };
   const cfg = almacen.leer("automations", null) || { next: 1, list: [] };
   const run = { runs: {}, backs: {}, last: {}, ...(almacen.leer("automationsRun", null) || {}) };
@@ -298,6 +310,7 @@ export function createAutomations({ S, motor, paneles, almacen, eventos, registr
     if (late) log(tx("s.log.autoLate", { name: a.name }), a.when.num ?? null);
     steps(a, r.step, r.c || {}, tokens.get(id));
   }
+  const byVia = (a, via) => (a.when.via ?? "any") === "any" || a.when.via === via;
   function fail(a, what, e) { log(tx("s.log.autoFail", { name: a.name, what, e }), a.when.num ?? null); }
 
   /** A command to a switch; if another one to it is still waiting for its answer (10 s at most), after that one. */
@@ -328,6 +341,18 @@ export function createAutomations({ S, motor, paneles, almacen, eventos, registr
       if (!motor.meshSay(s.to, fill(s.text, c))) fail(a, what, tx("s.auto.e.notSent"));
       return;
     }
+    if (s.type === "telegram") {
+      const tg = telegram();
+      const what = tx("s.auto.step.telegram");
+      if (!tg?.on) return fail(a, what, tx("s.auto.e.tgOff"));
+      if (s.text) tg.say(fill(s.text, c, TG_TEXT_MAX));
+      if (s.pos != null) {
+        const n = S.nodes.get(s.pos);
+        if (n?.pos) tg.location(n.pos.lat, n.pos.lon, motor.nodeName(s.pos));
+        else tg.say(tx("s.auto.tgNoPos", { node: motor.nodeName(s.pos) }));
+      }
+      return;
+    }
     if (s.type === "ask") {
       // The engine says why it doesn't ask (not connected, too soon) as a short message to whoever pressed: here, the log.
       const said = [];
@@ -346,9 +371,9 @@ export function createAutomations({ S, motor, paneles, almacen, eventos, registr
     return motor.nodeName(to.node);
   }
   /** {valor} / {value}: the datum that fired it, with its unit; {hora} / {time}: now. */
-  function fill(text, c) {
+  function fill(text, c, max = TEXT_MAX) {
     const v = c.key && isNum(c.value) ? fmtWithUnit(c.key, c.value) : "—";
-    return fitBytes(text.replace(/\{(valor|value)\}/gi, v).replace(/\{(hora|time)\}/gi, hhmm.format(new Date())), TEXT_MAX);
+    return fitBytes(text.replace(/\{(valor|value)\}/gi, v).replace(/\{(hora|time)\}/gi, hhmm.format(new Date())), max);
   }
 
   /* ── switches back after «for N min» ── */
@@ -486,15 +511,15 @@ export function createAutomations({ S, motor, paneles, almacen, eventos, registr
     /** For the tests: what the clock does every few seconds. */
     tick,
     get list() { return cfg.list; },
-    /** The texts that start automations over the mesh (normalised), on or off. */
-    meshTexts: () => new Set(cfg.list.filter((a) => a.when.type === "mesh").map((a) => normOrder(a.when.text))),
-    /** An order over the mesh with that (normalised) text: the automations it starts, and how each one is. */
-    meshFire(text, who) {
+    /** The texts that start automations by an order (normalised), on or off, that may come that way (mesh or telegram). */
+    meshTexts: (via = "mesh") => new Set(cfg.list.filter((a) => a.when.type === "mesh" && byVia(a, via)).map((a) => normOrder(a.when.text))),
+    /** An order with that (normalised) text, over the mesh or by Telegram: the automations it starts, and how each one is. */
+    meshFire(text, who, via = "mesh") {
       const out = [];
       for (const a of cfg.list) {
-        if (a.when.type !== "mesh" || normOrder(a.when.text) !== text) continue;
+        if (a.when.type !== "mesh" || normOrder(a.when.text) !== text || !byVia(a, via)) continue;
         if (!a.on) { out.push({ name: a.name, state: a.paused ? "paused" : "off" }); continue; }
-        fire(a, { why: tx("s.auto.why.mesh", { text: a.when.text, who }) });
+        fire(a, { why: tx(via === "telegram" ? "s.auto.why.telegram" : "s.auto.why.mesh", { text: a.when.text, who }) });
         out.push({ name: a.name, state: a.on ? "running" : "paused" }); // (the brake may have just paused it)
       }
       return out;

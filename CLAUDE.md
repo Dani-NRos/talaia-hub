@@ -96,7 +96,9 @@ The engine gets the state object `S` (see `estadoInicial()`) and hooks; the app 
   code in `S.telegram.code` (one code, one chat); unpaired chats are told once every 10 min and otherwise ignored. Alarms
   go out on the engine's `alarma` event with an `ack:<key>` button; the message is edited when the alarm is seen or
   clears (`tracked`). Text orders go through `meshOrders.order(text, { who, by, send })`, the same parser as the mesh.
-  In a group the bot only sees `/…` or mentions: `/riego on@bot` is read as `riego on`.
+  In a group the bot only sees `/…` or mentions: `/riego on@bot` is read as `riego on`. An order trigger carries
+  `when.via` (any | mesh | telegram; missing = any): `meshTexts(via)` / `meshFire(text, who, via)`. The step
+  `{ type: "telegram", text, pos }` sends to every chat (`say`) and the node's position as a venue (`location`).
 - **Home Assistant**: only watched nodes, as devices «Talaia · name», without position; base topic `talaia` by
   default and the ids come from it (`prefijoIds`).
 - **Users**: one kind of user (everyone can do everything); sessions in an HttpOnly cookie, only their SHA-256 in the

@@ -4,8 +4,10 @@
 
 - **Telegram** (*Settings → Telegram*): paste a bot's token from @BotFather and pair a chat or a group with a code.
   Every alarm goes there with an *Acknowledge* button (the log says who pressed it); `/paneles`, `/panel name`,
-  `/alarmas` and `/ayuda` answer in the chat, and the switches' words of the orders over the mesh work there too.
-  Nothing to open at home: the server asks Telegram for what is new.
+  `/alarmas` and `/ayuda` answer in the chat (a panel's answer has buttons for its switches), and the switches' words
+  of the orders over the mesh work there too. Nothing to open at home: the server asks Telegram for what is new.
+- **Automations and Telegram**: a step *Message by Telegram* (optionally with a node's position as a pin), and the
+  order trigger says where it may come from: the mesh, Telegram or either.
 - **The charts say the value and the time under the mouse or the finger**: a line marks the nearest reading and a
   label gives its value and when; on an ON/OFF bar, the state, from when to when and how long. With a finger, a tap
   shows it and dragging sideways moves it (the page still scrolls up and down); it stays until you tap elsewhere.

@@ -191,7 +191,7 @@ export function createTelegram({ S, motor, paneles, meshOrders, almacen, eventos
     if (cmd === "panel" && rest.length) { const num = findPanel(rest.join(" ")); return num == null ? reply(tx("s.tg.noPanel", { name: rest.join(" ") })) : reply(...panelText(num)); }
     if (cmd === "alarmas" || cmd === "alarms") return reply(...alarmsList());
     const by = tx("s.tg.by", { who });
-    if (meshOrders.order(text, { who: `${who} (Telegram)`, by, send: (t) => reply(t) })) {
+    if (meshOrders.order(text, { who, by, send: (t) => reply(t), via: "telegram" })) {
       motor.addLog("info", tx("s.log.tgOrder", { who, text }), null);
       return;
     }
@@ -237,12 +237,27 @@ export function createTelegram({ S, motor, paneles, meshOrders, almacen, eventos
       if (S.cfg.watched[num]) tell(chat, ...panelText(num));
       return;
     }
+    if (kind === "sw") { // «sw:<num>|<key>:<1|0>»: a switch pressed under a panel
+      const m = /^(-?\d+)\|([^:]+):([01])$/.exec(arg);
+      const d = m ? paneles.dato(Number(m[1]), m[2]) : null;
+      if (!d?.orden) return answer(tx("s.tg.swGone"));
+      const num = Number(m[1]), key = m[2], v = Number(m[3]);
+      const name = metricMeta(key).label, state = fmtWithUnit(key, v);
+      answer(tx("s.tg.swSent", { name, state }));
+      motor.addLog("info", tx("s.log.tgOrder", { who, text: `${name} → ${state}` }), null);
+      const r = await paneles.mandar(num, key, v, {
+        by: tx("s.tg.by", { who }),
+        done: (ok) => tell(chat, ok ? tx("s.mo.done", { name, state }) : tx("s.mo.noAnswer", { name, state })),
+      });
+      if (!r.ok) tell(chat, tx("s.mo.fail", { name, e: r.error }));
+      return;
+    }
     answer("");
   }
 
   /* ── texts ── */
   function helpText() {
-    const orders = meshOrders.helpList();
+    const orders = meshOrders.helpList("telegram");
     return [tx("s.tg.help"), orders.length ? tx("s.tg.helpOrders", { list: orders.join(", ") }) : tx("s.tg.helpNoOrders")].join("\n");
   }
   const watched = () => Object.keys(S.cfg.watched).map(Number).filter((n) => S.nodes.has(n)).sort((a, b) => motor.nodeName(a).localeCompare(motor.nodeName(b)));
@@ -269,7 +284,11 @@ export function createTelegram({ S, motor, paneles, meshOrders, almacen, eventos
     if (last) lines.push(tx("s.tg.lastHeard", { ago: ago(last) }));
     const als = [...S.active.values()].filter((a) => a.num === num);
     for (const a of als) lines.push(`⚠ ${motor.alarmTitle(a)}${a.acked ? ` (${tx("s.tg.seen")})` : ""}`);
-    const buttons = als.filter((a) => !a.acked).map((a) => [{ text: tx("s.tg.ackBtn", { title: motor.alarmTitle(a) }).slice(0, 60), callback_data: `ack:${a.key}` }]);
+    // A row of buttons for each switch of the panel, then one per alarm not seen.
+    const buttons = keys.filter((k) => paneles.dato(num, k)?.orden).map((k) => {
+      const m = metricMeta(k);
+      return [{ text: `${m.label}: ${m.estados[0]}`, callback_data: `sw:${num}|${k}:1` }, { text: `${m.label}: ${m.estados[1]}`, callback_data: `sw:${num}|${k}:0` }];
+    }).concat(als.filter((a) => !a.acked).map((a) => [{ text: tx("s.tg.ackBtn", { title: motor.alarmTitle(a) }).slice(0, 60), callback_data: `ack:${a.key}` }]));
     return [lines.join("\n"), buttons.length ? { reply_markup: { inline_keyboard: buttons } } : {}];
   }
   function alarmsList() {
@@ -355,6 +374,11 @@ export function createTelegram({ S, motor, paneles, meshOrders, almacen, eventos
     },
     /** A message to every paired chat (the automations). */
     say(text, extra) { if (cfg.on && cfg.token) tellAll(text, extra); },
+    /** A node's position as a pin on the map, to every paired chat. */
+    location(lat, lon, title) {
+      if (!cfg.on || !cfg.token) return;
+      for (const c of cfg.chats) send("sendVenue", { chat_id: c.id, latitude: lat, longitude: lon, title, address: `${lat.toFixed(5)}, ${lon.toFixed(5)}` });
+    },
     chats: () => cfg.chats.map((c) => ({ id: c.id, name: c.name })),
     /** The server's language changed: the commands' descriptions again. */
     relabel() { if (cfg.on && cfg.token && bot) setCommands(); },

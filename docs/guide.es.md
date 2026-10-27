@@ -459,8 +459,9 @@ Reglas «si… entonces…» que el servidor cumple 24/7, aunque no haya ninguna
   30 %*), o un estado ON/OFF que pasa a uno de los dos (*Taller · Puerta pasa a Abierta*). Si quieres, **y sigue así al
   menos** unos minutos.
 - **Una hora del día**, los días de la semana que elijas, con la hora del servidor.
-- **Una orden por la malla**: un texto que mandas desde un nodo Meshtastic (ver
-  [Órdenes por la malla](#órdenes-por-la-malla)).
+- **Una orden** (por la malla o Telegram): un texto que mandas desde un nodo Meshtastic (ver
+  [Órdenes por la malla](#órdenes-por-la-malla)) o desde un chat de Telegram emparejado (ver [Telegram](#telegram)).
+  *Llega por* dice cuál de los dos caminos cuenta: la malla, Telegram o cualquiera.
 
 **Entonces…**, pasos en orden (hasta 20):
 
@@ -469,6 +470,8 @@ Reglas «si… entonces…» que el servidor cumple 24/7, aunque no haya ninguna
 - **Esperar** segundos, minutos u horas (hasta 24 h).
 - **Mensaje por la malla**, a un canal privado o a un nodo. `{valor}` pone el valor del dato que la ha puesto en marcha,
   y `{hora}`, la hora (también valen `{value}` y `{time}`).
+- **Mensaje por Telegram**, a todos los chats emparejados (ver [Telegram](#telegram)), con los mismos `{valor}` y
+  `{hora}`. Con un nodo en *Con la posición de*, va también su última posición como un punto en el mapa.
 - **Pedir datos a un nodo**: ambiente, batería, calidad del aire, energía o posición.
 
 Cada una tiene su interruptor para activarla o desactivarla y **Probar** (se pulsa dos veces) para hacer sus pasos ya;
@@ -545,7 +548,7 @@ alarmas y las lecturas de tus paneles cuando las pides), así que déjalo apagad
   da por vista en Talaia (el registro dice quién: *Ana, por Telegram*). Cuando la alarma se ve o se resuelve, el botón
   pasa a ser una nota (*✓ Vista*, *✓ Resuelta*). Van también las alarmas de los datos MQTT y las del receptor.
 - **En el chat**: `/paneles` enseña un botón por cada panel vigilado: pulsa uno y contesta con sus datos de ahora,
-  cuándo llegó el último y sus alarmas (con sus botones). `/panel nombre` hace lo mismo por el nombre. `/alarmas`
+  cuándo llegó el último, sus alarmas (con sus botones) y un par de botones por cada interruptor que tenga. `/panel nombre` hace lo mismo por el nombre. `/alarmas`
   lista las activas. `/ayuda` cuenta todo esto.
 - **Órdenes**: las palabras de los interruptores de [Órdenes por la malla](#órdenes-por-la-malla) valen aquí también
   (`riego on`, `riego off`, `riego ?`), y los textos de las automatizaciones. En un grupo el bot solo ve lo que empieza

@@ -77,7 +77,7 @@ function nodeOptions(sel) {
 /* ── the list ── */
 function whenText(w) {
   if (w.type === "time") return t("au.s.time", { at: w.at, days: daysText(w.days) });
-  if (w.type === "mesh") return t("au.s.mesh", { text: w.text });
+  if (w.type === "mesh") return t("au.s.mesh", { text: w.text, via: t(`au.via.${w.via ?? "any"}`) });
   const what = datumName(w.num, w.key), d = w.for ? t("au.s.for", { d: dur(w.for * MIN) }) : "";
   if (w.op === "is") return t("au.s.is", { what, state: stateName(w.key, w.value), for: d });
   return t(w.op === "above" ? "au.s.above" : "au.s.below", { what, limit: fmtLimit(w.key, w.value, true).replace(" ", "\u00a0"), for: d }); // «30,0 °C» on one line
@@ -87,6 +87,7 @@ function stepText(s) {
   if (s.type === "wait") return t("au.s.wait", { d: secondsText(s.seconds) });
   if (s.type === "message") return t("au.s.msg", { to: s.to.channel != null ? t("au.channel", { name: channelOf(s.to.channel)?.name ?? s.to.channel }) : nodeName(s.to.node), text: s.text });
   if (s.type === "ask") return t("au.s.ask", { what: ASK_ALL[s.what]?.label || s.what, node: nodeName(s.num) });
+  if (s.type === "telegram") return t("au.s.tg", { text: s.text, pos: s.pos != null ? t("au.s.tgPos", { node: nodeName(s.pos) }) : "" });
   return "?";
 }
 /** What it points at that isn't there any more (a panel, a datum, a switch, a channel). */
@@ -94,8 +95,10 @@ function problems(a) {
   const s = S(), out = [];
   const w = a.when;
   if (w.type === "value" && (!s.cfg.watched[w.num] || !dataOf(w.num).includes(w.key))) out.push(t("au.p.when"));
-  if (w.type === "mesh" && !s.meshOrders?.on) out.push(t("au.p.meshOff"));
+  if (w.type === "mesh" && (w.via ?? "any") !== "telegram" && !s.meshOrders?.on) out.push(t("au.p.meshOff"));
+  if (w.type === "mesh" && (w.via ?? "any") !== "mesh" && !s.telegram?.on) out.push(t("au.p.tgOff"));
   a.steps.forEach((x, i) => {
+    if (x.type === "telegram" && !s.telegram?.on) out.push(t("au.p.tgStep", { n: i + 1 }));
     if (x.type === "switch" && !datumOf(x.num, x.key)?.orden) out.push(t("au.p.step", { n: i + 1 }));
     if (x.type === "message" && x.to.channel != null && s.channels.length && !channelOf(x.to.channel)?.private) out.push(t("au.p.channel", { n: i + 1 }));
   });
@@ -143,12 +146,13 @@ export function renderAutomations() {
 function toDraft(a) {
   const w = a.when;
   const when = w.type === "time" ? { type: "time", at: w.at, days: [...w.days] }
-    : w.type === "mesh" ? { type: "mesh", text: w.text }
+    : w.type === "mesh" ? { type: "mesh", text: w.text, via: w.via ?? "any" }
     : { type: "value", num: w.num, key: w.key, op: w.op, value: w.op === "is" ? w.value : String(w.value).replace(".", locale() === "es-ES" ? "," : "."), for: w.for ? String(w.for) : "" };
   const steps = a.steps.map((s) => {
     if (s.type === "switch") return { type: "switch", ref: `${s.num}|${s.key}`, value: s.value, for: s.for ? String(s.for) : "" };
     if (s.type === "wait") { const unit = s.seconds % 3600 === 0 ? "h" : s.seconds % 60 === 0 ? "min" : "s"; return { type: "wait", n: String(s.seconds / { s: 1, min: 60, h: 3600 }[unit]), unit }; }
     if (s.type === "message") return { type: "message", to: s.to.channel != null ? `c:${s.to.channel}` : `n:${s.to.node}`, text: s.text };
+    if (s.type === "telegram") return { type: "telegram", text: s.text, pos: s.pos ?? null };
     return { type: "ask", num: s.num, what: s.what };
   });
   return { id: a.id, name: a.name, on: a.on, when, steps };
@@ -166,6 +170,7 @@ function newStep(type) {
   if (type === "switch") return { type, ref: switches()[0] || "", value: 1, for: "" };
   if (type === "wait") return { type, n: "30", unit: "s" };
   if (type === "message") { const ch = S().channels.find((c) => c.private); return { type, to: ch ? `c:${ch.index}` : "", text: "" }; }
+  if (type === "telegram") return { type, text: "", pos: null };
   return { type: "ask", num: null, what: "env" };
 }
 /** What goes to the server: numbers as numbers (what can't be read goes as it is, and the server says what's wrong). */
@@ -173,12 +178,13 @@ function payload(d) {
   const num = (s) => { const v = parseNum(s); return v === null ? null : Number.isNaN(v) ? s : v; };
   const w = d.when;
   const when = w.type === "time" ? { type: "time", at: w.at, days: w.days }
-    : w.type === "mesh" ? { type: "mesh", text: w.text }
+    : w.type === "mesh" ? { type: "mesh", text: w.text, via: w.via }
     : { type: "value", num: w.num, key: w.key, op: w.op, value: w.op === "is" ? w.value : num(w.value), for: num(w.for) ?? 0 };
   const steps = d.steps.map((s) => {
     if (s.type === "switch") { const [n, k] = s.ref.split("|"); return { type: "switch", num: Number(n), key: k, value: s.value, for: num(s.for) }; }
     if (s.type === "wait") { const n = num(s.n); return { type: "wait", seconds: typeof n === "number" ? Math.round(n * { s: 1, min: 60, h: 3600 }[s.unit]) : n }; }
     if (s.type === "message") { const [k, v] = s.to.split(":"); return { type: "message", to: k === "c" ? { channel: Number(v) } : k === "n" ? { node: Number(v) } : {}, text: s.text }; }
+    if (s.type === "telegram") return { type: "telegram", text: s.text, pos: s.pos };
     return { type: "ask", num: s.num, what: s.what };
   });
   return { ...(d.id != null ? { id: d.id } : {}), name: d.name, on: d.on, when, steps };
@@ -209,7 +215,7 @@ function drawEditor() {
     <section class="blk"><h3>${esc(t("au.when"))}</h3>${whenHTML(a.when)}</section>
     <section class="blk"><h3>${esc(t("au.then"))}</h3>
       ${a.steps.length ? `<ol class="au-st-l">${a.steps.map(stepHTML).join("")}</ol>` : `<p class="hint">${esc(t("au.noSteps"))}</p>`}
-      <div class="btns au-add">${["switch", "wait", "message", "ask"].map((k) => `<button type="button" class="mini" data-au-add="${k}">${ICON.plus}${esc(t(`au.add.${k}`))}</button>`).join("")}</div>
+      <div class="btns au-add">${["switch", "wait", "message", "telegram", "ask"].map((k) => `<button type="button" class="mini" data-au-add="${k}">${ICON.plus}${esc(t(`au.add.${k}`))}</button>`).join("")}</div>
     </section>
     <section class="blk end">
       <label class="sw" for="auOnEd"><input type="checkbox" id="auOnEd" data-au="on"${a.on ? " checked" : ""}><span class="sw-ui"></span><span>${esc(t("au.onLabel"))}</span></label>
@@ -225,9 +231,11 @@ function whenHTML(w) {
       <option value="time"${w.type === "time" ? " selected" : ""}>${esc(t("au.w.time"))}</option>
       <option value="mesh"${w.type === "mesh" ? " selected" : ""}>${esc(t("au.w.mesh"))}</option></select></div>`;
   if (w.type === "mesh") {
-    const off = !S().meshOrders?.on;
+    const via = w.via ?? "any";
+    const meshOff = via !== "telegram" && !S().meshOrders?.on, tgOff = via !== "mesh" && !S().telegram?.on;
     return `${type}<div class="au-row"><label for="auOrder">${esc(t("au.order"))}</label><input id="auOrder" class="inp au-order" data-au="order" autocomplete="off" spellcheck="false" maxlength="40" value="${esc(w.text)}" placeholder="${esc(t("au.orderPh"))}"></div>
-      <p class="hint">${esc(t("au.orderHint"))}</p>${off ? `<p class="warn-t">${esc(t("au.p.meshOff"))}</p>` : ""}`;
+      <div class="set-row"><label for="auVia">${esc(t("au.via"))}</label><select id="auVia" class="inp sel" data-au="via">${["any", "mesh", "telegram"].map((k) => `<option value="${k}"${k === via ? " selected" : ""}>${esc(t(`au.via.${k}`))}</option>`).join("")}</select></div>
+      <p class="hint">${esc(t("au.orderHint"))}</p>${meshOff ? `<p class="warn-t">${esc(t("au.p.meshOff"))}</p>` : ""}${tgOff ? `<p class="warn-t">${esc(t("au.p.tgOff"))}</p>` : ""}`;
   }
   if (w.type === "time") {
     const short = dayNames("narrow"), long = dayNames("long");
@@ -288,6 +296,11 @@ function stepHTML(s, i) {
     body = `<div class="au-row"><select class="inp sel" ${f("to")} aria-label="${esc(t("au.to"))}"><option value=""${cur ? "" : " selected"}>${esc(t("au.choose"))}</option>${lost}${chOpts ? `<optgroup label="${esc(t("au.privateChannels"))}">${chOpts}</optgroup>` : ""}${nOpts}</select></div>
       <input class="inp" ${f("text")} autocomplete="off" value="${esc(s.text)}" placeholder="${esc(t("au.textPh", TOKENS()))}" aria-label="${esc(t("au.text"))}">
       <p class="hint"><span data-au-bytes="${i}">${esc(bytesText(s.text))}</span> · ${esc(t("au.textHint", TOKENS()))}</p>`;
+  } else if (s.type === "telegram") {
+    const tgOff = !S().telegram?.on;
+    body = `<input class="inp" ${f("text")} autocomplete="off" value="${esc(s.text)}" placeholder="${esc(t("au.textPh", TOKENS()))}" aria-label="${esc(t("au.text"))}">
+      <div class="au-row"><label for="auTp${i}">${esc(t("au.pos"))}</label><select id="auTp${i}" class="inp sel" ${f("pos")}>${nodeOptions(s.pos).replace(/^<option value=""[^<]*<\/option>/, `<option value=""${s.pos == null ? " selected" : ""}>${esc(t("au.posNone"))}</option>`)}</select></div>
+      <p class="hint">${esc(t("au.tgHint", TOKENS()))}</p>${tgOff ? `<p class="warn-t">${esc(t("au.p.tgOff"))}</p>` : ""}`;
   } else {
     body = `<div class="au-row"><select class="inp sel" ${f("num")} aria-label="${esc(t("au.node"))}">${nodeOptions(s.num)}</select>
       <select class="inp sel" ${f("what")} aria-label="${esc(t("au.what"))}">${ASKABLE.map((k) => `<option value="${k}"${k === s.what ? " selected" : ""}>${esc(ASK_ALL[k].label)}</option>`).join("")}</select></div>`;
@@ -331,6 +344,7 @@ function onEditorChange(ev) {
     else if (k === "whenNum") { const num = el.value === "" ? null : Number(el.value); a.when = valueWhen(num, num != null ? dataOf(num)[0] : null); }
     else if (k === "whenKey") a.when = { ...valueWhen(a.when.num, el.value || null), for: a.when.for };
     else if (k === "op") a.when.op = el.value;
+    else if (k === "via") { a.when.via = el.value; drawEditor(); return; }
     else if (k === "stateValue") a.when.value = Number(el.value);
     else return onEditorInput(ev);
     if (["whenType", "whenNum", "whenKey"].includes(k)) drawEditor();
@@ -341,7 +355,7 @@ function onEditorChange(ev) {
   const k = el.dataset.auK;
   if (k === "ref" || k === "to" || k === "unit" || k === "what") s[k] = el.value;
   else if (k === "value") s.value = Number(el.value);
-  else if (k === "num") s.num = el.value === "" ? null : Number(el.value);
+  else if (k === "num" || k === "pos") s[k] = el.value === "" ? null : Number(el.value);
   else return onEditorInput(ev);
   if (k === "ref" || k === "value") drawEditor(); // the names of its states, the hint
 }
