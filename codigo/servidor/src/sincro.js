@@ -34,6 +34,7 @@ export const PARTES = {
   paneles: (S) => S.paneles ?? null, // nombres, paneles sin nodo, datos MQTT (configuración y últimos valores), malla
   usuarios: (S) => S.usuarios ?? [], // users and their sessions (never a password)
   automations: (S) => S.automations ?? null, // the automations, what they are waiting for and when each last ran
+  telegram: (S) => S.telegram ?? null, // the bot: on, whether there is a token (never the token), its name, the paired chats, the pairing code, state
   meshOrders: (S) => S.meshOrders ?? null, // orders over the mesh: on, the nodes allowed (start of their key), channel, words
 };
 

@@ -14,6 +14,8 @@ queda en tu equipo y funciona sin internet.
   un rato), esperas, mensajes por la malla y peticiones a nodos.
 - **Órdenes por la malla**: enciende y apaga cosas o pon en marcha automatizaciones con un mensaje desde un nodo
   Meshtastic, solo desde los nodos que autorices (con su clave comprobada), y recibe la respuesta por la malla.
+- **Telegram**: un bot te manda las alarmas al móvil (con botón de *Enterado*) y atiende órdenes y preguntas desde un
+  chat o un grupo, sin abrir ningún puerto en casa.
 - **Un año de histórico** en SQLite, con gráficas y exportación a CSV.
 - **Toda la malla**: mapa, lista con buscador, rutas y peticiones a los nodos (telemetría, posición, ficha,
   traceroute).

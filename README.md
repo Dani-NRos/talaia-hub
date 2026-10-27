@@ -13,6 +13,8 @@ machine; it works without internet.
   messages over the mesh and requests to nodes.
 - **Orders over the mesh**: switch things on and off or start automations with a message from a Meshtastic node,
   only from the nodes you allow (with their key checked), and get the answer back over the mesh.
+- **Telegram**: a bot sends the alarms to your phone (with an *Acknowledge* button) and takes orders and questions
+  from a chat or a group, with no port to open at home.
 - **A year of history** in SQLite, with charts and CSV export.
 - **The whole mesh**: map, list with search, routes, requests to nodes (telemetry, position, node info, traceroute).
 - **MQTT**: its own Mosquitto broker with users managed from the screen, other brokers at the same time, and data from

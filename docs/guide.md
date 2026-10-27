@@ -12,7 +12,7 @@ SQLite and a screen for the browser, even when no phone or computer is looking.
 - [The screen](#the-screen) · [From outside your home (Tailscale)](#from-outside-your-home-tailscale)
 - [Alerts over the mesh](#alerts-over-the-mesh) · [MQTT](#mqtt) · [Home Assistant](#home-assistant)
 - [Panels and MQTT data](#panels-and-mqtt-data) · [To the mesh (the receiver's panel)](#to-the-mesh-the-receivers-panel)
-- [Automations](#automations) · [Orders over the mesh](#orders-over-the-mesh)
+- [Automations](#automations) · [Orders over the mesh](#orders-over-the-mesh) · [Telegram](#telegram)
 
 ## What you need
 
@@ -533,3 +533,29 @@ Not taken as orders:
   connects, or is older than 10 minutes by the receiver's clock (which may be a few minutes off).
 - The same message heard twice (through a neighbour that relays it), and more than 20 orders in 10 minutes from the
   same node.
+
+## Telegram
+
+A Telegram bot sends the alarms to your phone and takes orders from a chat or a group. Nothing is opened at home:
+the server asks Telegram for what is new, so it works behind any router and with Tailscale. It is off until you set
+it up, and what it sends goes through Telegram's servers (the alarms' texts and your panels' readings when you ask
+for them), so leave it off if you'd rather keep all of it at home.
+
+- **Create the bot**: in Telegram, talk to *@BotFather*, send `/newbot` and give it a name. It answers with a
+  **token** (like `123456789:AAH…`). Paste it in *Settings → Telegram* and press *Save and connect*: Talaia checks
+  it and says *Connected as @yourbot*. The token is kept on the server and never shown again.
+- **Pair a chat or a group**: *Settings → Telegram* shows a **code**. Open a chat with your bot (or add it to a group)
+  and send the code as it is. The chat appears in the list and the code changes: one code pairs one chat. Anyone
+  else who finds the bot is told it needs a code, and nothing more. You can remove a chat from the list (it's told
+  it no longer gets anything), and a group that throws the bot out, or a person who blocks it, drops out by itself.
+- **Alarms**: every alarm that fires goes to every paired chat, with its detail and an **Acknowledge** button that
+  marks it seen in Talaia (the log says who, *Ana, by Telegram*). When the alarm is seen or clears, the button
+  becomes a note (*✓ Seen*, *✓ Cleared*). The alarms of MQTT data and of the receiver go too.
+- **In the chat**: `/paneles` shows a button per watched panel: press one and it answers with its readings now, when
+  its last datum came and its alarms (with their buttons). `/panel name` does the same by name. `/alarmas` lists the
+  active ones. `/ayuda` says all this.
+- **Orders**: the switches' words of [Orders over the mesh](#orders-over-the-mesh) work here too (`riego on`,
+  `riego off`, `riego ?`), and so do the automations' texts. In a group the bot only sees what starts with `/` or
+  mentions it, so write `/riego on` there. The answer comes back in the chat, and the log says who gave the order.
+- **A test message** (*Settings → Telegram → Send a test message*) tells you it reaches every paired chat.
+

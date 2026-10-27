@@ -168,6 +168,16 @@ function crearOrdenes(talaia) {
       }
       return talaia.meshOrders.configure(cambio);
     },
+    telegram: ({ cambio }) => {
+      exigir(cambio && typeof cambio === "object" && !Array.isArray(cambio), "cambio");
+      exigir(Object.keys(cambio).every((k) => ["on", "token"].includes(k)), "cambio");
+      if ("on" in cambio) exigir(typeof cambio.on === "boolean", "on");
+      if ("token" in cambio) exigir(cambio.token === null || (typeof cambio.token === "string" && cambio.token.length <= 100), "token");
+      return talaia.telegram.configure(cambio);
+    },
+    telegramCode: () => talaia.telegram.newCode(),
+    telegramRemoveChat: ({ id }) => { exigir(Number.isInteger(id), "id"); return talaia.telegram.removeChat(id); },
+    telegramTest: () => talaia.telegram.test(),
     meshOrdersNode: ({ num }) => { exigir(esNodo(num), "num"); return talaia.meshOrders.addNode(num); },
     meshOrdersRemoveNode: ({ num }) => { exigir(esNodo(num), "num"); return talaia.meshOrders.removeNode(num); },
     buscarTemas: () => talaia.paneles.buscarTemas(),
@@ -332,7 +342,7 @@ export function crearWeb(talaia, config, registro, opts = {}) {
       try { p = f(cuerpo, quien); } finally { S.actor = null; }
       const r = await p;
       sincro.vaciar(); // que las pantallas vean el cambio ya, antes de la respuesta
-      json(res, 200, { ok: !!r?.ok, toast: r?.toast || avisos[0], error: r?.error, ...(r?.radio != null ? { radio: r.radio } : {}), ...(r?.valor != null ? { valor: r.valor } : {}), ...(r?.temas ? { temas: r.temas } : {}), ...(r?.num != null ? { num: r.num } : {}), ...(r?.id != null ? { id: r.id } : {}) });
+      json(res, 200, { ok: !!r?.ok, toast: r?.toast || avisos[0], error: r?.error, ...(r?.radio != null ? { radio: r.radio } : {}), ...(r?.valor != null ? { valor: r.valor } : {}), ...(r?.temas ? { temas: r.temas } : {}), ...(r?.num != null ? { num: r.num } : {}), ...(r?.id != null ? { id: r.id } : {}), ...(r?.code ? { code: r.code } : {}) });
     } catch (e) {
       if (e instanceof ErrorOrden) return json(res, 400, { ok: false, error: e.message });
       registro.error(tx("s.j.orderFail", { what: cuerpo.orden, e: e.stack || e }));

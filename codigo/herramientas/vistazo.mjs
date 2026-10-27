@@ -158,7 +158,7 @@ for (const size of Object.keys(SIZES)) {
         continue;
       }
       if (v === "settings") {
-        for (const part of ["mesh", "mqtt", "receiver", "system", "users", "screen"]) {
+        for (const part of ["mesh", "mqtt", "telegram", "receiver", "system", "users", "screen"]) {
           await page.evaluate((x) => { location.hash = `#/settings/${x}`; }, part);
           await sleep(400);
           await page.screenshot({ path: path.join(out, `${size}-${scheme}-settings-${part}.png`), fullPage: true });

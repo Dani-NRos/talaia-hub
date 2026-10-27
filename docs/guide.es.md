@@ -12,7 +12,7 @@ histórico en SQLite y una pantalla para el navegador, aunque no haya ningún m�
 - [La pantalla](#la-pantalla) · [Desde fuera de casa (Tailscale)](#desde-fuera-de-casa-tailscale)
 - [Avisos por la malla](#avisos-por-la-malla) · [MQTT](#mqtt) · [Home Assistant](#home-assistant)
 - [Paneles y datos por MQTT](#paneles-y-datos-por-mqtt) · [A la malla (el panel del receptor)](#a-la-malla-el-panel-del-receptor)
-- [Automatizaciones](#automatizaciones) · [Órdenes por la malla](#órdenes-por-la-malla)
+- [Automatizaciones](#automatizaciones) · [Órdenes por la malla](#órdenes-por-la-malla) · [Telegram](#telegram)
 
 ## Qué hace falta
 
@@ -526,3 +526,30 @@ No se toman como órdenes:
 - Lo que esperaba en el receptor mientras el servidor no estaba conectado: lo que llega en los primeros 10 s tras
   conectar, o tiene más de 10 minutos según el reloj del receptor (que puede ir unos minutos desfasado).
 - El mismo mensaje oído dos veces (por un vecino que lo repite) y más de 20 órdenes en 10 minutos del mismo nodo.
+
+## Telegram
+
+Un bot de Telegram te manda las alarmas al móvil y atiende órdenes desde un chat o un grupo. No se abre nada en
+casa: el servidor le pregunta a Telegram qué hay de nuevo, así que funciona detrás de cualquier router y con
+Tailscale. Está apagado hasta que lo configuras, y lo que manda pasa por los servidores de Telegram (los textos de las
+alarmas y las lecturas de tus paneles cuando las pides), así que déjalo apagado si prefieres que todo se quede en casa.
+
+- **Crear el bot**: en Telegram, habla con *@BotFather*, manda `/newbot` y ponle un nombre. Te contesta con un
+  **token** (como `123456789:AAH…`). Pégalo en *Ajustes → Telegram* y pulsa *Guardar y conectar*: Talaia lo comprueba
+  y dice *Conectado como @tubot*. El token se guarda en el servidor y no vuelve a mostrarse.
+- **Emparejar un chat o un grupo**: *Ajustes → Telegram* enseña un **código**. Abre un chat con tu bot (o añádelo a
+  un grupo) y manda el código tal cual. El chat aparece en la lista y el código cambia: un código empareja un chat.
+  A cualquier otro que encuentre el bot se le dice que hace falta un código, y nada más. Puedes quitar un chat de la
+  lista (se le avisa de que ya no recibe nada), y un grupo que echa al bot, o una persona que lo bloquea, sale solo.
+- **Alarmas**: cada alarma que salta va a todos los chats emparejados, con su detalle y un botón **Enterado** que la
+  da por vista en Talaia (el registro dice quién: *Ana, por Telegram*). Cuando la alarma se ve o se resuelve, el botón
+  pasa a ser una nota (*✓ Vista*, *✓ Resuelta*). Van también las alarmas de los datos MQTT y las del receptor.
+- **En el chat**: `/paneles` enseña un botón por cada panel vigilado: pulsa uno y contesta con sus datos de ahora,
+  cuándo llegó el último y sus alarmas (con sus botones). `/panel nombre` hace lo mismo por el nombre. `/alarmas`
+  lista las activas. `/ayuda` cuenta todo esto.
+- **Órdenes**: las palabras de los interruptores de [Órdenes por la malla](#órdenes-por-la-malla) valen aquí también
+  (`riego on`, `riego off`, `riego ?`), y los textos de las automatizaciones. En un grupo el bot solo ve lo que empieza
+  por `/` o lo menciona, así que allí escribe `/riego on`. La respuesta vuelve al chat y el registro dice quién dio la
+  orden.
+- **Un mensaje de prueba** (*Ajustes → Telegram → Mandar un mensaje de prueba*) te dice que llega a todos los chats.
+

@@ -11,6 +11,7 @@ import os from "node:os";
 import { crearServicioMqtt, migrar as migrarMqtt } from "./mqtt.js";
 import { crearSalidaHA } from "./homeassistant.js";
 import { crearPaneles, migrarEstacion } from "./paneles.js";
+import { createTelegram } from "./telegram.js";
 import { createAutomations } from "./automations.js";
 import { createMeshOrders } from "./mesh-orders.js";
 import { crearBrokerLocal } from "./mosquitto.js";
@@ -200,6 +201,9 @@ export async function crearTalaia(config, registro, opts = {}) {
   /* ── automations (2.1): «if … then …» ── */
   const automations = createAutomations({ S, motor, paneles, almacen, eventos, registro, timing: opts.automations, orderWords: () => meshOrders?.words() ?? new Set() });
   meshOrders = createMeshOrders({ S, motor, paneles, automations, almacen, eventos, timing: opts.meshOrders });
+  /* ── Telegram: the alarms to a bot, and orders from it ── */
+  // (TALAIA_TELEGRAM_API points the bot at a fake Bot API: only the tools in herramientas/ use it)
+  const telegram = createTelegram({ S, motor, paneles, meshOrders, almacen, eventos, registro }, opts.telegram ?? (process.env.TALAIA_TELEGRAM_API ? { api: process.env.TALAIA_TELEGRAM_API, timing: { poll: 1 } } : undefined));
 
   /* ── tareas periódicas ── */
   // Sin señal y los estados que tienen que durar un tiempo («abierta más de 10 min»).
@@ -230,7 +234,7 @@ export async function crearTalaia(config, registro, opts = {}) {
   const resumenId = setInterval(resumen, HOUR);
 
   return {
-    S, motor, acciones, almacen, eventos, mqtt, paneles, usuarios, automations, meshOrders,
+    S, motor, acciones, almacen, eventos, mqtt, paneles, usuarios, automations, meshOrders, telegram,
     get receptor() { return receptor; },
     /** The server's language: what it writes from now on (what is already in the log stays as it was). */
     idioma(l) {
@@ -239,6 +243,7 @@ export async function crearTalaia(config, registro, opts = {}) {
         S.settings.language = l;
         setLanguage(l);
         paneles.reetiquetar();
+        telegram.relabel();
         motor.guardar("settings"); // to the screens; Home Assistant gets its names again
         registro.info(tx("s.j.language", { name: tx(`s.lang.${l}`) }));
       }
@@ -252,6 +257,7 @@ export async function crearTalaia(config, registro, opts = {}) {
       mqtt.arrancar();
       paneles.arrancar();
       automations.start();
+      telegram.start();
     },
     async detener() {
       if (cerrado) return;
@@ -260,6 +266,7 @@ export async function crearTalaia(config, registro, opts = {}) {
       clearInterval(sesionesId);
       clearInterval(resumenId);
       automations.stop();
+      await telegram.stop();
       paneles.parar();
       await mqtt.parar(); // antes de cerrar: deja dicho «offline» a Home Assistant
       await receptor.disconnect();

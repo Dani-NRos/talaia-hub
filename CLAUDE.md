@@ -57,11 +57,12 @@ codigo/                 npm workspaces: npm install, npm test, npm run build
     src/paneles.js      panels: names, panels without a node (negative numbers), MQTT data («mq1»…), switches,
                         the receiver's data to the mesh
     src/automations.js  automations (2.1); src/mesh-orders.js orders over the mesh (2.1)
+    src/telegram.js     the Telegram bot: long polling, pairing by code, alarms with a button, commands and orders
     instalar.sh sistema/  installer (own Node in /opt/talaia, Mosquitto from apt), systemd units, udev rule
     test/               node --test; nodo-falso.mjs is a simulated Meshtastic node (real protobuf) over TCP or a
                         virtual serial port; aedes is an MQTT broker in memory; mosquitto.test.mjs needs Mosquitto
   herramientas/         pantalla-servidor.mjs (end to end with Playwright), vistazo.mjs (screenshots of every section),
-                        scroll.mjs (the scroll of the sheet and Settings must not move), pestanas.mjs (the sheet's tabs), orden.mjs (order of data and charts), cursor.mjs (the charts' cursor),
+                        scroll.mjs (the scroll of the sheet and Settings must not move), pestanas.mjs (the sheet's tabs), orden.mjs (order of data and charts), cursor.mjs (the charts' cursor), telegram.mjs (Settings → Telegram against a fake Bot API),
                         docker-prueba.mjs (the image with compose): see herramientas/LEEME.md
 Dockerfile docker/      the image and compose.yaml
 .github/workflows/      ci.yml (tests on Node 22 and 24, build, image amd64+arm64) and release.yml (image to ghcr.io)
@@ -89,6 +90,13 @@ The engine gets the state object `S` (see `estadoInicial()`) and hooks; the app 
   one pinned when added, or anyone on the chosen private channel; answers back the same way through `meshSay`.
   Answers must never read as orders, and on a channel only orders are answered. What waited in the receiver (10 s
   after connecting, or older than 10 min by its clock) isn't taken.
+- **Telegram** (`telegram.js`): long polling against `api.telegram.org` (the tests and `herramientas/telegram.mjs`
+  point `opts.telegram.api` / `TALAIA_TELEGRAM_API` at a fake Bot API: the real one isn't reachable from these
+  sessions). The token lives in SQLite («telegram») and never goes out (`S.telegram.hasToken`). A chat pairs with the
+  code in `S.telegram.code` (one code, one chat); unpaired chats are told once every 10 min and otherwise ignored. Alarms
+  go out on the engine's `alarma` event with an `ack:<key>` button; the message is edited when the alarm is seen or
+  clears (`tracked`). Text orders go through `meshOrders.order(text, { who, by, send })`, the same parser as the mesh.
+  In a group the bot only sees `/…` or mentions: `/riego on@bot` is read as `riego on`.
 - **Home Assistant**: only watched nodes, as devices «Talaia · name», without position; base topic `talaia` by
   default and the ids come from it (`prefijoIds`).
 - **Users**: one kind of user (everyone can do everything); sessions in an HttpOnly cookie, only their SHA-256 in the

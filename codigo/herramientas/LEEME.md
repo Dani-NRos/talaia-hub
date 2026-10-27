@@ -26,6 +26,10 @@ Necesitan Playwright con Chromium (no va en el repo: se busca en `PLAYWRIGHT_DIR
 - **`cursor.mjs [carpeta]`**: el cursor de las gráficas: valor y hora con el ratón (ficha y pantalla completa) y con el
   dedo (móvil), en una línea y en una barra ON/OFF (con un broker MQTT en memoria), que vuelve al redibujarse, que la
   etiqueta queda dentro de su gráfica y que se quita al salir o tocar fuera. Sale con 1 si algo falla.
+- **`telegram.mjs [carpeta]`**: Ajustes → Telegram contra un Telegram de mentira (el servidor arranca con
+  `TALAIA_TELEGRAM_API` apuntando a él): guardar y comprobar el token, el código de emparejar, un chat y un grupo que
+  se emparejan y salen en la lista, el mensaje de prueba, quitar un chat, apagar y encender, quitar el bot. Sale con 1
+  si algo falla.
 - **`scroll.mjs`**: que el scroll no se mueva: la ficha de un nodo (con su alarma y las lecturas de otro nodo que
   también la tiene) y Ajustes, con el servidor de verdad y un nodo simulado. Sale con 1 si algo falla.
 - **`iconos.mjs`**: dibuja los iconos de la app (`app/pwa/icon-*.png`) con la torre de `app/src/logo.js`.

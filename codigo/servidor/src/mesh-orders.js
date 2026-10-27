@@ -111,7 +111,12 @@ export function createMeshOrders({ S, motor, paneles, automations, almacen, even
     motor.addLog("info", tx("s.log.moRefused", { who: nodeName(p.from), why: tx(`s.mo.why.${why}`) }), p.from >= 0 ? p.from : null);
   }
 
-  function answer(path, text) { if (path.reply) motor.meshSay(path.reply, text); }
+  /** The answer goes back the way the order came: over the mesh, or to whoever else brought it (Telegram: `send`). */
+  function answer(path, text) {
+    if (!path.reply) return;
+    if (path.reply.send) path.reply.send(text);
+    else motor.meshSay(path.reply, text);
+  }
 
   function packet(p) {
     const dec = p.payloadVariant?.case === "decoded" ? p.payloadVariant.value : null;
@@ -160,7 +165,7 @@ export function createMeshOrders({ S, motor, paneles, automations, almacen, even
     if (cmd.kind === "bad") return path.dm && answer(path, tx("s.mo.how", { word: sw.word }));
     if (cmd.kind === "state") return answer(path, stateText(sw, name));
     const r = await paneles.mandar(sw.num, sw.key, cmd.v, {
-      by: tx("s.mo.by", { who }),
+      by: path.by || tx("s.mo.by", { who }),
       done: (ok) => answer(path, ok ? tx("s.mo.done", { name, state: fmtValue(sw.key, cmd.v) }) : tx("s.mo.noAnswer", { name, state: fmtValue(sw.key, cmd.v) })),
     });
     if (!r.ok) answer(path, tx("s.mo.fail", { name, e: r.error }));
@@ -172,8 +177,7 @@ export function createMeshOrders({ S, motor, paneles, automations, almacen, even
     return since < MIN ? tx("s.mo.stateNew", { name, state: fmtValue(sw.key, m.v) }) : tx("s.mo.state", { name, state: fmtValue(sw.key, m.v), d: dur(since) });
   }
   function helpText() {
-    const list = switches().filter((x) => datum(x.num, x.key)?.orden).map((x) => `${x.word} on/off/?`)
-      .concat([...automations.meshTexts()]);
+    const list = api.helpList();
     return list.length ? tx("s.mo.help", { list: list.join(", ") }) : tx("s.mo.helpNone");
   }
 
@@ -200,8 +204,20 @@ export function createMeshOrders({ S, motor, paneles, automations, almacen, even
   }
 
   publish();
-  return {
+  const api = {
     packet,
+    /**
+     * An order that didn't come over the mesh (Telegram): the same words and answers. `send(text)` gets the answers;
+     * `by` is how the log says who did it. Returns false if the text isn't an order (help included).
+     */
+    order(text, { who, by, send }) {
+      const cmd = parse(text);
+      if (!cmd) return false;
+      run(cmd, { dm: true, reply: { send }, by }, who);
+      return true;
+    },
+    /** What the help lists (switch words and automation texts), for other channels' own help. */
+    helpList() { return switches().filter((x) => datum(x.num, x.key)?.orden).map((x) => `${x.word} on/off/?`).concat([...automations.meshTexts()]); },
     /** The receiver is ready: what arrives in the next seconds was waiting in it. */
     ready() { readyAt = Date.now(); },
     publicKey(num, key) {
@@ -252,4 +268,5 @@ export function createMeshOrders({ S, motor, paneles, automations, almacen, even
       return { ok: true, toast: tx("s.mo.nodeRemoved", { name: nodeName(num) }) };
     },
   };
+  return api;
 }

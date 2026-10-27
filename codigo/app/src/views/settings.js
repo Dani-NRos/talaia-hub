@@ -12,6 +12,7 @@ import { displayName } from "./dashboard.js";
 import { brokerLabel } from "./panel-config.js";
 import { usersTab, usersClick } from "./users.js";
 import { meshOrdersHTML, meshOrdersClick, meshOrdersChange, meshOrdersInput } from "./mesh-orders.js";
+import { telegramHTML, telegramClick, telegramChange, telegramInput } from "./telegram.js";
 import { unlockAudio, beep, applyWake, notificationState } from "../alerts.js";
 import { channelWhy } from "@talaia/nucleo/canales.js";
 import { hexId, MESH_HOURLY } from "@talaia/nucleo/motor.js";
@@ -25,7 +26,7 @@ const REPO_URL = "https://github.com/Dani-NRos/talaia-hub";
 const ISSUES_URL = `${REPO_URL}/issues`;
 export const TILE_CACHE = "teselas-osm"; // the same name as in sw.js
 
-export const TABS = ["mesh", "mqtt", "receiver", "system", "users", "screen"];
+export const TABS = ["mesh", "mqtt", "telegram", "receiver", "system", "users", "screen"];
 const TAB_KEY = "talaia.settingsTab";
 let tab = null;
 let hooks = { languageChanged() {}, saveDeviceSettings() {} };
@@ -33,7 +34,8 @@ let hooks = { languageChanged() {}, saveDeviceSettings() {} };
 const S = () => ctx.S;
 const box = () => $("#settings");
 function showErr(el, msg) { if (!el) return; el.textContent = msg; el.hidden = false; }
-const typingIn = (sel) => !!document.activeElement?.matches?.(`${sel} input, ${sel} select`);
+// (a checkbox that was just pressed has the focus too, but nothing is being typed in it)
+const typingIn = (sel) => !!document.activeElement?.matches?.(`${sel} input:not([type=checkbox]), ${sel} select`);
 
 /**
  * hooks.languageChanged(): after a change of language, to redraw what is outside Settings.
@@ -63,7 +65,7 @@ export function enterSettings(sub) {
 export function renderSettings() {
   if (!tab) return;
   const tabs = TABS.map((k) => `<a href="#/settings/${k}" class="tab"${k === tab ? ' aria-current="page"' : ""}>${esc(t(`set.tab.${k}`))}</a>`).join("");
-  const body = { mesh: meshTab, mqtt: mqttTab, receiver: receiverTab, system: systemTab, users: usersTab, screen: screenTab }[tab]();
+  const body = { mesh: meshTab, mqtt: mqttTab, telegram: telegramHTML, receiver: receiverTab, system: systemTab, users: usersTab, screen: screenTab }[tab]();
   // The same part painted again (something arrived): the page stays where it was. Another part starts at the top.
   const y = box().querySelector(".tab-b")?.dataset.tab === tab ? window.scrollY : 0;
   box().innerHTML = `<nav class="tabs" aria-label="${esc(t("set.tabs"))}">${tabs}</nav><div class="tab-b" data-tab="${tab}">${body}</div>`;
@@ -83,6 +85,7 @@ export function patchSettings(p) {
   const redraw = {
     mesh: ["settings", "channels", "myNode", "meshOrders"],
     mqtt: [],
+    telegram: ["telegram"],
     receiver: ["link", "trouble", "device", "lora", "channels", "myNode", "myUser"],
     system: ["settings"],
     users: ["usuarios"],
@@ -442,6 +445,7 @@ async function onClick(ev) {
   const { orden, toast } = ctx;
   if (tab === "users" && (await usersClick(b, renderSettings))) return;
   if (tab === "mesh" && b.closest("#moBox") && (await meshOrdersClick(b, renderSettings))) return;
+  if (tab === "telegram" && (await telegramClick(b, renderSettings))) return;
   if ("brkNuevo" in ds) { brokerEdit = { id: null, nombre: "", url: "", usuario: "", clave: "", activado: true }; renderMqtt(); return $("#brkNombre")?.focus(); }
   if ("brkEdit" in ds) { const x = brokers().find((y) => y.id === ds.brkEdit); if (x) brokerEdit = { id: x.id, nombre: x.nombre, url: x.url, usuario: x.usuario, clave: "", activado: x.activado }; return renderMqtt(); }
   if ("brkCancel" in ds) { brokerEdit = null; return renderMqtt(); }
@@ -489,6 +493,7 @@ async function onChange(ev) {
   const { orden, toast } = ctx;
   if (el.closest("#mqttBox")) return editMqtt(el);
   if (el.closest("#moBox")) return meshOrdersChange(el);
+  if (el.closest("#tgBox")) return telegramChange(el);
   if (el.id === "setLang") {
     setLang(el.value);
     hooks.languageChanged();
@@ -524,4 +529,5 @@ async function onChange(ev) {
 function onInput(ev) {
   if (ev.target.closest("#mqttBox")) editMqtt(ev.target);
   if (ev.target.closest("#moBox")) meshOrdersInput(ev.target);
+  if (ev.target.closest("#tgBox")) telegramInput(ev.target);
 }
