@@ -6,7 +6,7 @@ import { $, esc, setHTML, LS, ICON, renameStored } from "./ui.js";
 import { refreshPosition, copyText, patchSwitches, setFence, setFenceRadius, removeFence, toggleSwitch } from "./views/node-parts.js";
 import { renderNodes, onNodesQuery, saveNodesView } from "./views/nodes.js";
 import { renderLog } from "./views/alarms.js";
-import { boardHTML, renderCards, toggleCard, toggleAllCards, moveCard, watchCardsWidth } from "./views/dashboard.js";
+import { boardHTML, renderCards, toggleCard, toggleAllCards, moveCard, watchCardsWidth, toggleBoard } from "./views/dashboard.js";
 import { openSheet, onSheetClose, renderSheet, drawCharts, refreshSheetLive, refreshRequests, patchRequestStatus, legHops, setSheetRange, setSheetTab, sheetTabKey, resizeSheet, trendFormFill, addTrend, removeTrend, saveStateAlarm, saveRuleFromInput, watch, unwatch, isSheetOpen } from "./views/sheet.js";
 import { patchPanels, data, meshOut, newPanelSheet, createPanel } from "./views/panel-config.js";
 import { openFull, closeFull, refreshFull, setFullRange, resizeFull, repaintFull } from "./views/fullscreen.js";
@@ -130,10 +130,10 @@ function renderTop() {
 }
 
 function renderBoard() {
-  const html = boardHTML();
-  setHTML($("#board"), html);
-  setHTML($("#alarmBoard"), html);
+  setHTML($("#board"), boardHTML({ foldable: true })); // the dashboard: seen alarms can be folded away
+  setHTML($("#alarmBoard"), boardHTML()); // Alarms: always the whole list
 }
+ctx.renderBoard = renderBoard;
 
 /* ───────────── tarjetas de los nodos vigilados ───────────── */
 
@@ -217,6 +217,7 @@ document.addEventListener("click", async (ev) => {
   if ("ask" in ds) return askUI(Number(ds.num), ds.ask);
   if ("mapFocus" in ds) return openMap(Number(ds.mapFocus));
   if ("cardToggle" in ds) return toggleCard(Number(ds.cardToggle));
+  if ("boardToggle" in ds) return toggleBoard();
   if ("cardsAll" in ds) return toggleAllCards();
   if ("order" in ds) { S.ordering = true; renderCards(); return $("#cards .ord-row [data-move]")?.focus(); }
   if ("orderDone" in ds) { S.ordering = false; renderCards(); return toast(tr("dash.orderSaved")); }

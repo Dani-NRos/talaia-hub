@@ -12,6 +12,15 @@
 .board.calm { display: flex; align-items: center; gap: 14px; background: var(--surface); border: 1px solid var(--line); }
 .board.calm h2 { font-size: 18px; }
 .board.calm p { color: var(--ink-2); font-size: 14px; }
+/* the seen alarms, folded to one line: the names cut with «…»; the chevron at the right end */
+.board.calm { min-width: 0; }
+.board.calm > div { min-width: 0; flex: 1; }
+.board.calm.min p { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.calm-dot.warn { background: var(--warn); animation: none; }
+.board .tg svg { transition: transform .15s; }
+.board.min .tg svg { transform: rotate(-90deg); }
+.board-h .tg { margin-left: auto; }
+.board-h .btn + .tg { margin-left: 0; }
 .calm-dot { width: 12px; height: 12px; border-radius: 50%; background: var(--ok); flex: none; animation: breathe 3.2s ease-out infinite; }
 .board-h { display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: 8px 12px; }
 .al-list { list-style: none; margin: 10px 0 0; padding: 0; display: grid; }

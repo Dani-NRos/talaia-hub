@@ -50,8 +50,12 @@ export const trendShort = (k, rule) => `${rule.dir === "down" ? "↓" : "↑"}${
 
 /* ── the alarm notice ── */
 
-/** Alarm notice (or all clear), the server's connection problems and what is paused: for the dashboard and Alarms. */
-export function boardHTML() {
+/**
+ * Alarm notice (or all clear), the server's connection problems and what is paused: for the dashboard and Alarms.
+ * foldable: on the dashboard, when every alarm is seen the notice can be folded to one line (the size of «all
+ * clear»), and this device remembers it; a new unseen alarm unfolds it by itself.
+ */
+export function boardHTML({ foldable = false } = {}) {
   const { S, motor } = ctx;
   const list = [...S.active.values()].sort((a, b) => (a.acked - b.acked) || (b.since - a.since));
   const watchedN = Object.keys(S.cfg.watched).length;
@@ -59,7 +63,14 @@ export function boardHTML() {
   if (list.length) {
     const open = list.filter((a) => !a.acked).length;
     const title = open ? t(open === 1 ? "board.open1" : "board.open", { n: open }) : t(list.length === 1 ? "board.seen1" : "board.seen", { n: list.length });
-    html += `<div class="board ${open ? "crit" : "seen"}"><div class="board-h"><h2>${esc(title)}</h2>${open > 1 ? `<button class="btn on-dark" data-ackall>${esc(t("board.ackAll"))}</button>` : ""}</div><ul class="al-list">`;
+    const fold = foldable && !open;
+    const min = fold && S.ui.boardMin;
+    const tg = fold ? `<button type="button" class="icon-btn tg" data-board-toggle aria-expanded="${!min}" aria-label="${esc(t(min ? "board.unfold" : "board.fold"))}">${ICON.chevron}</button>` : "";
+    if (min) {
+      // Folded: like «all clear», with the alarms' names on one line.
+      return `<div class="board seen calm min"><span class="calm-dot warn"></span><div><h2>${esc(title)}</h2><p>${esc(list.map((a) => motor.alarmTitle(a)).join(" · "))}</p></div>${tg}</div>${troubleHTML()}`;
+    }
+    html += `<div class="board ${open ? "crit" : "seen"}"><div class="board-h"><h2>${esc(title)}</h2>${open > 1 ? `<button class="btn on-dark" data-ackall>${esc(t("board.ackAll"))}</button>` : ""}${tg}</div><ul class="al-list">`;
     for (const a of list) {
       html += `<li class="al${a.acked ? " acked" : ""}" data-kind="${a.kind}"><div class="al-main"${a.num != null ? ` data-open="${a.num}"` : ""}><strong>${esc(motor.alarmTitle(a))}</strong><span>${esc(motor.alarmDetail(a))}${a.late ? ` ${esc(t("board.late"))}` : ""}</span></div><div class="al-side"><span class="al-t">${esc(t("board.since", { stamp: stamp(a.since) }))}</span>${a.acked ? `<span class="al-ok">${esc(t("board.seenTag"))}</span>` : `<button class="btn on-dark" data-ack="${esc(a.key)}">${esc(t("board.ack"))}</button>`}</div></li>`;
     }
@@ -93,6 +104,12 @@ function troubleHTML() {
 
 // Collapsed cards and chosen order: saved on this device (apart from the alarms, which are the server's).
 export function saveCardUi() { LS.set("talaia.cards", ctx.S.ui); }
+/** The alarm notice folded or not (only while every alarm is seen). */
+export function toggleBoard() {
+  ctx.S.ui.boardMin = !ctx.S.ui.boardMin;
+  saveCardUi();
+  ctx.renderBoard();
+}
 
 /** Watched panels in the chosen order; those without a place yet go last, by name. */
 export function watchedOrder() {

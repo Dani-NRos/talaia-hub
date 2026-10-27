@@ -183,6 +183,9 @@ son los del servidor: todos tus aparatos ven lo mismo, y si das *Enterado* en un
   buscador: desde ahí se vigila un nodo), *Automatizaciones* (ver [Automatizaciones](#automatizaciones)), *Alarmas* (las
   activas y el registro) y *Ajustes*. En el ordenador van en una barra a la izquierda; en el móvil, abajo, y *Ajustes*
   en el engranaje de arriba.
+- **El aviso de alarmas** de arriba del Tablero lista las activas. Cuando todas están vistas, una flecha lo contrae a
+  una línea, lo que ocupa *Todo en orden*, y este aparato lo recuerda; una alarma nueva lo despliega. *Alarmas* enseña
+  siempre la lista entera.
 - **La ficha de un nodo o panel** (se abre pulsando su nombre) tiene pestañas: *Nodo* (pedir datos, ruta, ubicación y
   valla; solo en nodos Meshtastic), *Alarmas* (sin señal, límites, estados, cambio rápido), *Histórico* (las gráficas)
   y *Ajustes* (nombre, datos MQTT, conexión, lo que sale a la malla, y dejar de vigilar o quitar el panel). Uno que no

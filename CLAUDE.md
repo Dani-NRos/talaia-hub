@@ -62,7 +62,7 @@ codigo/                 npm workspaces: npm install, npm test, npm run build
     test/               node --test; nodo-falso.mjs is a simulated Meshtastic node (real protobuf) over TCP or a
                         virtual serial port; aedes is an MQTT broker in memory; mosquitto.test.mjs needs Mosquitto
   herramientas/         pantalla-servidor.mjs (end to end with Playwright), vistazo.mjs (screenshots of every section),
-                        scroll.mjs (the scroll of the sheet and Settings must not move), pestanas.mjs (the sheet's tabs), orden.mjs (order of data and charts), cursor.mjs (the charts' cursor), telegram.mjs (Settings → Telegram against a fake Bot API),
+                        scroll.mjs (the scroll of the sheet and Settings must not move), pestanas.mjs (the sheet's tabs), orden.mjs (order of data and charts), cursor.mjs (the charts' cursor), telegram.mjs (Settings → Telegram against a fake Bot API), tablero.mjs (the alarm notice folds),
                         docker-prueba.mjs (the image with compose): see herramientas/LEEME.md
 Dockerfile docker/      the image and compose.yaml
 .github/workflows/      ci.yml (tests on Node 22 and 24, build, image amd64+arm64) and release.yml (image to ghcr.io)

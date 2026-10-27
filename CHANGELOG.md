@@ -2,6 +2,8 @@
 
 ## Unreleased
 
+- **The alarm notice of the Dashboard folds** once every alarm is seen: one line, the size of *All clear*, with the
+  alarms' names; each device remembers it, and a new alarm unfolds it. *Alarms* keeps the whole list.
 - **Telegram** (*Settings → Telegram*): paste a bot's token from @BotFather and pair a chat or a group with a code.
   Every alarm goes there with an *Acknowledge* button (the log says who pressed it); `/paneles`, `/panel name`,
   `/alarmas` and `/ayuda` answer in the chat (a panel's answer has buttons for its switches), and the switches' words

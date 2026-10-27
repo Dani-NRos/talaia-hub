@@ -30,6 +30,9 @@ Necesitan Playwright con Chromium (no va en el repo: se busca en `PLAYWRIGHT_DIR
   `TALAIA_TELEGRAM_API` apuntando a él): guardar y comprobar el token, el código de emparejar, un chat y un grupo que
   se emparejan y salen en la lista, el mensaje de prueba, quitar un chat, apagar y encender, quitar el bot. Sale con 1
   si algo falla.
+- **`tablero.mjs [carpeta]`**: el aviso de alarmas del Tablero: con una alarma sin ver no se contrae; vistas todas,
+  se contrae a una línea (lo que ocupa «Todo en orden»), el aparato lo recuerda, una alarma nueva lo despliega y
+  Alarmas sigue con la lista entera. Sale con 1 si algo falla.
 - **`scroll.mjs`**: que el scroll no se mueva: la ficha de un nodo (con su alarma y las lecturas de otro nodo que
   también la tiene) y Ajustes, con el servidor de verdad y un nodo simulado. Sale con 1 si algo falla.
 - **`iconos.mjs`**: dibuja los iconos de la app (`app/pwa/icon-*.png`) con la torre de `app/src/logo.js`.

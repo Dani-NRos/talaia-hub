@@ -185,6 +185,9 @@ the server's: all your devices see the same, and an *Acknowledge* on one is seen
   its search: a node is watched from there), *Automations* (see [Automations](#automations)), *Alarms* (the active ones
   and the log) and *Settings*. On a computer they're in a bar on the left; on a phone, at the bottom, with *Settings* in
   the gear at the top.
+- **The alarm notice** at the top of the Dashboard lists the active alarms. Once every one is seen, a chevron folds
+  it to one line, the size of *All clear*, and this device remembers it; a new alarm unfolds it. *Alarms* always
+  shows the whole list.
 - **A node's or panel's sheet** (press its name) has tabs: *Node* (ask for data, route, position and fence; only for
   Meshtastic nodes), *Alarms* (no signal, limits, states, quick change), *History* (the charts) and *Settings* (name,
   MQTT data, connection, what goes out to the mesh, and stop watching or remove the panel). One that isn't watched only
