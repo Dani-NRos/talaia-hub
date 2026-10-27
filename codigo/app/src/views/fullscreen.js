@@ -3,7 +3,7 @@
 import { ctx } from "../ctx.js";
 import { t } from "../i18n.js";
 import { $, $$, esc, setHTML, fitSame, ICON } from "../ui.js";
-import { chartSVG, stateSpans, stateSummary, stateSVG } from "../charts.js";
+import { chartSVG, stateSpans, stateSummary, stateSVG, hoverable } from "../charts.js";
 import { switchHTML } from "./node-parts.js";
 import { shownKeys, ordering, editorHTML, cardButton, orderButton } from "./metric-order.js";
 import { isDragging } from "../order-drag.js";
@@ -153,10 +153,12 @@ export async function drawFullCharts() {
     if (isState) {
       const spans = stateSpans(ser, from, to, S.nodes.get(num)?.metrics?.[k]);
       box.innerHTML = stateSVG(spans, k, from, to, W, Math.min(H, 90));
+      hoverable(box, { spans, metric: k });
       $(`[data-fmm="${k}"]`, fig).textContent = stateSummary(k, spans);
       continue;
     }
     box.innerHTML = chartSVG(ser, k, rules[k], from, to, W, H);
+    hoverable(box, { series: ser, metric: k });
     const vals = ser.map((p) => p.v).filter((v) => !(k === "batteryLevel" && v > 100));
     $(`[data-fmm="${k}"]`, fig).textContent = vals.length ? t("sheet.minmax", { min: fmtNum(Math.min(...vals), metricMeta(k).dec), max: fmtNum(Math.max(...vals), metricMeta(k).dec) }) : "";
   }

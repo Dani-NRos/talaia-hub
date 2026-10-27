@@ -61,7 +61,7 @@ codigo/                 npm workspaces: npm install, npm test, npm run build
     test/               node --test; nodo-falso.mjs is a simulated Meshtastic node (real protobuf) over TCP or a
                         virtual serial port; aedes is an MQTT broker in memory; mosquitto.test.mjs needs Mosquitto
   herramientas/         pantalla-servidor.mjs (end to end with Playwright), vistazo.mjs (screenshots of every section),
-                        scroll.mjs (the scroll of the sheet and Settings must not move), pestanas.mjs (the sheet's tabs), orden.mjs (order of data and charts),
+                        scroll.mjs (the scroll of the sheet and Settings must not move), pestanas.mjs (the sheet's tabs), orden.mjs (order of data and charts), cursor.mjs (the charts' cursor),
                         docker-prueba.mjs (the image with compose): see herramientas/LEEME.md
 Dockerfile docker/      the image and compose.yaml
 .github/workflows/      ci.yml (tests on Node 22 and 24, build, image amd64+arm64) and release.yml (image to ghcr.io)
@@ -106,6 +106,11 @@ The engine gets the state object `S` (see `estadoInicial()`) and hooks; the app 
   the fixed order (`sortMetrics(keys, order)`). The editor is `views/metric-order.js` (arrows, and `order-drag.js` for
   dragging, shared with the board's order); the screen applies a change at once and the server's echo repaints only
   if it differs (`layoutsSig` in `app.js`). `herramientas/orden.mjs` checks it.
+- **The charts' cursor** (`hoverable` in `charts.js`): `chartSVG`/`stateSVG` put the plot's geometry in `data-*` of the
+  svg and the code that draws them calls `hoverable(box, { series | spans, metric })`; one set of document pointer
+  listeners shows the nearest reading (or the ON/OFF span, within 8 px) with a line and an HTML label. The svg has
+  `touch-action: pan-y` so the page still scrolls; when the chart is drawn again the cursor comes back.
+  `herramientas/cursor.mjs` checks it.
 - **Repainting keeps the scroll**: the parts that arrive (`active`, `cfg`…) are not specific to the sheet's node, so
   `renderSheet()` skips the repaint when its HTML is the same as the last one (`{ force: true }` when opening it) and,
   when it does repaint, puts `.sheet-b` back where it was (`holdScroll`/`releaseScroll`: the charts fill in later and

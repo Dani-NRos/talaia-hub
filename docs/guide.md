@@ -196,6 +196,9 @@ the server's: all your devices see the same, and an *Acknowledge* on one is seen
   *On the card* button: that is the chart the panel's card on the Dashboard shows (press it again to let Talaia pick
   one). It's kept by the server, per panel, so every screen sees the same; what has no place yet (a new reading) goes
   last.
+- **The charts** say the value and the time of a reading when you move the mouse over them or touch them (on an
+  ON/OFF bar: the state, from when to when and how long). With a finger, drag sideways to move along the line; tap
+  elsewhere to hide it.
 - **Settings**, in parts: *Mesh* (no signal for new nodes, alerts and orders over the mesh), *MQTT* (brokers, users of
   this machine's broker, Home Assistant), *Receiver* (status, node, radio, channels, diagnostics), *System* (the
   server's language, history, about), *Users* and *This screen* (language, light or dark theme, sound, notifications,

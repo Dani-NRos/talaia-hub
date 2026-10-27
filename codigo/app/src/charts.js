@@ -2,7 +2,7 @@
 // as a time bar instead of a line.
 import { t, locale } from "./i18n.js";
 import { esc } from "./ui.js";
-import { metricMeta, fmtNum, fmtLimit } from "@talaia/nucleo/metrics.js";
+import { metricMeta, fmtNum, fmtLimit, fmtWithUnit } from "@talaia/nucleo/metrics.js";
 import { MIN, HOUR, DAY, isNum, hhmm, dShort, dur, stamp } from "@talaia/nucleo/textos.js";
 
 const WEEKDAY = new Map();
@@ -63,6 +63,9 @@ function timeAxis(from, to, W, x, top, bottom, H) {
   return g;
 }
 
+/** Where the plot is inside a chart, for the cursor (see `hoverable`). */
+const geo = (o) => Object.entries(o).map(([k, v]) => `data-${k}="${v}"`).join(" ");
+
 /** Full chart with axes, in real pixels. */
 export function chartSVG(series, metric, rule, from, to, W, H = 132) {
   const pr = 12, pt = 10, pb = 22;
@@ -100,7 +103,7 @@ export function chartSVG(series, metric, rule, from, to, W, H = 132) {
   const last = ser[ser.length - 1];
   const out = (isNum(rule?.max) && last.v > rule.max) || (isNum(rule?.min) && last.v < rule.min);
   const dot = `<circle class="end-ring${out ? " bad" : ""}" cx="${x(last.t).toFixed(1)}" cy="${y(last.v).toFixed(1)}" r="6"/><circle class="end${out ? " bad" : ""}" cx="${x(last.t).toFixed(1)}" cy="${y(last.v).toFixed(1)}" r="3.2"/>`;
-  return `<svg class="chart-svg" width="${W}" height="${H}" viewBox="0 0 ${W} ${H}" role="img" aria-label="${esc(m.label)}">${g}${area}${line}${thr}${dot}</svg>`;
+  return `<svg class="chart-svg" width="${W}" height="${H}" viewBox="0 0 ${W} ${H}" role="img" aria-label="${esc(m.label)}" ${geo({ from, to, pl, pr, pt, pb, lo, hi })}>${g}${area}${line}${thr}${dot}</svg>`;
 }
 
 /* ── ON/OFF states: a time bar instead of a line ── */
@@ -135,8 +138,8 @@ export function stateSVG(spans, metric, from, to, W, H = 64) {
   const pl = 8, pr = 12, pt = 6, pb = 22;
   const x = (ts) => pl + ((ts - from) / (to - from)) * (W - pl - pr);
   const g = timeAxis(from, to, W, x, pt, H - pb, H);
-  const bars = spans.map((s) => `<rect class="eb ${s.v ? "on" : "off"}" x="${x(s.a).toFixed(1)}" y="${pt}" width="${Math.max(1, x(s.b) - x(s.a)).toFixed(1)}" height="${H - pt - pb}"><title>${esc(m.estados[s.v ? 0 : 1])}: ${esc(stamp(s.a))} – ${esc(stamp(s.b))}</title></rect>`).join("");
-  return `<svg class="chart-svg est-svg" width="${W}" height="${H}" viewBox="0 0 ${W} ${H}" role="img" aria-label="${esc(m.label)}">${bars}${g}</svg>
+  const bars = spans.map((s) => `<rect class="eb ${s.v ? "on" : "off"}" x="${x(s.a).toFixed(1)}" y="${pt}" width="${Math.max(1, x(s.b) - x(s.a)).toFixed(1)}" height="${H - pt - pb}"/>`).join("");
+  return `<svg class="chart-svg est-svg" width="${W}" height="${H}" viewBox="0 0 ${W} ${H}" role="img" aria-label="${esc(m.label)}" ${geo({ from, to, pl, pr, pt, pb })}>${bars}${g}</svg>
     <p class="est-ley"><span class="eb-k on"></span>${esc(m.estados[0])} <span class="eb-k off"></span>${esc(m.estados[1])}</p>`;
 }
 
@@ -175,3 +178,94 @@ export function sparkHTML(series, metric, rule) {
   const out = (isNum(rule?.max) && last.v > rule.max) || (isNum(rule?.min) && last.v < rule.min);
   return `<div class="spark"><svg viewBox="0 0 ${W} ${H}" preserveAspectRatio="none" aria-hidden="true">${area}${thr}${line}</svg><i class="spark-dot${out ? " bad" : ""}" style="left:${((x(last.t) / W) * 100).toFixed(2)}%;top:${((y(last.v) / H) * 100).toFixed(2)}%"></i></div>`;
 }
+
+/* ── the cursor: the value and the time under the finger or the mouse ── */
+
+// A drawn chart remembers what it shows (`hoverable`); moving over it, a vertical line marks the nearest reading (or the
+// ON/OFF span under it) and a label says its value and when. With a finger: a tap shows it and dragging sideways moves
+// it (the page still scrolls up and down: `touch-action: pan-y`); it stays until tapping elsewhere. When the chart is
+// drawn again (new readings), the cursor comes back where it was.
+let hover = null; // { box, clientX, touch }
+
+/** After drawing a chart in `box`: its readings ({ series }) or its ON/OFF spans ({ spans }), and the metric. */
+export function hoverable(box, data) {
+  box._hv = data;
+  if (hover?.box === box) showAt(box, hover.clientX);
+}
+
+function nearest(series, ts) {
+  let lo = 0, hi = series.length - 1;
+  while (hi - lo > 1) { const mid = (lo + hi) >> 1; if (series[mid].t < ts) lo = mid; else hi = mid; }
+  return Math.abs(series[lo].t - ts) <= Math.abs(series[hi].t - ts) ? series[lo] : series[hi];
+}
+
+function showAt(box, clientX) {
+  const svg = box.querySelector(".chart-svg"), data = box._hv;
+  if (!svg || !data) return clear(box);
+  const d = svg.dataset, W = +svg.getAttribute("width"), H = +svg.getAttribute("height");
+  const r = svg.getBoundingClientRect();
+  const from = +d.from, to = +d.to, pl = +d.pl, pr = +d.pr, pt = +d.pt, pb = +d.pb;
+  const px = ((clientX - r.left) / r.width) * W;
+  const ts = from + ((Math.min(W - pr, Math.max(pl, px)) - pl) / (W - pl - pr)) * (to - from);
+  const x = (v) => pl + ((v - from) / (to - from)) * (W - pl - pr);
+  let lx, dotY = null, value, when;
+  if (data.spans) {
+    // The span under the pointer, or one within a few pixels (a short one can be thinner than a finger).
+    const near = 8 / (W - pl - pr) * (to - from);
+    const gapTo = (sp) => (ts < sp.a ? sp.a - ts : ts > sp.b ? ts - sp.b : 0);
+    const s = data.spans.reduce((best, sp) => (gapTo(sp) <= near && (!best || gapTo(sp) < gapTo(best)) ? sp : best), null);
+    if (!s) return clear(box);
+    lx = Math.min(W - pr, Math.max(pl, px));
+    value = metricMeta(data.metric).estados[s.v ? 0 : 1];
+    when = `${stamp(s.a)} – ${stamp(s.b)} · ${s.b - s.a < MIN ? t("chart.underMin") : dur(s.b - s.a)}`;
+  } else {
+    const ser = data.series.filter((p) => !(data.metric === "batteryLevel" && p.v > 100) && p.t >= from && p.t <= to);
+    if (!ser.length) return clear(box);
+    const p = nearest(ser, ts);
+    const lo = +d.lo, hi = +d.hi;
+    lx = x(p.t);
+    dotY = pt + ((hi - p.v) / (hi - lo)) * (H - pt - pb);
+    value = fmtWithUnit(data.metric, p.v);
+    when = stamp(p.t);
+  }
+  let g = svg.querySelector(".hv");
+  if (!g) { g = document.createElementNS("http://www.w3.org/2000/svg", "g"); g.setAttribute("class", "hv"); svg.append(g); }
+  g.innerHTML = `<line x1="${lx.toFixed(1)}" x2="${lx.toFixed(1)}" y1="${pt}" y2="${H - pb}"/>${dotY == null ? "" : `<circle cx="${lx.toFixed(1)}" cy="${dotY.toFixed(1)}" r="4"/>`}`;
+  let tip = box.querySelector(".hv-tip");
+  if (!tip) { tip = document.createElement("div"); tip.className = "hv-tip"; tip.setAttribute("aria-hidden", "true"); box.append(tip); }
+  tip.innerHTML = `<b>${esc(value)}</b><span>${esc(when)}</span>`;
+  // Beside the line, inside the chart: to its right, or to its left near the right edge.
+  const scale = r.width / W, b = box.getBoundingClientRect(), dx = r.left - b.left, left = lx * scale, w = tip.offsetWidth;
+  tip.style.left = `${Math.round(dx + (left + 10 + w > r.width ? Math.max(0, left - 10 - w) : left + 10))}px`;
+  tip.style.top = `${Math.round(r.top - b.top + pt * scale)}px`;
+}
+
+function clear(box) {
+  box?.querySelector(".chart-svg .hv")?.remove();
+  box?.querySelector(".hv-tip")?.remove();
+}
+function stop() {
+  if (hover) clear(hover.box);
+  hover = null;
+}
+
+const boxOf = (ev) => {
+  const box = ev.target.closest?.(".chart-box");
+  return box?._hv && ev.target.closest(".chart-svg") ? box : null;
+};
+document.addEventListener("pointermove", (ev) => {
+  const box = boxOf(ev);
+  if (!box) { if (hover && !hover.touch) stop(); return; }
+  if (ev.pointerType !== "mouse" && hover?.box !== box) return; // a finger moving over a chart while scrolling
+  if (hover?.box !== box) stop();
+  hover = { box, clientX: ev.clientX, touch: ev.pointerType !== "mouse" };
+  showAt(box, ev.clientX);
+});
+document.addEventListener("pointerdown", (ev) => {
+  const box = boxOf(ev);
+  if (!box) { if (hover?.touch) stop(); return; }
+  if (hover?.box !== box) stop();
+  hover = { box, clientX: ev.clientX, touch: ev.pointerType !== "mouse" };
+  showAt(box, ev.clientX);
+});
+document.addEventListener("pointerleave", (ev) => { if (ev.target === document.documentElement && hover && !hover.touch) stop(); }, true);

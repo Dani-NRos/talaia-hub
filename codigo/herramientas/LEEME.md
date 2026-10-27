@@ -23,6 +23,9 @@ Necesitan Playwright con Chromium (no va en el repo: se busca en `PLAYWRIGHT_DIR
   (flechas, teclado y arrastre) en pantalla completa y en la ficha, lo que se ve en la tarjeta, la ficha y la pantalla
   completa, que otra pantalla lo ve al momento y que se queda al recargar (lo guarda el servidor). Sale con 1 si algo
   falla; con una carpeta, guarda capturas.
+- **`cursor.mjs [carpeta]`**: el cursor de las gráficas: valor y hora con el ratón (ficha y pantalla completa) y con el
+  dedo (móvil), en una línea y en una barra ON/OFF (con un broker MQTT en memoria), que vuelve al redibujarse, que la
+  etiqueta queda dentro de su gráfica y que se quita al salir o tocar fuera. Sale con 1 si algo falla.
 - **`scroll.mjs`**: que el scroll no se mueva: la ficha de un nodo (con su alarma y las lecturas de otro nodo que
   también la tiene) y Ajustes, con el servidor de verdad y un nodo simulado. Sale con 1 si algo falla.
 - **`iconos.mjs`**: dibuja los iconos de la app (`app/pwa/icon-*.png`) con la torre de `app/src/logo.js`.

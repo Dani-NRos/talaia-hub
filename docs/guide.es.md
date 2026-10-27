@@ -194,6 +194,9 @@ son los del servidor: todos tus aparatos ven lo mismo, y si das *Enterado* en un
   Cada gráfica tiene un botón *En la tarjeta*: es la gráfica que enseña la tarjeta del panel en el Tablero (púlsalo
   otra vez para que Talaia elija una). Lo guarda el servidor, por panel, así que todas las pantallas ven lo mismo; lo
   que aún no tiene sitio (un dato nuevo) va al final.
+- **Las gráficas** dicen el valor y la hora de una lectura al pasar el ratón o tocarlas (en una barra ON/OFF: el
+  estado, desde cuándo hasta cuándo y cuánto duró). Con el dedo, arrastra de lado para moverte por la línea; toca
+  fuera para quitarlo.
 - **Ajustes**, en apartados: *Malla* (sin señal para los nodos nuevos, avisos y órdenes por la malla), *MQTT* (brokers,
   usuarios del broker de este equipo, Home Assistant), *Receptor* (estado, nodo, radio, canales, diagnóstico), *Sistema*
   (idioma del servidor, histórico, acerca de), *Usuarios* y *Esta pantalla* (idioma, tema claro u oscuro, sonido,

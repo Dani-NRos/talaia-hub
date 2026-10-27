@@ -1,5 +1,12 @@
 # Changes
 
+## Unreleased
+
+- **The charts say the value and the time under the mouse or the finger**: a line marks the nearest reading and a
+  label gives its value and when; on an ON/OFF bar, the state, from when to when and how long. With a finger, a tap
+  shows it and dragging sideways moves it (the page still scrolls up and down); it stays until you tap elsewhere.
+  In the sheet and in full screen.
+
 ## 2.2.0
 
 - **The scroll no longer jumps to the top.** A node's sheet went back to the top every time a reading arrived from

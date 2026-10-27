@@ -62,6 +62,14 @@ dialog.sheet[open] { display: flex; flex-direction: column; animation: up .22s e
 .chart figcaption b { font: 600 20px/1 var(--f-num); font-variant-numeric: tabular-nums; }
 .chart .mm { font: 400 12px/1 var(--f-body); font-variant-numeric: tabular-nums; color: var(--ink-2); margin-left: auto; }
 .chart-box { width: 100%; min-height: 132px; }
+/* The cursor over a chart: a line at the reading, a dot on it and a label with its value and time. */
+.chart-box { position: relative; }
+.chart-svg { touch-action: pan-y; }
+.chart-svg .hv line { stroke: var(--ink); stroke-width: 1; stroke-dasharray: 3 3; opacity: .7; }
+.chart-svg .hv circle { fill: var(--surface); stroke: var(--accent); stroke-width: 2; }
+.hv-tip { position: absolute; z-index: 2; pointer-events: none; display: grid; gap: 1px; padding: 5px 8px; border-radius: 6px; background: var(--ink); color: var(--surface); font: 500 12px/1.25 var(--f-body); white-space: nowrap; box-shadow: 0 4px 14px rgb(0 0 0 / .18); }
+.hv-tip b { font: 600 14px/1.2 var(--f-num); font-variant-numeric: tabular-nums; }
+.hv-tip span { opacity: .85; font-variant-numeric: tabular-nums; }
 .chart-box:has(.est-svg) { min-height: 0; }
 .chart-svg { display: block; }
 .chart-svg .grid { stroke: var(--line); stroke-width: 1; }

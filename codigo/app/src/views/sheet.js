@@ -4,7 +4,7 @@
 import { ctx } from "../ctx.js";
 import { t } from "../i18n.js";
 import { $, $$, esc, parseNum, ICON, LS } from "../ui.js";
-import { chartSVG, stateSpans, stateSummary, stateSVG } from "../charts.js";
+import { chartSVG, stateSpans, stateSummary, stateSVG, hoverable } from "../charts.js";
 import { requestBlock, requestStatus, positionBlock, switchHTML } from "./node-parts.js";
 import { metaLine, displayName, saveCardUi } from "./dashboard.js";
 import { panelSections, forgetDraftsExcept, hasDrafts } from "./panel-config.js";
@@ -408,11 +408,13 @@ export async function drawCharts() {
     if (isState) {
       const spans = stateSpans(ser, from, to, S.nodes.get(num)?.metrics?.[k]);
       box.innerHTML = stateSVG(spans, k, from, to, W);
+      hoverable(box, { spans, metric: k });
       $(`[data-mm="${k}"]`, fig).textContent = stateSummary(k, spans);
       releaseScroll();
       continue;
     }
     box.innerHTML = chartSVG(ser, k, rules[k], from, to, W);
+    hoverable(box, { series: ser, metric: k });
     const vals = ser.map((p) => p.v).filter((v) => !(k === "batteryLevel" && v > 100));
     $(`[data-mm="${k}"]`, fig).textContent = vals.length ? t("sheet.minmax", { min: fmtNum(Math.min(...vals), metricMeta(k).dec), max: fmtNum(Math.max(...vals), metricMeta(k).dec) }) : "";
     releaseScroll();
