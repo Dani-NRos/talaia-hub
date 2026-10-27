@@ -1,6 +1,6 @@
 # Changes
 
-## Unreleased
+## 2.3.0
 
 - **The alarm notice of the Dashboard folds** once every alarm is seen: one line, the size of *All clear*, with the
   alarms' names; each device remembers it, and a new alarm unfolds it. *Alarms* keeps the whole list.
