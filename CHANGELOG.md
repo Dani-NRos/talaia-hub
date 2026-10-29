@@ -1,5 +1,13 @@
 # Changes
 
+## Unreleased
+
+- **Zigbee through Zigbee2MQTT**, step by step in the guide: the Sonoff ZBDongle-E on the same machine as Talaia,
+  Zigbee2MQTT installed on its own with a user of Talaia's broker, its service, the firmware it needs, pairing and
+  renaming the devices, and bringing each one into a panel with *Find topics*.
+- **The receiver's port «auto» leaves other radios alone**: a Zigbee coordinator (or a Z-Wave one) uses the same
+  USB-serial chips as some Meshtastic boards; now what says *Zigbee* in its USB name doesn't count as a node.
+
 ## 2.3.0
 
 - **The alarm notice of the Dashboard folds** once every alarm is seen: one line, the size of *All clear*, with the

@@ -11,7 +11,8 @@ SQLite and a screen for the browser, even when no phone or computer is looking.
   [Configuration](#configuration) · [If it doesn't connect](#if-it-doesnt-connect) · [Uninstall](#uninstall)
 - [The screen](#the-screen) · [From outside your home (Tailscale)](#from-outside-your-home-tailscale)
 - [Alerts over the mesh](#alerts-over-the-mesh) · [MQTT](#mqtt) · [Home Assistant](#home-assistant)
-- [Panels and MQTT data](#panels-and-mqtt-data) · [To the mesh (the receiver's panel)](#to-the-mesh-the-receivers-panel)
+- [Panels and MQTT data](#panels-and-mqtt-data) · [To the mesh (the receiver's panel)](#to-the-mesh-the-receivers-panel) ·
+  [Zigbee (Zigbee2MQTT)](#zigbee-zigbee2mqtt)
 - [Automations](#automations) · [Orders over the mesh](#orders-over-the-mesh) · [Telegram](#telegram)
 
 ## What you need
@@ -142,8 +143,9 @@ a summary every hour, in the server's language (*Settings → System*). The `tal
 }
 ```
 
-- `receiver.port` by USB: `"auto"` (whichever node is plugged in), a USB id like `"239a:8029"` (still good if the port
-  changes name) or a fixed path, better from `/dev/serial/by-id/` (the name `talaia --ports` gives).
+- `receiver.port` by USB: `"auto"` (whichever node is plugged in; a USB radio that says *Zigbee* or *Z-Wave* in its
+  name doesn't count), a USB id like `"239a:8029"` (still good if the port changes name) or a fixed path, better from
+  `/dev/serial/by-id/` (the name `talaia --ports` gives). With two USB radios, fix it.
 - Over the network: `{ "type": "tcp", "host": "192.168.1.60", "port": 4403 }`.
 - `retentionDays`: how much history is kept (a year by default). It keeps the telemetry of **all** the nodes the
   receiver hears, and each reading takes about 80 bytes: 50 nodes with 4 sensors every half hour are about 22 MB a
@@ -458,6 +460,176 @@ mqtt_statestream:
 With `publish_attributes: true` each one's unit goes out too and Talaia picks it by itself. Each one goes out on
 `ha_states/sensor/station_temperature/state` (retained: Talaia has it as soon as it connects). Don't include the
 “Talaia · …” sensors: Talaia refuses its own topics so as not to receive again what it publishes.
+
+## Zigbee (Zigbee2MQTT)
+
+Zigbee sensors and plugs (door contacts, temperature and humidity, water leak, motion, smart plugs…) reach Talaia
+through **Zigbee2MQTT**, a separate program that talks to a USB Zigbee coordinator and publishes every device over
+MQTT. Talaia doesn't install it or keep it up to date: it runs on its own, on the same machine, and publishes on
+Talaia's broker; from there its devices are [MQTT data](#panels-and-mqtt-data) like any other. This is how to set it
+up on Ubuntu, Debian or Raspberry Pi OS with the **Sonoff ZBDongle-E** (another coordinator works the same, changing
+`adapter`). Where this guide and [Zigbee2MQTT's own](https://www.zigbee2mqtt.io/guide/installation/01_linux.html)
+differ, theirs wins: it changes faster than Talaia.
+
+### 1. The dongle
+
+- Plug it in **with the USB extension cable** it comes with, away from USB 3 ports, SSDs and the Meshtastic node:
+  they interfere with Zigbee's 2.4 GHz.
+- `ls /dev/serial/by-id/` shows it as `usb-ITead_Sonoff_Zigbee_3.0_USB_Dongle_Plus_V2_…-if00` (the older
+  ZBDongle-P says `…Dongle_Plus_…` without `V2`, and takes `adapter: zstack`). That is the name to use below:
+  `/dev/ttyACM0` can change after a reboot.
+- **Talaia's receiver must not take it.** With `"port": "auto"` Talaia skips the ports that say *Zigbee* in their USB
+  name, but with two USB radios plugged in it's safer to fix the node's port in `/etc/talaia/config.json`: its USB id
+  (`talaia --ports` gives it, like `239a:8029`) or its `/dev/serial/by-id/…` path, then
+  `sudo systemctl restart talaia`. The udev rule the installer puts in already keeps ModemManager away from the
+  dongle's chip.
+
+### 2. A user for it on Talaia's broker
+
+On the screen, *Settings → MQTT → Users of this broker*: a user `zigbee2mqtt` with a password of at least 8
+characters. Keep it for step 4.
+
+### 3. Install Zigbee2MQTT
+
+It needs its own Node.js, 20 or newer. The one in `/opt/talaia/node` is Talaia's (its installer replaces it): don't
+point Zigbee2MQTT at it. The system's `nodejs` on Ubuntu 24.04 and Raspberry Pi OS 12 is too old; take it from
+NodeSource (64 bits), as Zigbee2MQTT's guide does:
+
+```
+sudo apt-get install -y git make g++ gcc libsystemd-dev curl
+curl -fsSL https://deb.nodesource.com/setup_22.x | sudo -E bash -
+sudo apt-get install -y nodejs
+sudo npm install -g pnpm
+```
+
+Then the program, in `/opt/zigbee2mqtt`, as a user of its own that may use the serial port:
+
+```
+sudo useradd --system --home-dir /opt/zigbee2mqtt --shell /usr/sbin/nologin zigbee2mqtt
+sudo usermod -aG dialout zigbee2mqtt
+sudo mkdir -p /opt/zigbee2mqtt && sudo chown zigbee2mqtt:zigbee2mqtt /opt/zigbee2mqtt
+sudo -u zigbee2mqtt -H git clone --depth 1 https://github.com/Koenkk/zigbee2mqtt.git /opt/zigbee2mqtt
+cd /opt/zigbee2mqtt
+sudo -u zigbee2mqtt -H pnpm i --frozen-lockfile
+sudo -u zigbee2mqtt -H pnpm run build
+```
+
+The last two take a few minutes on a mini PC or a Raspberry Pi 4/5. On a Pi Zero 2 W (512 MB) they are very slow
+and can run out of memory: Zigbee2MQTT isn't made for it.
+
+### 4. Its configuration
+
+`/opt/zigbee2mqtt/data/configuration.yaml` (replace the one the download brings; keep the indentation):
+
+```yaml
+homeassistant:
+  enabled: false
+frontend:
+  enabled: true
+  port: 8080
+  auth_token: a-long-password-for-its-screen
+mqtt:
+  base_topic: zigbee2mqtt
+  server: mqtt://127.0.0.1:1883
+  user: zigbee2mqtt
+  password: the-password-of-step-2
+serial:
+  port: /dev/serial/by-id/usb-ITead_Sonoff_Zigbee_3.0_USB_Dongle_Plus_V2_…-if00
+  adapter: ember
+availability:
+  enabled: true
+advanced:
+  network_key: GENERATE
+  pan_id: GENERATE
+  ext_pan_id: GENERATE
+  channel: 15
+```
+
+- `availability` makes every device publish whether it's reachable (`zigbee2mqtt/<name>/availability`): Talaia uses
+  it as the panel's connection.
+- `channel`: 11 by default; 15, 20 and 25 clash less with WiFi. Choose it now: changing it later means pairing
+  everything again.
+- `frontend.auth_token` protects Zigbee2MQTT's own screen with a password (otherwise anyone on the network could pair
+  or remove devices).
+- `homeassistant` stays off: Talaia's broker isn't Home Assistant's. If you want the Zigbee devices in Home Assistant
+  too, either Home Assistant reads Talaia's broker (a bridge between the two Mosquitto) or Zigbee2MQTT publishes on
+  Home Assistant's broker and you add that broker in Talaia (*Settings → MQTT*).
+
+### 5. The service
+
+`/etc/systemd/system/zigbee2mqtt.service`:
+
+```ini
+[Unit]
+Description=Zigbee2MQTT
+After=network.target mosquitto.service
+
+[Service]
+Type=simple
+User=zigbee2mqtt
+Group=zigbee2mqtt
+WorkingDirectory=/opt/zigbee2mqtt
+ExecStart=/usr/bin/node index.js
+Environment=NODE_ENV=production
+Restart=always
+RestartSec=10s
+
+[Install]
+WantedBy=multi-user.target
+```
+
+```
+sudo systemctl daemon-reload
+sudo systemctl enable --now zigbee2mqtt
+journalctl -u zigbee2mqtt -f
+```
+
+The journal should say, in this order, that it connected to the MQTT server, the coordinator's firmware version,
+that the frontend is on port 8080 and `Zigbee2MQTT started!`. In Talaia, *Find topics* (step 7) will show
+`zigbee2mqtt/bridge/…` as soon as it's up.
+
+### 6. If the firmware is too old
+
+`adapter: ember` needs EmberZNet **7.4 or newer** on the dongle. Many ZBDongle-E are sold with 6.10.x: Zigbee2MQTT
+then stops at start saying the firmware is too old (or that it can't talk to the adapter). Flash it following
+[ITead's instructions](https://dongle.sonoff.tech/) with the *Zigbee 3.0 NCP (EmberZNet)* firmware for the
+ZBDongle-E, from a computer with Chrome, and plug it back. Zigbee2MQTT's
+[EmberZNet page](https://www.zigbee2mqtt.io/guide/adapters/emberznet.html) has the details and the versions it
+recommends. Then `sudo systemctl restart zigbee2mqtt`.
+
+### 7. Pair the devices and bring them into Talaia
+
+- Open Zigbee2MQTT's screen, `http://<this machine's IP>:8080`, and press **Permit join (All)**; put the device in
+  pairing mode (usually holding its button a few seconds) and it shows up within a minute, with its model.
+- **Rename it right away** (the pencil, *Rename device*), with a short name without accents, like `shed-door`: the
+  name is its MQTT topic (`zigbee2mqtt/shed-door`). If you rename it later, Talaia's data for it stop arriving until
+  you point them at the new topic.
+- In the device, *Settings (specific)* → **Retain** on, and save: the last value stays on the broker, so Talaia has
+  it as soon as it connects (and *Find topics* sees it without waiting for the sensor to speak).
+- On Talaia's dashboard, **Add panel**: a name and *Zigbee* as what it is. In its *Settings* tab, **Find topics** and
+  **Use** on each field of `zigbee2mqtt/<name>`: `temperature`, `humidity`, `battery`, `contact` (it comes with
+  *Reversed* ticked), `water_leak`, `occupancy`, `state` (a plug: *Switch on and off from Talaia* proposes
+  `zigbee2mqtt/<name>/set`), `power`, `energy`, `voltage`… `linkquality` isn't a measurement Talaia keeps; leave it.
+  On `zigbee2mqtt/<name>/availability`, **Use as connection** and, if you want, *Warn if it disconnects*. Save.
+
+From then on it's a panel like any other: alarms, history, automations, orders over the mesh and Telegram.
+
+### Updating Zigbee2MQTT
+
+Read its release notes first: it changes often and sometimes changes what it publishes (what Talaia reads are the
+standard topics, which don't change). Then:
+
+```
+sudo systemctl stop zigbee2mqtt
+cd /opt/zigbee2mqtt
+sudo -u zigbee2mqtt -H cp -r data data.bak
+sudo -u zigbee2mqtt -H git pull
+sudo -u zigbee2mqtt -H pnpm i --frozen-lockfile
+sudo -u zigbee2mqtt -H pnpm run build
+sudo systemctl start zigbee2mqtt
+```
+
+Updating Talaia touches none of this.
 
 ## Automations
 

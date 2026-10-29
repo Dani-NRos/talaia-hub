@@ -8,6 +8,10 @@ import { tx } from "@talaia/nucleo/idioma.js";
 import "./textos.js";
 
 const hex4 = (n) => n.toString(16).padStart(4, "0");
+// Other radios share the USB-serial chips of the Meshtastic boards (a Zigbee coordinator such as the Sonoff
+// ZBDongle-E, CH9102 1a86; the ZBDongle-P, CP2102N 10c4): they say what they are in their USB product name, so «auto»
+// leaves them alone. A path or a USB id in the configuration still takes whatever it names.
+export const NO_ES_NODO = /zigbee|z-?wave|thread|coordinator/i;
 const leer = (f) => { try { return fs.readFileSync(f, "utf8").trim(); } catch { return ""; } };
 
 /**
@@ -40,14 +44,15 @@ export function listarPuertos({ sys = "/sys", dev = "/dev" } = {}) {
     }
     const vid = usb ? parseInt(leer(path.join(usb, "idVendor")), 16) : null;
     const pid = usb ? parseInt(leer(path.join(usb, "idProduct")), 16) : null;
+    const producto = usb ? leer(path.join(usb, "product")) : "";
     out.push({
       ruta: path.join(dev, n),
       porId: porId.get(n) || null,
       vid, pid,
       fabricante: usb ? leer(path.join(usb, "manufacturer")) : "",
-      producto: usb ? leer(path.join(usb, "product")) : "",
+      producto,
       serie: usb ? leer(path.join(usb, "serial")) : "",
-      conocido: vid != null && USB_VENDORS.some((u) => u.vid === vid),
+      conocido: vid != null && USB_VENDORS.some((u) => u.vid === vid) && !NO_ES_NODO.test(producto),
     });
   }
   return out;
@@ -58,7 +63,8 @@ export const describirPuerto = (p) => `${p.porId || p.ruta} (USB ${usbId(p)}${p.
 
 /**
  * Elige el puerto según la configuración:
- *   "auto"              el único nodo de fabricante conocido (si hay varios, el primero, y avisa)
+ *   "auto"              el único nodo de fabricante conocido (si hay varios, el primero, y avisa); lo que dice ser
+ *                       otra radio (Zigbee…) no cuenta
  *   "239a:8029"         el de ese fabricante y producto USB (sobrevive a que cambie ttyACM0 → ttyACM1)
  *   "/dev/…"            esa ruta tal cual (mejor /dev/serial/by-id/…, que no cambia)
  * Devuelve { puerto, nota } o { puerto: null, motivo }.

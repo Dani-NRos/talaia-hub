@@ -33,6 +33,7 @@ function sysFalso() {
   aparato("1-1", "239a", "8029", "Base 5", "ttyACM0");
   aparato("1-2", "0bda", "5411", "Lector de tarjetas", "ttyUSB0");
   aparato("1-3", "239a", "8029", "Base 5 de otro", "ttyACM1");
+  aparato("1-4", "1a86", "55d4", "Sonoff Zigbee 3.0 USB Dongle Plus V2", "ttyACM2"); // a Zigbee coordinator: the chip of a LilyGO, not a node
   fs.mkdirSync(path.join(sys, "class/tty/ttyS0"), { recursive: true }); // puerto de la placa: no cuenta
   fs.mkdirSync(path.join(dev, "serial/by-id"), { recursive: true });
   fs.symlinkSync("../../ttyACM0", path.join(dev, "serial/by-id/usb-Adafruit_Base_5_ABC123-if00"));
@@ -42,10 +43,11 @@ function sysFalso() {
 test("puertos: lee fabricante y producto USB de /sys y el nombre estable de /dev/serial/by-id", () => {
   const raices = sysFalso();
   const l = listarPuertos(raices);
-  assert.equal(l.length, 2); // ttyACM1 is in /sys but not in /dev (a container that hasn't got it)
+  assert.equal(l.length, 3); // ttyACM1 is in /sys but not in /dev (a container that hasn't got it)
   assert.deepEqual([l[0].vid, l[0].pid, l[0].producto, l[0].conocido], [0x239a, 0x8029, "Base 5", true]);
   assert.equal(l[0].porId, path.join(raices.dev, "serial/by-id/usb-Adafruit_Base_5_ABC123-if00"));
-  assert.equal(l[1].conocido, false);
+  assert.deepEqual([l[1].vid, l[1].pid, l[1].conocido], [0x1a86, 0x55d4, false]); // ttyACM2: a known chip, but it says Zigbee
+  assert.equal(l[2].conocido, false); // ttyUSB0: the card reader
 });
 
 test("puertos: auto elige el nodo; por id USB; por ruta; y explica por qué no hay ninguno", () => {
@@ -55,6 +57,10 @@ test("puertos: auto elige el nodo; por id USB; por ruta; y explica por qué no h
   assert.match(elegirPuerto("303a:1001", l).motivo, /ningún aparato USB 303a:1001/);
   assert.equal(elegirPuerto(l[0].porId, l).puerto.ruta, l[0].porId);
   assert.match(elegirPuerto("auto", l.filter((p) => !p.conocido)).motivo, /ninguno parece un nodo Meshtastic/);
+  // The Zigbee dongle plugged in first: «auto» still takes the node, without the "several nodes" warning.
+  assert.equal(elegirPuerto("auto", [l[1], l[0]]).puerto.producto, "Base 5");
+  assert.equal(elegirPuerto("auto", [l[1], l[0]]).nota, undefined);
+  assert.equal(elegirPuerto("1a86:55d4", l).puerto.producto, "Sonoff Zigbee 3.0 USB Dongle Plus V2"); // asked for by id, it's taken
   assert.match(elegirPuerto("auto", []).motivo, /no hay ningún nodo enchufado/);
   assert.match(elegirPuerto("auto", [l[0], { ...l[0], ruta: "/dev/ttyACM1" }]).nota, /hay 2 nodos enchufados/);
 });
